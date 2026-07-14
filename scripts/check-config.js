@@ -1,6 +1,8 @@
 const key = process.env.MIMO_API_KEY || "";
-const baseUrl = process.env.MIMO_BASE_URL
-  || (key.startsWith("tp-") ? "https://token-plan-cn.xiaomimimo.com/v1" : "https://api.xiaomimimo.com/v1");
+const configuredMimoBaseUrl = process.env.MIMO_BASE_URL || "";
+const baseUrl = key.startsWith("tp-")
+  ? (configuredMimoBaseUrl || "https://token-plan-cn.xiaomimimo.com/v1")
+  : (/token-plan/i.test(configuredMimoBaseUrl) ? "https://api.xiaomimimo.com/v1" : (configuredMimoBaseUrl || "https://api.xiaomimimo.com/v1"));
 const providers = [
   ["MIMO_API_KEY", process.env.MIMO_API_KEY],
   ["DASHSCOPE_API_KEY", process.env.DASHSCOPE_API_KEY],

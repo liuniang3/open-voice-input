@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## v0.2.0 - 2026-07-15
+
 ### Changed
 
 - Renamed the project from MiMo Voice Input to Open Voice Input to reflect the new provider-agnostic direction.
@@ -11,6 +13,9 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Added Windows NSIS installer and single-file portable build targets.
+- Added a GitHub Actions release workflow with SHA-256 checksums.
+- Added a pre-build secret scan that stops packaging when real-looking API keys are found.
 - Added Fun-ASR as an ASR provider alongside MiMo and Qwen3-ASR.
 - Added Fun-ASR realtime WebSocket support for local microphone recordings.
 - Added Fun-ASR REST batch scaffolding for public audio URLs.
@@ -60,4 +65,4 @@ All notable changes to this project are documented here.
 - This is not a real Windows IME driver; it uses clipboard paste.
 - MiMo multimodal chat is not a dedicated ASR endpoint, so occasional non-transcription responses can still happen.
 - `Stable` mode uses two API calls, increasing latency and cost.
-- There is no packaged installer, auto-update flow, or code-signing setup yet.
+- Automatic updates and code signing are not configured yet; unsigned builds may trigger Windows SmartScreen.

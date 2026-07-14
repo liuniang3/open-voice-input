@@ -10,7 +10,9 @@ const resultText = document.getElementById("resultText");
 const recordBtn = document.getElementById("recordBtn");
 const stopBtn = document.getElementById("stopBtn");
 const sendBtn = document.getElementById("sendBtn");
+const copyBtn = document.getElementById("copyBtn");
 const closeBtn = document.getElementById("closeBtn");
+const recordingCancelBtn = document.getElementById("recordingCancelBtn");
 const settingsBtn = document.getElementById("settingsBtn");
 const settingsPanel = document.getElementById("settingsPanel");
 const microphoneSelect = document.getElementById("microphoneSelect");
@@ -43,6 +45,7 @@ const ASR_MODES = new Set(["batch", "realtime"]);
 const QWEN_ASR_OPENAI_MODEL = "qwen3-asr-flash";
 const QWEN_ASR_OPENAI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const QWEN_ASR_REALTIME_MODEL = "qwen3-asr-flash-realtime";
+const MIMO_ASR_MODEL = "mimo-v2.5-asr";
 const FUN_ASR_MODEL = "fun-asr";
 const FUN_ASR_REST_BASE_URL = "https://dashscope.aliyuncs.com/api/v1";
 const FUN_ASR_REALTIME_MODEL = "fun-asr-realtime";
@@ -69,6 +72,10 @@ let recordingShortContext = "";
 let recordingAsrMode = "batch";
 let lastVoiceRequest = null;
 let resizeTimer = 0;
+let mimoPreviewTimer = 0;
+let mimoPreviewInFlight = false;
+let mimoPreviewLastSampleCount = 0;
+let mimoPreviewRunId = 0;
 
 function createSettingsSnapshot() {
   return {
@@ -92,6 +99,14 @@ function createSettingsSnapshot() {
   };
 }
 
+function createFinalTranscriptionSnapshot() {
+  const snapshot = createSettingsSnapshot();
+  if (normalizeAsrMode(snapshot.asrMode) === "realtime") {
+    snapshot.asrMode = "batch";
+  }
+  return snapshot;
+}
+
 function normalizeTranscriptionMode(mode) {
   return TRANSCRIPTION_MODES.has(mode) ? mode : "stable";
 }
@@ -100,36 +115,57 @@ function normalizeAsrMode(mode) {
   return ASR_MODES.has(mode) ? mode : "batch";
 }
 
+function usesSocketRealtimePreview() {
+  return recordingAsrMode === "realtime" && (appSettings.asrProvider === "qwen3-asr" || appSettings.asrProvider === "fun-asr");
+}
+
+function usesMimoPollingPreview() {
+  return recordingAsrMode === "realtime" && appSettings.asrProvider === "mimo";
+}
+
 function normalizeQwenAsrModel(model) {
   const value = String(model || "").trim();
-  if (!value || value === "mimo-v2.5") return QWEN_ASR_OPENAI_MODEL;
+  if (!value || value === "mimo-v2.5" || value === MIMO_ASR_MODEL) return QWEN_ASR_OPENAI_MODEL;
   if (value.includes("realtime") || value.includes("filetrans")) return QWEN_ASR_OPENAI_MODEL;
   return value;
 }
 
 function normalizeQwenRealtimeModel(model) {
   const value = String(model || "").trim();
-  if (!value || value === "mimo-v2.5" || value === QWEN_ASR_OPENAI_MODEL) return QWEN_ASR_REALTIME_MODEL;
+  if (!value || value === "mimo-v2.5" || value === MIMO_ASR_MODEL || value === QWEN_ASR_OPENAI_MODEL) {
+    return QWEN_ASR_REALTIME_MODEL;
+  }
   return value;
 }
 
 function normalizeFunAsrModel(model) {
   const value = String(model || "").trim();
-  if (!value || value === "mimo-v2.5" || value === QWEN_ASR_OPENAI_MODEL || value.includes("realtime")) {
+  if (!value || value === "mimo-v2.5" || value === MIMO_ASR_MODEL || value === QWEN_ASR_OPENAI_MODEL || value.includes("realtime")) {
     return FUN_ASR_MODEL;
+  }
+  return value;
+}
+
+function normalizeMimoAsrModel(model) {
+  const value = String(model || "").trim();
+  if (!value || value === "mimo-v2.5" || value === QWEN_ASR_OPENAI_MODEL || value === FUN_ASR_MODEL || value.includes("realtime")) {
+    return MIMO_ASR_MODEL;
   }
   return value;
 }
 
 function normalizeFunAsrRealtimeModel(model) {
   const value = String(model || "").trim();
-  if (!value || value === "mimo-v2.5" || value === QWEN_ASR_OPENAI_MODEL || value === FUN_ASR_MODEL) {
+  if (!value || value === "mimo-v2.5" || value === MIMO_ASR_MODEL || value === QWEN_ASR_OPENAI_MODEL || value === FUN_ASR_MODEL) {
     return FUN_ASR_REALTIME_MODEL;
   }
   return value;
 }
 
 function normalizeProviderSettingsDraft() {
+  if (!apiKeyInput.value.trim().startsWith("tp-") && /token-plan/i.test(baseUrlInput.value.trim())) {
+    baseUrlInput.value = "https://api.xiaomimimo.com/v1";
+  }
   if (asrProviderSelect.value === "qwen3-asr") {
     asrModelInput.value = normalizeQwenAsrModel(asrModelInput.value);
     asrRealtimeModelInput.value = normalizeQwenRealtimeModel(asrRealtimeModelInput.value);
@@ -142,8 +178,8 @@ function normalizeProviderSettingsDraft() {
     if (!asrBaseUrlInput.value.trim() || asrBaseUrlInput.value.trim() === QWEN_ASR_OPENAI_BASE_URL) {
       asrBaseUrlInput.value = FUN_ASR_REST_BASE_URL;
     }
-  } else if (asrProviderSelect.value === "mimo" && !asrModelInput.value.trim()) {
-    asrModelInput.value = "mimo-v2.5";
+  } else if (asrProviderSelect.value === "mimo") {
+    asrModelInput.value = normalizeMimoAsrModel(asrModelInput.value);
   }
 }
 
@@ -154,7 +190,7 @@ function normalizeAsrModelForSelectedProvider(value) {
   if (asrProviderSelect.value === "fun-asr") {
     return normalizeFunAsrModel(value);
   }
-  return String(value || "").trim();
+  return normalizeMimoAsrModel(value);
 }
 
 function normalizeRealtimeModelForSelectedProvider(value) {
@@ -185,9 +221,11 @@ function setLevel(value) {
 }
 
 function setButtons(state) {
+  const hasResult = Boolean(resultText.value.trim());
   recordBtn.disabled = state === "recording" || state === "transcribing";
   stopBtn.disabled = state !== "recording";
-  sendBtn.disabled = !resultText.value.trim() || state === "recording" || state === "transcribing";
+  copyBtn.disabled = !hasResult || state === "recording" || state === "transcribing";
+  sendBtn.disabled = !hasResult || state === "recording" || state === "transcribing";
 }
 
 function scheduleRecordingResize() {
@@ -200,7 +238,8 @@ function resizeRecordingWindowToContent() {
   if (currentWindowMode !== "recording") return;
   const textLength = statusDetail.textContent.length;
   const contentWidth = textLength > 48 ? 520 : textLength > 22 ? 420 : 320;
-  const contentHeight = Math.min(420, Math.max(112, Math.ceil(statusPanel.scrollHeight + 24)));
+  const chromeHeight = document.getElementById("recordingChrome")?.offsetHeight || 0;
+  const contentHeight = Math.min(420, Math.max(132, Math.ceil(statusPanel.scrollHeight + chromeHeight + 36)));
   window.mimoInput.resizeRecordingWindow?.({
     width: contentWidth,
     height: contentHeight
@@ -264,7 +303,7 @@ async function startRecording({ autoSend = true } = {}) {
     throw error;
   }
 
-  if ((appSettings.asrProvider === "qwen3-asr" || appSettings.asrProvider === "fun-asr") && recordingAsrMode === "realtime") {
+  if (usesSocketRealtimePreview()) {
     try {
       const result = await window.mimoInput.startRealtimeAsr();
       if (result?.enabled) {
@@ -276,6 +315,9 @@ async function startRecording({ autoSend = true } = {}) {
       setStatus("warning", "实时连接失败", "已继续录音，停止后将使用非实时转写。");
       recordingAsrMode = "batch";
     }
+  } else if (usesMimoPollingPreview()) {
+    setStatus("recording", "正在录音", "MiMo 实时预览会每几秒刷新一次；最终文本仍以完整录音为准。");
+    resultText.value = "MiMo 实时预览准备中，开始说话后会自动刷新。";
   }
 
   audioContext = new AudioContext();
@@ -298,7 +340,7 @@ async function startRecording({ autoSend = true } = {}) {
     if (!isRecording) return;
     const input = event.inputBuffer.getChannelData(0);
     recordingChunks.push(new Float32Array(input));
-    if (recordingAsrMode === "realtime") {
+    if (usesSocketRealtimePreview()) {
       window.mimoInput.appendRealtimeAudio(float32ToPcm16Base64(input, recordingSampleRate, 16000)).catch(() => {});
     }
     updateAudioStats(input);
@@ -312,6 +354,9 @@ async function startRecording({ autoSend = true } = {}) {
     if (recordingAsrMode !== "realtime") {
       setStatus("recording", "正在录音", `已切换到备用输入：${actualLabel}`);
     }
+  }
+  if (usesMimoPollingPreview()) {
+    startMimoPreviewLoop();
   }
 }
 
@@ -338,12 +383,14 @@ async function stopRecording() {
   const rms = recordingSampleCount ? Math.sqrt(recordingRmsSum / recordingSampleCount) : 0;
   if (durationMs < 500 || recordingSampleCount < recordingSampleRate * 0.45) {
     logRenderer("recording: too short", `duration=${durationMs} samples=${recordingSampleCount}`);
+    await cleanupRealtimePreview();
     setStatus("warning", "录音太短", "请至少录制半秒以上。");
     setButtons("ready");
     return;
   }
   if (recordingPeak < 0.012 || rms < 0.003) {
     logRenderer("recording: no input", `peak=${recordingPeak} rms=${rms}`);
+    await cleanupRealtimePreview();
     setStatus("warning", "没有检测到声音", "未检测到清晰的麦克风输入。");
     setButtons("ready");
     return;
@@ -352,7 +399,7 @@ async function stopRecording() {
   const wavBytes = encodeWav(recordingChunks, recordingSampleRate);
   const pcm16Base64 = float32ToPcm16Base64(flattenFloat32(recordingChunks), recordingSampleRate, 16000);
   const audioDataUrl = `data:audio/wav;base64,${arrayBufferToBase64(wavBytes.buffer)}`;
-  const settingsSnapshot = createSettingsSnapshot();
+  const settingsSnapshot = createFinalTranscriptionSnapshot();
   const transcriptionRequest = {
     audioDataUrl,
     pcm16Base64,
@@ -364,23 +411,13 @@ async function stopRecording() {
   lastVoiceRequest = transcriptionRequest;
 
   if (recordingAsrMode === "realtime") {
-    try {
-      isTranscribing = true;
-      setButtons("transcribing");
-      setStatus("transcribing", "正在整理", "正在获取实时转写最终结果。");
-      const transcript = await window.mimoInput.finishRealtimeAsr({
-        shortContext: recordingShortContext,
-        transcriptionMode
-      });
-      await handleTranscriptResult(transcript, { retry: false, autoSendAfterTranscript });
-    } catch (error) {
-      logRenderer("qwen realtime: finish failed", error.message || String(error));
-      setStatus("error", "实时转写失败", error.message || String(error));
-      setButtons("ready");
-    } finally {
-      isTranscribing = false;
-      setButtons("ready");
-    }
+    setButtons("transcribing");
+    setStatus("transcribing", "正在生成最终文本", "实时内容只作为预览，正在用完整录音重新转写。");
+    await cleanupRealtimePreview({ finish: true, shortContext: recordingShortContext, transcriptionMode });
+    await runVoiceRequest(transcriptionRequest, {
+      bytes: wavBytes.byteLength,
+      retry: false
+    });
     recordingChunks = [];
     recordingShortContext = "";
     return;
@@ -425,7 +462,8 @@ async function runVoiceRequest(request, { bytes = 0, retry = false } = {}) {
     logRenderer(retry ? "mimo: retry done" : "mimo: transcribe done", `chars=${transcript.length}`);
     await handleTranscriptResult(transcript, {
       retry,
-      autoSendAfterTranscript: request.autoSendAfterTranscript
+      autoSendAfterTranscript: request.autoSendAfterTranscript,
+      copyAfterTranscript: request.copyAfterTranscript
     });
   } catch (error) {
     logRenderer(retry ? "mimo: retry failed" : "mimo: transcribe failed", error.message || String(error));
@@ -436,15 +474,24 @@ async function runVoiceRequest(request, { bytes = 0, retry = false } = {}) {
   }
 }
 
-async function handleTranscriptResult(transcript, { retry = false, autoSendAfterTranscript = false } = {}) {
+async function handleTranscriptResult(transcript, { retry = false, autoSendAfterTranscript = false, copyAfterTranscript = false } = {}) {
   resultText.value = transcript || "";
+  setButtons("ready");
   if (transcript) {
+    if (retry) {
+      await showResultWindow();
+    }
     if (autoSendAfterTranscript) {
       setStatus("transcribing", "正在写入", "正在粘贴到上一个焦点应用。");
       await sendResult({ hideAfterSend: true });
       return;
     }
-    setStatus("ready", retry ? "重试完成" : "可以发送", "确认文本后按 Ctrl+Enter 发送。");
+    if (copyAfterTranscript) {
+      await copyResult({ silent: true });
+      setStatus("ready", retry ? "重试完成，已复制" : "已复制", "结果已写入剪贴板，也可以在窗口中查看或发送。");
+    } else {
+      setStatus("ready", retry ? "重试完成" : "可以发送", "确认文本后按 Ctrl+Enter 发送，或点击复制。");
+    }
   } else {
     setStatus("warning", "没有识别到语音", "请靠近麦克风再试一次。");
   }
@@ -459,10 +506,106 @@ async function retryLastVoiceRequest() {
   await runVoiceRequest(
     {
       ...lastVoiceRequest,
-      autoSendAfterTranscript: false
+      autoSendAfterTranscript: false,
+      copyAfterTranscript: true
     },
     { retry: true }
   );
+}
+
+function startMimoPreviewLoop() {
+  stopMimoPreviewLoop();
+  mimoPreviewRunId += 1;
+  mimoPreviewLastSampleCount = 0;
+  const runId = mimoPreviewRunId;
+  mimoPreviewTimer = window.setInterval(() => {
+    runMimoPreviewTick(runId).catch((error) => {
+      logRenderer("mimo realtime preview: tick failed", error.message || String(error));
+    });
+  }, 2600);
+  window.setTimeout(() => {
+    runMimoPreviewTick(runId).catch((error) => {
+      logRenderer("mimo realtime preview: first tick failed", error.message || String(error));
+    });
+  }, 1400);
+}
+
+function stopMimoPreviewLoop() {
+  if (mimoPreviewTimer) {
+    window.clearInterval(mimoPreviewTimer);
+    mimoPreviewTimer = 0;
+  }
+  mimoPreviewRunId += 1;
+  mimoPreviewInFlight = false;
+  mimoPreviewLastSampleCount = 0;
+}
+
+async function runMimoPreviewTick(runId) {
+  if (!isRecording || !usesMimoPollingPreview() || mimoPreviewInFlight || runId !== mimoPreviewRunId) return;
+  if (recordingSampleCount < recordingSampleRate * 1.2) return;
+  if (recordingSampleCount - mimoPreviewLastSampleCount < recordingSampleRate * 1.0) return;
+
+  const chunks = recordingChunks.slice();
+  const sampleRate = recordingSampleRate;
+  const sampleCount = recordingSampleCount;
+  if (!chunks.length) return;
+
+  mimoPreviewInFlight = true;
+  mimoPreviewLastSampleCount = sampleCount;
+  try {
+    const wavBytes = encodeWav(chunks, sampleRate);
+    const audioDataUrl = `data:audio/wav;base64,${arrayBufferToBase64(wavBytes.buffer)}`;
+    const previewSnapshot = {
+      ...createSettingsSnapshot(),
+      asrMode: "batch",
+      transcriptionMode: "fast"
+    };
+    const transcript = await window.mimoInput.transcribe({
+      audioDataUrl,
+      shortContext: "",
+      transcriptionMode: "fast",
+      settingsSnapshot: previewSnapshot
+    });
+    if (runId !== mimoPreviewRunId || !isRecording || !usesMimoPollingPreview()) return;
+    if (transcript) {
+      resultText.value = transcript;
+      setStatus("recording", "MiMo 实时预览", transcript);
+      scheduleRecordingResize();
+    }
+  } finally {
+    if (runId === mimoPreviewRunId) {
+      mimoPreviewInFlight = false;
+    }
+  }
+}
+
+async function cleanupRealtimePreview({ finish = false, shortContext = "", transcriptionMode = recordingTranscriptionMode } = {}) {
+  if (recordingAsrMode !== "realtime") return "";
+  if (appSettings.asrProvider === "mimo") {
+    const previewText = resultText.value.trim();
+    stopMimoPreviewLoop();
+    logRenderer("mimo realtime preview: stopped", `chars=${previewText.length}`);
+    return previewText;
+  }
+  try {
+    if (finish) {
+      const previewText = await window.mimoInput.finishRealtimeAsr({
+        clean: false,
+        shortContext,
+        transcriptionMode
+      });
+      logRenderer("realtime preview: finished", `chars=${String(previewText || "").length}`);
+      return previewText || "";
+    }
+    await window.mimoInput.cancelRealtimeAsr?.();
+    logRenderer("realtime preview: cancelled");
+  } catch (error) {
+    logRenderer("realtime preview: cleanup failed", error.message || String(error));
+    if (finish) {
+      setStatus("warning", "实时预览结束失败", "已继续使用完整录音生成最终文本。");
+    }
+  }
+  return "";
 }
 
 async function cancelRecording() {
@@ -481,7 +624,7 @@ async function cancelRecording() {
   } catch {
     // Best-effort cleanup for an interrupted recording.
   }
-  await window.mimoInput.cancelRealtimeAsr?.();
+  await cleanupRealtimePreview();
   recordingChunks = [];
   levelMeter.hidden = true;
   setLevel(0);
@@ -542,6 +685,21 @@ function buildShortContext() {
   const parts = [];
   if (contextInput.value.trim()) parts.push(contextInput.value.trim());
   return parts.join("\n");
+}
+
+async function copyResult({ silent = false } = {}) {
+  const text = resultText.value.trim();
+  if (!text) return;
+  try {
+    await window.mimoInput.copyText(text);
+    if (!silent) {
+      setStatus("ready", "已复制", "结果已写入剪贴板。");
+    }
+  } catch (error) {
+    setStatus("error", "复制失败", error.message || String(error));
+  } finally {
+    setButtons("ready");
+  }
 }
 
 async function sendResult({ hideAfterSend = false } = {}) {
@@ -733,7 +891,7 @@ function fillSettingsForm(status) {
     asrRealtimeModelInput.value = normalizeFunAsrRealtimeModel(appSettings.asrRealtimeModel || appSettings.asrModel);
     asrBaseUrlInput.value = appSettings.asrBaseUrl || FUN_ASR_REST_BASE_URL;
   } else {
-    asrModelInput.value = appSettings.asrModel || appSettings.model || "mimo-v2.5";
+    asrModelInput.value = normalizeMimoAsrModel(appSettings.asrModel || appSettings.model);
     asrRealtimeModelInput.value = appSettings.asrRealtimeModel || QWEN_ASR_REALTIME_MODEL;
     asrBaseUrlInput.value = appSettings.asrBaseUrl || "";
   }
@@ -771,11 +929,19 @@ async function setTranscriptionMode(mode) {
 function applyWindowMode(mode) {
   currentWindowMode = mode;
   document.body.classList.toggle("recording-mode", mode === "recording" || mode === "compact");
+  document.body.classList.toggle("recording-active", mode === "recording");
   document.body.classList.toggle("settings-open", mode === "settings");
-  if (mode === "recording" || mode === "compact") {
+  document.body.classList.toggle("result-open", mode === "result");
+  if (mode === "recording" || mode === "compact" || mode === "result") {
     settingsPanel.hidden = true;
   }
   scheduleRecordingResize();
+}
+
+async function showResultWindow() {
+  await window.mimoInput.openResultWindow();
+  applyWindowMode("result");
+  settingsPanel.hidden = true;
 }
 
 async function saveAllSettings({ clearKeys = false } = {}) {
@@ -929,6 +1095,8 @@ recordBtn.addEventListener("click", () => startRecording({ autoSend: false }).ca
   levelMeter.hidden = true;
 }));
 stopBtn.addEventListener("click", stopRecording);
+recordingCancelBtn.addEventListener("click", cancelRecording);
+copyBtn.addEventListener("click", () => copyResult());
 sendBtn.addEventListener("click", sendResult);
 closeBtn.addEventListener("click", () => window.mimoInput.hide());
 settingsBtn.addEventListener("click", async () => {

@@ -10,7 +10,11 @@ function createMimoClient({ getSettings, cleanTranscript }) {
     const settings = getSettings();
     const configured = settings.baseUrl || process.env.MIMO_BASE_URL;
     if (configured) {
-      return configured.replace(/\/+$/, "");
+      const normalized = configured.replace(/\/+$/, "");
+      if (!apiKey?.startsWith("tp-") && /token-plan/i.test(normalized)) {
+        return "https://api.xiaomimimo.com/v1";
+      }
+      return normalized;
     }
     if (apiKey?.startsWith("tp-")) {
       return "https://token-plan-cn.xiaomimimo.com/v1";
@@ -18,13 +22,30 @@ function createMimoClient({ getSettings, cleanTranscript }) {
     return "https://api.xiaomimimo.com/v1";
   }
 
-  async function requestChat(messages, { maxTokens = 1024 } = {}) {
+  async function requestChat(messages, {
+    extraBody = {},
+    includeSampling = true,
+    maxTokens = 1024,
+    model,
+    stream = false
+  } = {}) {
     const settings = getSettings();
     const apiKey = resolveApiKey();
     if (!apiKey) {
       throw new Error("MiMo API key is not configured.");
     }
     const baseUrl = resolveBaseUrl(apiKey);
+    const body = {
+      model: model || settings.model,
+      messages,
+      max_completion_tokens: maxTokens,
+      stream,
+      ...extraBody
+    };
+    if (includeSampling) {
+      body.temperature = 0;
+      body.top_p = 0.1;
+    }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), settings.requestTimeoutMs);
@@ -37,14 +58,7 @@ function createMimoClient({ getSettings, cleanTranscript }) {
           "api-key": apiKey,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          model: settings.model,
-          messages,
-          max_completion_tokens: maxTokens,
-          temperature: 0,
-          top_p: 0.1,
-          stream: false
-        })
+        body: JSON.stringify(body)
       });
 
       const bodyText = await response.text();

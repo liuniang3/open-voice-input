@@ -7,7 +7,7 @@ const QWEN_REALTIME_WS_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime";
 
 function normalizeQwenRealtimeModel(model) {
   const value = String(model || "").trim();
-  if (!value || value === "mimo-v2.5" || value === "qwen3-asr-flash") return QWEN_REALTIME_MODEL;
+  if (!value || value === "mimo-v2.5" || value === "mimo-v2.5-asr" || value === "qwen3-asr-flash") return QWEN_REALTIME_MODEL;
   return value;
 }
 
@@ -63,7 +63,7 @@ function createQwenRealtimeSession({
           turn_detection: {
             type: "server_vad",
             threshold: 0.0,
-            silence_duration_ms: 400
+            silence_duration_ms: 1200
           }
         })
       });
@@ -240,11 +240,24 @@ function joinTranscript(left, right) {
   if (!b) return a;
   if (a.endsWith(b)) return a;
   if (b.startsWith(a)) return b;
+  if (shouldUseSoftChineseJoin(a, b)) {
+    return `${stripTerminalPunctuation(a)}，${b}`;
+  }
   return `${a}${needsSpace(a, b) ? " " : ""}${b}`;
 }
 
 function needsSpace(left, right) {
   return /[A-Za-z0-9]$/.test(left) && /^[A-Za-z0-9]/.test(right);
+}
+
+function shouldUseSoftChineseJoin(left, right) {
+  return /[\u4e00-\u9fff][。！？]$/.test(left)
+    && /^[\u4e00-\u9fff]/.test(right)
+    && !/^(然后|但是|不过|所以|因为|如果|比如|另外|还有|接下来|最后)/.test(right);
+}
+
+function stripTerminalPunctuation(value) {
+  return String(value || "").replace(/[。！？]+$/u, "");
 }
 
 function compactObject(value) {

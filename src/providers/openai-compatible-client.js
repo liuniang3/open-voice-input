@@ -145,11 +145,23 @@ function parseServerSentEventChunks(text) {
       .filter(Boolean);
     if (!dataLines.length) continue;
 
+    const standalonePayloads = dataLines.filter((line) => line === "[DONE]" || looksLikeJsonPayload(line));
+    if (standalonePayloads.length === dataLines.length) {
+      for (const payload of standalonePayloads) {
+        if (payload !== "[DONE]") chunks.push(JSON.parse(payload));
+      }
+      continue;
+    }
+
     const payload = dataLines.join("\n").trim();
     if (!payload || payload === "[DONE]") continue;
     chunks.push(JSON.parse(payload));
   }
   return chunks;
+}
+
+function looksLikeJsonPayload(value) {
+  return /^[{[]/.test(String(value || "").trim());
 }
 
 module.exports = {

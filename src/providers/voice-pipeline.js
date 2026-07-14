@@ -1,6 +1,6 @@
 const { cleanTranscript } = require("../transcript-cleaner");
 const { createFunAsrProvider, FUN_ASR_REST_BASE_URL, normalizeFunAsrModel } = require("./asr/fun-asr-provider");
-const { createMimoAsrProvider } = require("./asr/mimo-asr-provider");
+const { createMimoAsrProvider, normalizeMimoAsrModel } = require("./asr/mimo-asr-provider");
 const { createQwen3AsrProvider } = require("./asr/qwen3-asr-provider");
 const { createMimoCleanerProvider } = require("./cleaner/mimo-cleaner-provider");
 const { createOpenAiCompatibleCleanerProvider } = require("./cleaner/openai-compatible-cleaner-provider");
@@ -28,7 +28,17 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     requestTimeoutMs: resolveRequestTimeoutMs
   });
   const asrProviders = providerOverrides.asrProviders || {
-    mimo: createMimoAsrProvider({ client: mimoClient, cleanTranscript }),
+    mimo: createMimoAsrProvider({
+      client: mimoClient,
+      cleanTranscript,
+      getOptions: () => {
+        const settings = readSettings();
+        return {
+          language: settings.asrLanguage || "",
+          model: settings.asrModel || settings.model || ""
+        };
+      }
+    }),
     "qwen3-asr": createQwen3AsrProvider({
       client: qwenAsrClient,
       cleanTranscript,
@@ -254,13 +264,14 @@ function normalizeQwenAsrMode(mode) {
 
 function normalizeQwenAsrModel(model) {
   const value = String(model || "").trim();
-  if (!value || value === "mimo-v2.5") return QWEN_ASR_OPENAI_MODEL;
+  if (!value || value === "mimo-v2.5" || value === "mimo-v2.5-asr") return QWEN_ASR_OPENAI_MODEL;
   if (value.includes("realtime") || value.includes("filetrans")) return QWEN_ASR_OPENAI_MODEL;
   return value;
 }
 
 module.exports = {
   createVoicePipeline,
+  normalizeMimoAsrModel,
   normalizeQwenAsrModel,
   QWEN_ASR_OPENAI_BASE_URL,
   QWEN_ASR_OPENAI_MODEL,

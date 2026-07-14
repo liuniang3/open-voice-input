@@ -19,6 +19,11 @@
         </div>
       </header>
 
+      <div id="recordingChrome" class="recording-chrome" aria-label="录音控制">
+        <span>Enter 停止 · Esc 取消</span>
+        <button id="recordingCancelBtn" class="recording-cancel" title="取消转写，快捷键 Esc" aria-label="取消转写">×</button>
+      </div>
+
       <section class="status-panel" id="statusPanel">
         <div id="pulse" class="pulse"></div>
         <div>
@@ -37,112 +42,160 @@
 
       <section id="settingsPanel" class="settings-panel" hidden>
         <div class="settings-head">
-          <strong>设置</strong>
-          <button id="saveSettingsBtn">保存</button>
-        </div>
-        <label class="field">
-          <span>主 API Key</span>
-          <input id="apiKeyInput" type="password" placeholder="留空则使用 MIMO_API_KEY 环境变量" />
-        </label>
-        <label class="field">
-          <span>主 Base URL</span>
-          <input id="baseUrlInput" type="text" placeholder="自动识别，或填写 https://token-plan-cn.xiaomimimo.com/v1" />
-        </label>
-        <label class="field">
-          <span>语音识别供应商</span>
-          <select id="asrProviderSelect">
-            <option value="mimo">MiMo 音频理解</option>
-            <option value="qwen3-asr">Qwen3-ASR 专用识别</option>
-            <option value="fun-asr">Fun-ASR 专用识别</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>千问识别模式</span>
-          <select id="asrModeSelect">
-            <option value="batch">非实时：录完后转写</option>
-            <option value="realtime">实时：边录边显示</option>
-          </select>
-        </label>
-        <div class="provider-grid">
-          <label class="field">
-            <span>非实时模型</span>
-            <input id="asrModelInput" type="text" placeholder="例如 mimo-v2.5、qwen3-asr-flash 或 fun-asr" />
-          </label>
-          <label class="field">
-            <span>实时模型</span>
-            <input id="asrRealtimeModelInput" type="text" placeholder="例如 qwen3-asr-flash-realtime 或 fun-asr-realtime" />
-          </label>
-        </div>
-        <div class="provider-grid">
-          <label class="field">
-            <span>语音识别 Base URL</span>
-            <input id="asrBaseUrlInput" type="text" placeholder="留空使用供应商默认地址" />
-          </label>
-        </div>
-        <label class="field">
-          <span>语音识别 API Key</span>
-          <input id="asrApiKeyInput" type="password" placeholder="留空复用主 API Key" />
-        </label>
-        <div class="provider-grid">
-          <label class="field">
-            <span>识别语言</span>
-            <input id="asrLanguageInput" type="text" placeholder="可选，例如 zh 或 en" />
-          </label>
-          <label class="check-field">
-            <input id="asrEnableItnInput" type="checkbox" />
-            <span>启用数字、日期等文本规范化</span>
-          </label>
-        </div>
-        <label class="field">
-          <span>文本清理供应商</span>
-          <select id="cleanerProviderSelect">
-            <option value="mimo">MiMo 聊天清理</option>
-            <option value="openai-compatible">OpenAI 兼容接口清理</option>
-          </select>
-        </label>
-        <div class="provider-grid">
-          <label class="field">
-            <span>文本清理模型</span>
-            <input id="cleanerModelInput" type="text" placeholder="例如 mimo-v2.5 或 gpt-5.4-mini" />
-          </label>
-          <label class="field">
-            <span>文本清理 Base URL</span>
-            <input id="cleanerBaseUrlInput" type="text" placeholder="https://api.openai.com/v1 或兼容接口地址" />
-          </label>
-        </div>
-        <label class="field">
-          <span>文本清理 API Key</span>
-          <input id="cleanerApiKeyInput" type="password" placeholder="留空复用主 API Key" />
-        </label>
-        <label class="field">
-          <span>全局快捷键</span>
-          <input id="hotkeyInput" type="text" placeholder="CommandOrControl+Alt+M" autocomplete="off" />
-          <small id="hotkeyHint" class="hotkey-hint" hidden>按下新的快捷键组合</small>
-        </label>
-        <label class="field">
-          <span>麦克风</span>
-          <select id="microphoneSelect">
-            <option value="">系统默认麦克风</option>
-          </select>
-          <small id="microphoneHint" class="microphone-hint">录音时会显示实际使用的输入源。</small>
-        </label>
-        <fieldset class="field mode-field">
-          <span>转写模式</span>
-          <div class="mode-toggle" role="group" aria-label="转写模式">
-            <button id="stableModeBtn" type="button" class="mode-button" data-mode="stable">
-              <strong>稳定</strong>
-              <span>先识别再清理</span>
-            </button>
-            <button id="fastModeBtn" type="button" class="mode-button" data-mode="fast">
-              <strong>快速</strong>
-              <span>仅语音识别</span>
-            </button>
+          <div>
+            <strong>设置</strong>
+            <span>配置录音、识别、清理和快捷键。保存前不会覆盖已有 API 配置。</span>
           </div>
-        </fieldset>
-        <div class="settings-actions">
-          <button id="testConnectionBtn">测试连接</button>
-          <button id="refreshDevicesBtn">刷新麦克风</button>
-          <button id="clearApiKeyBtn">使用环境变量 Key</button>
+          <div class="settings-head-actions">
+            <button id="testConnectionBtn">测试连接</button>
+            <button id="saveSettingsBtn" class="primary">保存</button>
+          </div>
+        </div>
+
+        <div class="settings-layout">
+          <section class="settings-section">
+            <div class="section-title">
+              <strong>工作方式</strong>
+              <span>决定速度、质量和快捷键。</span>
+            </div>
+            <fieldset class="field mode-field">
+              <span>转写模式</span>
+              <div class="mode-toggle" role="group" aria-label="转写模式">
+                <button id="stableModeBtn" type="button" class="mode-button" data-mode="stable">
+                  <strong>稳定</strong>
+                  <span>先识别再清理</span>
+                </button>
+                <button id="fastModeBtn" type="button" class="mode-button" data-mode="fast">
+                  <strong>快速</strong>
+                  <span>仅语音识别</span>
+                </button>
+              </div>
+            </fieldset>
+            <label class="field">
+              <span>全局快捷键</span>
+              <input id="hotkeyInput" type="text" placeholder="CommandOrControl+Alt+M" autocomplete="off" />
+              <small id="hotkeyHint" class="hotkey-hint" hidden>选中后直接按新的快捷键组合，Esc 取消。</small>
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <div class="section-title">
+              <strong>输入设备</strong>
+              <span>选择麦克风并刷新设备列表。</span>
+            </div>
+            <label class="field">
+              <span>麦克风</span>
+              <select id="microphoneSelect">
+                <option value="">系统默认麦克风</option>
+              </select>
+              <small id="microphoneHint" class="microphone-hint">录音时会显示实际使用的输入源。</small>
+            </label>
+            <button id="refreshDevicesBtn" type="button">刷新麦克风</button>
+          </section>
+
+          <section class="settings-section settings-section-wide">
+            <div class="section-title">
+              <strong>第一步：语音识别</strong>
+              <span>推荐 MiMo `mimo-v2.5-asr`；实时预览会因供应商能力不同而不同。</span>
+            </div>
+            <div class="provider-grid">
+              <label class="field">
+                <span>语音识别供应商</span>
+                <select id="asrProviderSelect">
+                  <option value="mimo">MiMo ASR（推荐）</option>
+                  <option value="qwen3-asr">Qwen3-ASR 专用识别</option>
+                  <option value="fun-asr">Fun-ASR 专用识别</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>识别显示模式</span>
+                <select id="asrModeSelect">
+                  <option value="batch">非实时：录完后转写</option>
+                  <option value="realtime">实时预览：边录边显示</option>
+                </select>
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label class="field">
+                <span>最终转写模型</span>
+                <input id="asrModelInput" type="text" placeholder="例如 mimo-v2.5-asr、qwen3-asr-flash 或 fun-asr" />
+              </label>
+              <label class="field">
+                <span>实时预览模型</span>
+                <input id="asrRealtimeModelInput" type="text" placeholder="例如 qwen3-asr-flash-realtime 或 fun-asr-realtime" />
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label class="field">
+                <span>语音识别 Base URL</span>
+                <input id="asrBaseUrlInput" type="text" placeholder="留空使用供应商默认地址" />
+              </label>
+              <label class="field">
+                <span>语音识别 API Key</span>
+                <input id="asrApiKeyInput" type="password" placeholder="留空复用主 API Key" />
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label class="field">
+                <span>识别语言</span>
+                <input id="asrLanguageInput" type="text" placeholder="可选，例如 zh 或 en" />
+              </label>
+              <label class="check-field">
+                <input id="asrEnableItnInput" type="checkbox" />
+                <span>启用数字、日期等文本规范化</span>
+              </label>
+            </div>
+          </section>
+
+          <section class="settings-section settings-section-wide">
+            <div class="section-title">
+              <strong>第二步：文本清理</strong>
+              <span>稳定模式下用于删除口头词、合并重复片段并补标点。</span>
+            </div>
+            <div class="provider-grid">
+              <label class="field">
+                <span>文本清理供应商</span>
+                <select id="cleanerProviderSelect">
+                  <option value="mimo">MiMo 聊天清理</option>
+                  <option value="openai-compatible">OpenAI 兼容接口清理</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>文本清理模型</span>
+                <input id="cleanerModelInput" type="text" placeholder="例如 mimo-v2.5 或 gpt-5.4-mini" />
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label class="field">
+                <span>文本清理 Base URL</span>
+                <input id="cleanerBaseUrlInput" type="text" placeholder="https://api.openai.com/v1 或兼容接口地址" />
+              </label>
+              <label class="field">
+                <span>文本清理 API Key</span>
+                <input id="cleanerApiKeyInput" type="password" placeholder="留空复用主 API Key" />
+              </label>
+            </div>
+          </section>
+
+          <section class="settings-section settings-section-wide">
+            <div class="section-title">
+              <strong>通用凭证</strong>
+              <span>MiMo 默认凭证，也可被 ASR 或清理步骤复用。</span>
+            </div>
+            <div class="provider-grid">
+              <label class="field">
+                <span>主 API Key</span>
+                <input id="apiKeyInput" type="password" placeholder="留空则使用 MIMO_API_KEY 环境变量" />
+              </label>
+              <label class="field">
+                <span>主 Base URL</span>
+                <input id="baseUrlInput" type="text" placeholder="默认 https://api.xiaomimimo.com/v1；token plan 可填专用地址" />
+              </label>
+            </div>
+            <div class="settings-actions">
+              <button id="clearApiKeyBtn" type="button">使用环境变量 Key</button>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -154,6 +207,7 @@
       <div class="actions advanced-field">
         <button id="recordBtn" class="primary">录音</button>
         <button id="stopBtn" disabled>停止</button>
+        <button id="copyBtn" disabled>复制</button>
         <button id="sendBtn" disabled>发送</button>
       </div>
 

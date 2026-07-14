@@ -6,7 +6,7 @@ const SAMPLE_AUDIO_URL = "https://dashscope.oss-cn-beijing.aliyuncs.com/samples/
 
 function normalizeFunAsrModel(model) {
   const value = String(model || "").trim();
-  if (!value || value === "mimo-v2.5" || value === "qwen3-asr-flash" || value.includes("realtime")) {
+  if (!value || value === "mimo-v2.5" || value === "mimo-v2.5-asr" || value === "qwen3-asr-flash" || value.includes("realtime")) {
     return FUN_ASR_MODEL;
   }
   return value;

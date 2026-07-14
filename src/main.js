@@ -7,18 +7,22 @@ const { createVoicePipeline } = require("./providers/voice-pipeline");
 const { createQwenRealtimeSession } = require("./providers/asr/qwen-realtime-session");
 const { createFunAsrRealtimeSession } = require("./providers/asr/fun-asr-realtime-session");
 
-const APP_ICON_PATH = path.join(__dirname, "..", "assets", "mimo-icon.ico");
-const TRAY_ICON_PATH = path.join(__dirname, "..", "assets", "mimo-tray.png");
-const HOTKEY_HELPER_PATH = path.join(__dirname, "win-hotkey-helper.ps1");
+const RESOURCE_ROOT = app.isPackaged ? process.resourcesPath : path.join(__dirname, "..");
+const APP_ICON_PATH = path.join(RESOURCE_ROOT, "assets", "mimo-icon.ico");
+const TRAY_ICON_PATH = path.join(RESOURCE_ROOT, "assets", "mimo-tray.png");
+const HOTKEY_HELPER_PATH = app.isPackaged
+  ? path.join(process.resourcesPath, "win-hotkey-helper.ps1")
+  : path.join(__dirname, "win-hotkey-helper.ps1");
 const APP_DISPLAY_NAME = "Open Voice Input";
 const STABLE_USER_DATA_DIR = "open-voice-input";
 const FALLBACK_TRAY_ICON_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 const WINDOW_SIZES = {
-  recording: { width: 320, height: 112 },
+  recording: { width: 320, height: 132 },
   recordingMax: { width: 520, height: 420 },
   compact: { width: 220, height: 74 },
-  settings: { width: 500, height: 620 }
+  result: { width: 500, height: 420 },
+  settings: { width: 840, height: 700 }
 };
 
 const DEFAULT_SETTINGS = {
@@ -28,7 +32,7 @@ const DEFAULT_SETTINGS = {
   baseUrl: "",
   asrProvider: "mimo",
   asrMode: "batch",
-  asrModel: "mimo-v2.5",
+  asrModel: "mimo-v2.5-asr",
   asrRealtimeModel: "qwen3-asr-flash-realtime",
   asrApiKey: "",
   asrBaseUrl: "",
@@ -173,13 +177,16 @@ function createSettingsWindow() {
     height: WINDOW_SIZES.settings.height,
     useContentSize: true,
     show: false,
-    frame: false,
-    alwaysOnTop: true,
-    resizable: false,
-    skipTaskbar: true,
+    title: `${APP_DISPLAY_NAME} 设置`,
+    frame: true,
+    alwaysOnTop: false,
+    resizable: true,
+    minimizable: true,
+    maximizable: true,
+    skipTaskbar: false,
     icon: APP_ICON_PATH,
-    transparent: true,
-    backgroundColor: "#00000000",
+    transparent: false,
+    backgroundColor: "#101418",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -234,9 +241,19 @@ function showSettings() {
   prepareWindowForDisplay(settingsWindow, "settings");
   settingsWindow.show();
   enforceWindowGeometry(settingsWindow, "settings");
-  focusWindow(settingsWindow, "settings");
+  focusWindow(settingsWindow, "settings", { topmost: false });
   sendWhenLoaded(settingsWindow, "window-mode", "settings");
   sendWhenLoaded(settingsWindow, "open-settings");
+}
+
+function showResultWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  logEvent("result-window: show");
+  setWindowMode("result");
+  prepareWindowForDisplay(mainWindow, "result");
+  mainWindow.show();
+  enforceWindowGeometry(mainWindow, "result");
+  focusMainWindow();
 }
 
 function setWindowMode(mode) {
@@ -250,9 +267,13 @@ function setWindowMode(mode) {
 function enforceWindowGeometry(win, mode = windowMode) {
   if (!win || win.isDestroyed()) return;
   const size = WINDOW_SIZES[mode] || WINDOW_SIZES.compact;
-  win.setMinimumSize(1, 1);
-  win.setContentSize(size.width, size.height, false);
-  win.setBounds({ ...win.getBounds(), width: size.width, height: size.height }, false);
+  const isSettings = mode === "settings" || win === settingsWindow;
+  win.setMinimumSize(isSettings ? 720 : 1, isSettings ? 560 : 1);
+  if (!isSettings || !win.isVisible()) {
+    win.setContentSize(size.width, size.height, false);
+    win.setBounds({ ...win.getBounds(), width: size.width, height: size.height }, false);
+  }
+  setWindowAlwaysOnTop(win, !isSettings);
   logEvent("window: geometry", `${mode} ${JSON.stringify(win.getBounds())}`);
 }
 
@@ -264,6 +285,7 @@ function resizeRecordingWindow({ width, height } = {}) {
   const nextHeight = clamp(Number(height) || min.height, min.height, max.height);
   mainWindow.setContentSize(nextWidth, nextHeight, false);
   mainWindow.setBounds({ ...mainWindow.getBounds(), width: nextWidth, height: nextHeight }, false);
+  raiseWindowToFront(mainWindow, "recording-resize", { focus: false, native: false });
   logEvent("window: recording resize", `${nextWidth}x${nextHeight}`);
 }
 
@@ -278,8 +300,8 @@ function prepareWindowForDisplay(win = mainWindow, mode = windowMode) {
   }
   enforceWindowGeometry(win, mode);
   win.setFocusable(true);
-  win.setAlwaysOnTop(true);
-  win.center();
+  setWindowAlwaysOnTop(win, mode !== "settings" && win !== settingsWindow);
+  if (!win.isVisible()) win.center();
   win.moveTop();
 }
 
@@ -315,19 +337,84 @@ function focusMainWindow() {
   focusWindow(mainWindow, "main");
 }
 
-function focusWindow(win, label) {
+function focusWindow(win, label, { topmost = true } = {}) {
   if (!win || win.isDestroyed()) return;
   logEvent("window: focus requested", label);
   win.show();
-  win.moveTop();
-  win.focus();
-  for (const delay of [80, 180, 360]) {
+  raiseWindowToFront(win, label, { focus: true, native: topmost, topmost });
+  for (const delay of [80, 180, 360, 720]) {
     setTimeout(() => {
       if (!win || win.isDestroyed() || !win.isVisible()) return;
-      win.moveTop();
-      win.focus();
-      logEvent("window: focus retry", `${label} delay=${delay} focused=${win.isFocused()}`);
+      raiseWindowToFront(win, label, { focus: true, native: topmost && delay >= 180, topmost });
+      logEvent("window: focus retry", `${label} delay=${delay} focused=${win.isFocused()} visible=${win.isVisible()}`);
     }, delay);
+  }
+}
+
+function raiseWindowToFront(win, label, { focus = false, native = false, topmost = true } = {}) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    setWindowAlwaysOnTop(win, Boolean(topmost));
+    win.moveTop();
+    if (focus) win.focus();
+    if (native && topmost) bumpNativeTopmost(win, label);
+  } catch (error) {
+    logEvent("window: raise failed", `${label} ${error?.message || String(error)}`);
+  }
+}
+
+function setWindowAlwaysOnTop(win, enabled) {
+  if (enabled) {
+    win.setAlwaysOnTop(true, "screen-saver");
+  } else {
+    win.setAlwaysOnTop(false);
+  }
+}
+
+function bumpNativeTopmost(win, label) {
+  if (os.platform() !== "win32" || !win || win.isDestroyed()) return;
+  const handle = nativeWindowHandleDecimal(win);
+  if (!handle || handle === "0") return;
+  const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class OpenVoiceInputWin32Topmost {
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, UInt32 uFlags);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+}
+"@
+$hwnd = [IntPtr]::new([Int64]'${handle}')
+$HWND_TOPMOST = [IntPtr]::new(-1)
+$SWP_NOSIZE = 0x0001
+$SWP_NOMOVE = 0x0002
+$SWP_NOACTIVATE = 0x0010
+$SWP_SHOWWINDOW = 0x0040
+[OpenVoiceInputWin32Topmost]::ShowWindow($hwnd, 9) | Out-Null
+[OpenVoiceInputWin32Topmost]::SetWindowPos($hwnd, $HWND_TOPMOST, 0, 0, 0, 0, $SWP_NOMOVE -bor $SWP_NOSIZE -bor $SWP_NOACTIVATE -bor $SWP_SHOWWINDOW) | Out-Null
+[OpenVoiceInputWin32Topmost]::BringWindowToTop($hwnd) | Out-Null
+`;
+  execFile("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], {
+    timeout: 2500,
+    windowsHide: true
+  }, (error) => {
+    if (error) {
+      logEvent("window: native topmost failed", `${label} ${error.message || String(error)}`);
+    }
+  });
+}
+
+function nativeWindowHandleDecimal(win) {
+  try {
+    const handle = win.getNativeWindowHandle();
+    if (!handle || handle.length < 4) return "";
+    if (handle.length >= 8) return handle.readBigUInt64LE(0).toString();
+    return String(handle.readUInt32LE(0));
+  } catch (error) {
+    logEvent("window: native handle failed", error?.message || String(error));
+    return "";
   }
 }
 
@@ -644,21 +731,26 @@ async function startRealtimeAsr(event) {
   } else {
     return { enabled: false };
   }
-  await realtimeSession.ready;
-  return { enabled: true, model: realtimeSession.model };
+  try {
+    await realtimeSession.ready;
+    return { enabled: true, model: realtimeSession.model };
+  } catch (error) {
+    stopRealtimeAsr();
+    throw error;
+  }
 }
 
 function appendRealtimeAudio(base64Audio) {
   realtimeSession?.appendPcm16Base64(base64Audio);
 }
 
-async function finishRealtimeAsr({ shortContext = "", transcriptionMode } = {}) {
+async function finishRealtimeAsr({ clean = true, shortContext = "", transcriptionMode } = {}) {
   if (!realtimeSession) return "";
   const session = realtimeSession;
   realtimeSession = null;
   const rawText = await session.finish();
-  logEvent("qwen-realtime: final text", `chars=${rawText.length}`);
-  if (normalizeTranscriptionMode(transcriptionMode || settings.transcriptionMode) === "stable") {
+  logEvent("realtime-asr: preview final text", `chars=${rawText.length}`);
+  if (clean && normalizeTranscriptionMode(transcriptionMode || settings.transcriptionMode) === "stable") {
     return voicePipeline.cleanText({ rawText, shortContext });
   }
   return rawText;
@@ -735,6 +827,7 @@ ipcMain.handle("window:compact", async (_event, isCompact) => {
   }
 });
 ipcMain.handle("window:settings", async () => showSettings());
+ipcMain.handle("window:result", async () => showResultWindow());
 ipcMain.handle("window:recording-resize", async (_event, size) => resizeRecordingWindow(size));
 ipcMain.handle("app:status", async () => ({
   hasApiKey: Boolean(resolveApiKey()),
@@ -757,6 +850,7 @@ ipcMain.handle("voice:realtime:finish", async (_event, payload) => finishRealtim
 ipcMain.handle("voice:realtime:cancel", async () => stopRealtimeAsr());
 ipcMain.handle("connection:test", async () => voicePipeline.testConnection());
 ipcMain.handle("input:inject", async (_event, text) => injectText(text));
+ipcMain.handle("clipboard:write-text", async (_event, text) => clipboard.writeText(String(text || "")));
 ipcMain.handle("recording:keys:clear", async () => unregisterRecordingKeyFallbacks());
 
 app.whenReady().then(async () => {
@@ -769,7 +863,11 @@ app.whenReady().then(async () => {
   createTray();
   await registerHotkey();
   setWindowMode("compact");
-  mainWindow.hide();
+  if (resolveApiKey()) {
+    mainWindow.hide();
+  } else {
+    showSettings();
+  }
   logEvent("app: initialized");
 });
 

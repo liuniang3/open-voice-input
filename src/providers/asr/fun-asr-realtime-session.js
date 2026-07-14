@@ -8,7 +8,7 @@ const FUN_ASR_REALTIME_WS_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/inferenc
 
 function normalizeFunAsrRealtimeModel(model) {
   const value = String(model || "").trim();
-  if (!value || value === "mimo-v2.5" || value === "qwen3-asr-flash" || value === "fun-asr") {
+  if (!value || value === "mimo-v2.5" || value === "mimo-v2.5-asr" || value === "qwen3-asr-flash" || value === "fun-asr") {
     return FUN_ASR_REALTIME_MODEL;
   }
   return value;

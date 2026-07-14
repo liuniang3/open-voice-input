@@ -1,14 +1,19 @@
 {
   "name": "open-voice-input",
   "productName": "Open Voice Input",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Windows voice input assistant with pluggable ASR providers and optional LLM cleanup.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "check": "node scripts/check-config.js",
+    "check:secrets": "node scripts/check-secrets.js",
+    "checksums": "node scripts/write-checksums.js",
     "test:clean": "node scripts/test-clean-transcript.js",
-    "test:pipeline": "node scripts/test-voice-pipeline.js"
+    "test:pipeline": "node scripts/test-voice-pipeline.js",
+    "build:dir": "npm run check:secrets && node scripts/run-electron-builder.js --dir --win --x64",
+    "dist": "npm run check:secrets && npm run test:pipeline && npm run test:clean && node scripts/run-electron-builder.js --win nsis portable --x64 && npm run checksums",
+    "dist:portable": "npm run check:secrets && node scripts/run-electron-builder.js --win portable --x64 && npm run checksums"
   },
   "keywords": [
     "asr",
@@ -22,9 +27,70 @@
   "license": "MIT",
   "private": true,
   "devDependencies": {
-    "electron": "^39.2.6"
+    "electron": "39.8.9",
+    "electron-builder": "26.15.3"
   },
   "dependencies": {
-    "ws": "^8.20.0"
+    "ws": "8.21.0"
+  },
+  "build": {
+    "appId": "com.liuniang.openvoiceinput",
+    "productName": "Open Voice Input",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!src/win-hotkey-helper.ps1"
+    ],
+    "extraResources": [
+      {
+        "from": "src/win-hotkey-helper.ps1",
+        "to": "win-hotkey-helper.ps1"
+      },
+      {
+        "from": "assets/mimo-icon.ico",
+        "to": "assets/mimo-icon.ico"
+      },
+      {
+        "from": "assets/mimo-tray.png",
+        "to": "assets/mimo-tray.png"
+      }
+    ],
+    "win": {
+      "icon": "assets/mimo-icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Open Voice Input"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "liuniang3",
+      "repo": "open-voice-input"
+    }
   }
 }

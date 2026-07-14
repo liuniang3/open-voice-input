@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { createOpenAiCompatibleClient, parseChatCompletionBody } = require("../src/providers/openai-compatible-client");
 const { normalizeFunAsrModel } = require("../src/providers/asr/fun-asr-provider");
 const { normalizeFunAsrRealtimeModel, parseRealtimeEvents: parseFunRealtimeEvents } = require("../src/providers/asr/fun-asr-realtime-session");
+const { normalizeMimoAsrModel } = require("../src/providers/asr/mimo-asr-provider");
 const { joinTranscript, normalizeQwenRealtimeModel, parseRealtimeEvents: parseQwenRealtimeEvents } = require("../src/providers/asr/qwen-realtime-session");
 const { createVoicePipeline, normalizeQwenAsrMode, normalizeQwenAsrModel } = require("../src/providers/voice-pipeline");
 
@@ -229,6 +230,13 @@ async function run() {
   ].join("\n"));
   assert.equal(streamedBody.message.content, "你好");
 
+  const compactStreamedBody = parseChatCompletionBody([
+    'data: {"id":"chatcmpl-test","choices":[{"delta":{"content":"不"}}]}',
+    'data: {"id":"chatcmpl-test","choices":[{"delta":{"content":"崩"}}]}',
+    "data: [DONE]"
+  ].join("\n"));
+  assert.equal(compactStreamedBody.message.content, "不崩");
+
   const normalBody = parseChatCompletionBody('{"choices":[{"message":{"content":"ok"}}]}');
   assert.equal(normalBody.message.content, "ok");
 
@@ -239,8 +247,13 @@ async function run() {
 
   assert.equal(normalizeQwenAsrModel(""), "qwen3-asr-flash");
   assert.equal(normalizeQwenAsrModel("mimo-v2.5"), "qwen3-asr-flash");
+  assert.equal(normalizeQwenAsrModel("mimo-v2.5-asr"), "qwen3-asr-flash");
   assert.equal(normalizeQwenAsrModel("qwen3-asr-flash-realtime-2026-02-10"), "qwen3-asr-flash");
   assert.equal(normalizeQwenAsrModel("qwen3-asr-flash"), "qwen3-asr-flash");
+  assert.equal(normalizeMimoAsrModel(""), "mimo-v2.5-asr");
+  assert.equal(normalizeMimoAsrModel("mimo-v2.5"), "mimo-v2.5-asr");
+  assert.equal(normalizeMimoAsrModel("qwen3-asr-flash"), "mimo-v2.5-asr");
+  assert.equal(normalizeMimoAsrModel("mimo-v2.5-asr"), "mimo-v2.5-asr");
   assert.equal(normalizeQwenAsrMode("realtime"), "realtime");
   assert.equal(normalizeQwenAsrMode("unknown"), "batch");
   assert.equal(normalizeQwenRealtimeModel(""), "qwen3-asr-flash-realtime");
@@ -248,12 +261,14 @@ async function run() {
   assert.equal(normalizeQwenRealtimeModel("qwen3-asr-flash-realtime-2026-02-10"), "qwen3-asr-flash-realtime-2026-02-10");
   assert.equal(normalizeFunAsrModel(""), "fun-asr");
   assert.equal(normalizeFunAsrModel("mimo-v2.5"), "fun-asr");
+  assert.equal(normalizeFunAsrModel("mimo-v2.5-asr"), "fun-asr");
   assert.equal(normalizeFunAsrModel("fun-asr-realtime-2026-02-10"), "fun-asr");
   assert.equal(normalizeFunAsrModel("fun-asr-2026-02-10"), "fun-asr-2026-02-10");
   assert.equal(normalizeFunAsrRealtimeModel(""), "fun-asr-realtime");
   assert.equal(normalizeFunAsrRealtimeModel("fun-asr"), "fun-asr-realtime");
   assert.equal(normalizeFunAsrRealtimeModel("fun-asr-realtime-2026-02-10"), "fun-asr-realtime-2026-02-10");
-  assert.equal(joinTranscript("第一句。", "第二句。"), "第一句。第二句。");
+  assert.equal(joinTranscript("第一句。", "第二句。"), "第一句，第二句。");
+  assert.equal(joinTranscript("第一句。", "然后第二句。"), "第一句。然后第二句。");
   assert.equal(joinTranscript("hello", "world"), "hello world");
   assert.equal(joinTranscript("第一句。第二句。", "第二句。"), "第一句。第二句。");
 
