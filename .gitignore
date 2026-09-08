@@ -15,3 +15,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 *.local
+experiments/results/
+native/audio-capture-helper/target/
+native/ffmpeg/
+*.pdb
+output/
+__pycache__/
+*.pyc

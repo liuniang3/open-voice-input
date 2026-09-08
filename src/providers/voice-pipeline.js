@@ -1,4 +1,6 @@
 const { cleanTranscript } = require("../transcript-cleaner");
+const { resolveAsrAudioPolicy } = require("../audio-policy");
+const { joinTranscriptSegments } = require("../audio-utils");
 const { createFunAsrProvider, FUN_ASR_REST_BASE_URL, normalizeFunAsrModel } = require("./asr/fun-asr-provider");
 const { createMimoAsrProvider, normalizeMimoAsrModel } = require("./asr/mimo-asr-provider");
 const { createQwen3AsrProvider } = require("./asr/qwen3-asr-provider");
@@ -14,7 +16,30 @@ const QWEN_ASR_MODES = new Set(["batch", "realtime"]);
 function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) {
   let overrideSettings = null;
   const readSettings = () => overrideSettings || getSettings();
-  const mimoClient = createMimoClient({ getSettings: readSettings, cleanTranscript });
+  const mimoClient = createMimoClient({
+    getSettings: () => {
+      const settings = readSettings();
+      return {
+        ...settings,
+        apiKey: settings.asrApiKey || "",
+        baseUrl: settings.asrBaseUrl || "",
+        model: settings.asrModel || "mimo-v2.5-asr"
+      };
+    },
+    useEnvironmentFallback: false
+  });
+  const mimoCleanerClient = createMimoClient({
+    getSettings: () => {
+      const settings = readSettings();
+      return {
+        ...settings,
+        apiKey: settings.cleanerApiKey || "",
+        baseUrl: settings.cleanerBaseUrl || "",
+        model: settings.cleanerModel || settings.model || "mimo-v2.5"
+      };
+    },
+    useEnvironmentFallback: false
+  });
   const qwenAsrClient = createOpenAiCompatibleClient({
     apiKey: resolveDashScopeAsrApiKey,
     baseUrl: resolveQwenAsrBaseUrl,
@@ -69,46 +94,98 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     })
   };
   const cleanerProviders = providerOverrides.cleanerProviders || {
-    mimo: createMimoCleanerProvider({ client: mimoClient }),
-    "openai-compatible": createOpenAiCompatibleCleanerProvider({
-      client: openAiCleanerClient,
-      cleanTranscript
-    })
+    mimo: createMimoCleanerProvider({ client: mimoCleanerClient, getModel: resolveCleanerModel }),
+    "openai-compatible": createOpenAiCompatibleCleanerProvider({ client: openAiCleanerClient })
   };
 
   function normalizeTranscriptionMode(mode) {
     return mode === "fast" ? "fast" : "stable";
   }
 
-  async function transcribe({ audioDataUrl, pcm16Base64, shortContext, transcriptionMode, settingsSnapshot }) {
+  async function transcribe({ audioDataUrl, pcm16Base64, audioSegments, shortContext, transcriptionMode, settingsSnapshot }) {
     return withSettingsSnapshot(settingsSnapshot, async () => {
       const settings = readSettings();
       const mode = normalizeTranscriptionMode(transcriptionMode || settings.transcriptionMode);
       const asrProvider = resolveAsrProvider(settings);
       const cleanerProvider = resolveCleanerProvider(settings);
+      const segments = normalizeAudioSegments({ audioDataUrl, pcm16Base64, audioSegments });
       logEvent?.("voice-pipeline: mode", `${mode} asr=${asrProvider.id}:${asrProvider.kind || "audio-chat"} cleaner=${cleanerProvider.id}`);
 
       if (mode === "fast") {
-        const fastResult = await asrProvider.transcribeFast({ audioDataUrl, pcm16Base64, shortContext });
-        return cleanTranscript(fastResult.text);
+        const texts = await transcribeAudioSegments(asrProvider, "transcribeFast", segments, shortContext);
+        return cleanTranscript(joinTranscriptSegments(texts));
       }
 
-      const rawResult = await asrProvider.transcribeRaw({ audioDataUrl, pcm16Base64, shortContext });
-      const rawTranscript = cleanTranscript(rawResult.text);
+      const rawTexts = await transcribeAudioSegments(asrProvider, "transcribeRaw", segments, shortContext);
+      const rawTranscript = cleanTranscript(joinTranscriptSegments(rawTexts));
       if (!rawTranscript) return "";
 
-      const cleanedResult = await cleanerProvider.clean({ rawText: rawTranscript, shortContext });
-      return cleanedResult.text || rawTranscript;
+      logEvent?.("voice-pipeline: cleaner start", `${cleanerProvider.id}:${resolveCleanerModel()}`);
+      try {
+        const cleanedResult = await cleanerProvider.clean({ rawText: rawTranscript, shortContext });
+        logEvent?.("voice-pipeline: cleaner done", cleanedResult.text ? "accepted" : "fallback-empty-or-unsafe");
+        return cleanedResult.text || rawTranscript;
+      } catch (error) {
+        logEvent?.("voice-pipeline: cleaner failed, using raw", error?.message || String(error));
+        return rawTranscript;
+      }
     });
   }
 
-  async function cleanText({ rawText, shortContext }) {
-    const text = cleanTranscript(rawText);
-    if (!text) return "";
-    const settings = readSettings();
-    const cleanerProvider = resolveCleanerProvider(settings);
-    const cleanedResult = await cleanerProvider.clean({ rawText: text, shortContext });
-    return cleanedResult.text || text;
+  async function cleanText({ rawText, shortContext, settingsSnapshot }) {
+    return withSettingsSnapshot(settingsSnapshot, async () => {
+      const text = cleanTranscript(rawText);
+      if (!text) return "";
+      const settings = readSettings();
+      const cleanerProvider = resolveCleanerProvider(settings);
+      logEvent?.("voice-pipeline: cleaner start", `${cleanerProvider.id}:${resolveCleanerModel()}`);
+      try {
+        const cleanedResult = await cleanerProvider.clean({ rawText: text, shortContext });
+        logEvent?.("voice-pipeline: cleaner done", cleanedResult.text ? "accepted" : "fallback-empty-or-unsafe");
+        return cleanedResult.text || text;
+      } catch (error) {
+        logEvent?.("voice-pipeline: cleaner failed, using raw", error?.message || String(error));
+        return text;
+      }
+    });
+  }
+
+  async function transcribeSegment({ audioDataUrl, pcm16Base64, shortContext = "", settingsSnapshot }) {
+    return withSettingsSnapshot(settingsSnapshot, async () => {
+      const asrProvider = resolveAsrProvider(readSettings());
+      const result = await transcribeWithAsr(asrProvider, "transcribeRaw", {
+        audioDataUrl,
+        pcm16Base64,
+        shortContext
+      });
+      return cleanTranscript(result.text);
+    });
+  }
+
+  async function transcribeAudioSegments(asrProvider, method, segments, shortContext) {
+    const texts = [];
+    for (let index = 0; index < segments.length; index += 1) {
+      logEvent?.("voice-pipeline: asr segment", `${index + 1}/${segments.length}`);
+      const result = await transcribeWithAsr(asrProvider, method, {
+        ...segments[index],
+        shortContext
+      });
+      texts.push(result.text || "");
+    }
+    return texts;
+  }
+
+  async function transcribeWithAsr(asrProvider, method, payload) {
+    logEvent?.("voice-pipeline: asr start", `${asrProvider.id}:${method}`);
+    try {
+      const result = await asrProvider[method](payload);
+      logEvent?.("voice-pipeline: asr done", `${asrProvider.id} chars=${result.text?.length || 0}`);
+      return result;
+    } catch (error) {
+      const detail = error?.message || String(error);
+      logEvent?.("voice-pipeline: asr failed", `${asrProvider.id} ${detail}`);
+      throw new Error(`语音识别请求失败（${asrProvider.id}）：${detail}`, { cause: error });
+    }
   }
 
   async function testConnection() {
@@ -128,7 +205,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
       ok: settings.transcriptionMode === "fast" || Boolean(resolveCleanerApiKey()),
       detail: settings.transcriptionMode === "fast"
         ? "快速模式不调用二次清理"
-        : `${cleanerProvider.id} · ${resolveCleanerBaseUrl()}`
+        : `${cleanerProvider.id} · ${resolveActiveCleanerBaseUrl(settings)}`
     });
 
     const failed = checks.find((check) => !check.ok);
@@ -155,14 +232,18 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
         ],
         { maxTokens: 64 }
       );
-    } else if (settings.cleanerProvider === "openai-compatible" && settings.transcriptionMode !== "fast") {
-      await openAiCleanerClient.requestChat(
-        [
-          { role: "system", content: "Return exactly {\"text\":\"ok\"}." },
-          { role: "user", content: "ok" }
-        ],
-        { maxTokens: 32 }
-      );
+    }
+
+    if (settings.transcriptionMode !== "fast") {
+      const messages = [
+        { role: "system", content: "Return exactly {\"text\":\"ok\"}." },
+        { role: "user", content: "ok" }
+      ];
+      if (settings.cleanerProvider === "openai-compatible") {
+        await openAiCleanerClient.requestChat(messages, { maxTokens: 32 });
+      } else {
+        await mimoCleanerClient.requestChat(messages, { maxTokens: 32, model: resolveCleanerModel() });
+      }
     }
 
     return checks;
@@ -172,12 +253,14 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     cleanerProviders,
     asrProviders,
     cleanText,
+    getAudioPolicy: () => resolveAsrAudioPolicy(readSettings()),
     normalizeTranscriptionMode,
     normalizeQwenAsrMode,
     resolveApiKey,
     resolveBaseUrl,
     testConnection,
-    transcribe
+    transcribe,
+    transcribeSegment
   };
 
   function resolveAsrProvider(settings) {
@@ -207,7 +290,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
 
   function resolveDashScopeAsrApiKey() {
     const settings = readSettings();
-    return settings.asrApiKey || process.env.QWEN_ASR_API_KEY || process.env.DASHSCOPE_API_KEY || settings.apiKey || process.env.MIMO_API_KEY || "";
+    return settings.asrApiKey || process.env.QWEN_ASR_API_KEY || process.env.DASHSCOPE_API_KEY || "";
   }
 
   function resolveQwenAsrBaseUrl() {
@@ -234,12 +317,18 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
 
   function resolveCleanerApiKey() {
     const settings = readSettings();
-    return settings.cleanerApiKey || process.env.CLEANER_API_KEY || settings.apiKey || process.env.MIMO_API_KEY || "";
+    return settings.cleanerApiKey || process.env.CLEANER_API_KEY || "";
   }
 
   function resolveCleanerBaseUrl() {
     const settings = readSettings();
     return normalizeBaseUrl(settings.cleanerBaseUrl || process.env.CLEANER_BASE_URL, "https://api.openai.com/v1");
+  }
+
+  function resolveActiveCleanerBaseUrl(settings) {
+    return settings.cleanerProvider === "openai-compatible"
+      ? resolveCleanerBaseUrl()
+      : mimoCleanerClient.resolveBaseUrl(mimoCleanerClient.resolveApiKey());
   }
 
   function resolveCleanerModel() {
@@ -256,6 +345,15 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
       overrideSettings = previous;
     }
   }
+}
+
+function normalizeAudioSegments({ audioDataUrl, pcm16Base64, audioSegments }) {
+  const segments = Array.isArray(audioSegments)
+    ? audioSegments.filter((segment) => segment?.audioDataUrl || segment?.pcm16Base64)
+    : [];
+  if (segments.length) return segments;
+  if (audioDataUrl || pcm16Base64) return [{ audioDataUrl, pcm16Base64 }];
+  throw new Error("没有可用于语音识别的音频数据。");
 }
 
 function normalizeQwenAsrMode(mode) {

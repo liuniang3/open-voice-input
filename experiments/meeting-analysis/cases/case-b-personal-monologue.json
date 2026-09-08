@@ -1,0 +1,211 @@
+{
+  "id": "B",
+  "name": "personal-long-monologue",
+  "template": "personal",
+  "description": "合成个人长独白：层级观点、假启动/ASR错词、明确不得误改的数字与术语。非真实用户数据。",
+  "rawItems": [
+    {
+      "id": "b01",
+      "speakerId": "self",
+      "beginMs": 0,
+      "endMs": 12000,
+      "text": "呃我在想，我在想这个语音输入法的核心问题其实不是识别率，而是插入焦点稳不稳定。"
+    },
+    {
+      "id": "b02",
+      "speakerId": "self",
+      "beginMs": 13000,
+      "endMs": 25000,
+      "text": "第一层，用户要的是说完就能写进当前窗口，延迟感比绝对准确更重要。"
+    },
+    {
+      "id": "b03",
+      "speakerId": "self",
+      "beginMs": 26000,
+      "endMs": 40000,
+      "text": "第二层，清理模型不能乱改术语。比如 SendInput、input_audio、还有模型名 gpt-5.4-mini 都必须原样保留。"
+    },
+    {
+      "id": "b04",
+      "speakerId": "self",
+      "beginMs": 41000,
+      "endMs": 55000,
+      "text": "刚才那个数我说错了，不是百分之九十二，是百分之八十七点五，这是上周离线评测的词错误率反着说的，准确率是百分之八十七点五。"
+    },
+    {
+      "id": "b05",
+      "speakerId": "self",
+      "beginMs": 56000,
+      "endMs": 70000,
+      "text": "假启动一下：我们是不是应该，不对，我的意思是不要上云端默认清理，本地规则先兜底。"
+    },
+    {
+      "id": "b06",
+      "speakerId": "self",
+      "beginMs": 71000,
+      "endMs": 85000,
+      "text": "ASR 错词示例：把“热键”听成“惹键”，把“粘贴”听成“粘帖”，校订时可以修，但别改业务含义。"
+    },
+    {
+      "id": "b07",
+      "speakerId": "self",
+      "beginMs": 86000,
+      "endMs": 100000,
+      "text": "第三层假设：如果用户在代码编辑器里，数字 4096 和端口 8787 绝不能被四舍五入或改写。"
+    },
+    {
+      "id": "b08",
+      "speakerId": "self",
+      "beginMs": 101000,
+      "endMs": 115000,
+      "text": "开放问题：会议模式和个人模式要不要共用同一套 prompt，我还没想清楚。"
+    },
+    {
+      "id": "b09",
+      "speakerId": "self",
+      "beginMs": 116000,
+      "endMs": 130000,
+      "text": "下一步：先写一页对比表，把准确率百分之八十七点五和延迟目标三百毫秒放在一起看。"
+    }
+  ],
+  "allowedCorrections": {
+    "b01": ["焦点"],
+    "b05": ["不要上云端默认清理", "本地规则先兜底"],
+    "b06": ["热键", "粘贴"]
+  },
+  "mustPreserve": [
+    { "id": "mp-sendinput", "text": "SendInput", "alts": ["SendInput"], "sourceItemIds": ["b03"] },
+    { "id": "mp-input-audio", "text": "input_audio", "alts": ["input_audio"], "sourceItemIds": ["b03"] },
+    { "id": "mp-model", "text": "gpt-5.4-mini", "alts": ["gpt-5.4-mini"], "sourceItemIds": ["b03"] },
+    { "id": "mp-acc-875", "text": "87.5", "alts": ["百分之八十七点五", "87.5%", "八十七点五"], "sourceItemIds": ["b04", "b09"] },
+    { "id": "mp-4096", "text": "4096", "alts": ["4096"], "sourceItemIds": ["b07"] },
+    { "id": "mp-8787", "text": "8787", "alts": ["8787"], "sourceItemIds": ["b07"] },
+    { "id": "mp-latency-300", "text": "300", "alts": ["三百毫秒", "300毫秒", "300 ms"], "sourceItemIds": ["b09"] }
+  ],
+  "goldClaims": {
+    "coreIdeas": [
+      {
+        "id": "idea-focus",
+        "keywordGroups": [["焦点", "插入"], ["识别率", "不是"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["b01"],
+        "sourceOverlapMin": 1
+      },
+      {
+        "id": "idea-latency-over-acc",
+        "keywordGroups": [["延迟"], ["准确", "重要"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["b02"],
+        "sourceOverlapMin": 1
+      }
+    ],
+    "supportingPoints": [
+      {
+        "id": "sup-terms",
+        "keywordGroups": [["SendInput", "input_audio", "gpt-5.4-mini", "术语"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["b03"],
+        "sourceOverlapMin": 1
+      },
+      {
+        "id": "sup-local-first",
+        "keywordGroups": [["本地规则", "云端", "默认清理"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["b05"],
+        "sourceOverlapMin": 1
+      }
+    ],
+    "assumptions": [
+      {
+        "id": "asm-editor-numbers",
+        "keywordGroups": [["代码编辑器", "4096", "8787"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["b07"],
+        "sourceOverlapMin": 1
+      }
+    ],
+    "openQuestions": [
+      {
+        "id": "oq-shared-prompt",
+        "keywordGroups": [["会议模式", "个人模式", "prompt", "共用"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["b08"],
+        "sourceOverlapMin": 1
+      }
+    ],
+    "nextSteps": [
+      {
+        "id": "ns-table",
+        "keywordGroups": [["对比表"], ["八十七点五", "87.5", "三百毫秒", "300"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["b09"],
+        "sourceOverlapMin": 1
+      }
+    ],
+    "facts": [
+      {
+        "id": "fact-early-core",
+        "keywordGroups": [["焦点", "核心"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["b01", "b02"],
+        "position": "early"
+      },
+      {
+        "id": "fact-mid-terms",
+        "keywordGroups": [["术语", "SendInput", "准确率"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["b03", "b04", "b05"],
+        "position": "mid"
+      },
+      {
+        "id": "fact-late-next",
+        "keywordGroups": [["下一步", "对比表", "开放问题"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["b08", "b09"],
+        "position": "late"
+      }
+    ]
+  },
+  "mustNotClaims": [
+    {
+      "id": "mn-wrong-acc-92",
+      "keywordGroups": [
+        [
+          "准确率是百分之九十二",
+          "准确率是92%",
+          "准确率百分之九十二",
+          "准确率92%",
+          "准确率92",
+          "百分之九十二决定"
+        ]
+      ],
+      "minGroupHits": 1,
+      "paths": ["coreIdeas", "supportingPoints", "nextSteps", "keyQuotes", "facts", "assumptions"]
+    },
+    {
+      "id": "mn-cloud-default",
+      "keywordGroups": [
+        [
+          "决定默认上云清理",
+          "默认上云端清理",
+          "必须云端清理",
+          "默认上云清理",
+          "应该默认上云端清理"
+        ]
+      ],
+      "minGroupHits": 1,
+      "paths": ["coreIdeas", "nextSteps", "assumptions", "supportingPoints"]
+    },
+    {
+      "id": "mn-invented-budget",
+      "keywordGroups": [["融资", "一百万"]],
+      "minGroupHits": 1,
+      "paths": ["coreIdeas", "nextSteps", "supportingPoints"]
+    }
+  ],
+  "spanCoverage": {
+    "earlyItemIds": ["b01", "b02", "b03"],
+    "midItemIds": ["b04", "b05", "b06"],
+    "lateItemIds": ["b07", "b08", "b09"]
+  }
+}

@@ -53,7 +53,12 @@ assert.equal(
 
 assert.equal(
   removeDeterministicFillers("呃我们再试一下语音，我我现在说一段长的对话。比如说，比如说，我现在说的这些内容。"),
-  "我们再试一下语音，我现在说一段长的对话。比如说，我现在说的这些内容。"
+  "我们再试一下语音，我我现在说一段长的对话。比如说，比如说，我现在说的这些内容。"
+);
+
+assert.equal(
+  removeDeterministicFillers("我刚刚完成了，请你看看这一点。"),
+  "我刚刚完成了，请你看看这一点。"
 );
 
 assert.equal(

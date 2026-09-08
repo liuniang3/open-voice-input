@@ -1,0 +1,39 @@
+[package]
+name = "audio-capture-helper"
+version = "0.2.0"
+edition = "2021"
+description = "Stage 0B WASAPI shared-mode dual-track (mic + system loopback) capture helper for Open Voice Input"
+publish = false
+
+[[bin]]
+name = "audio-capture-helper"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+
+# Direct Windows APIs only. Do not add cpal.
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.58"
+features = [
+  "Win32_Foundation",
+  "Win32_Media_Audio",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Threading",
+  "Win32_System_JobObjects",
+  "Win32_Security",
+  "Win32_System_SystemInformation",
+  "Win32_System_Performance",
+  "Win32_Storage_FileSystem",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_Devices_FunctionDiscovery",
+]
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

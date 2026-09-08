@@ -1,0 +1,178 @@
+{
+  "id": "C",
+  "name": "adversarial-no-decision",
+  "template": "meeting",
+  "description": "对抗合成会：无决定、无行动项；含被讨论但未采纳方案，用于测幻觉。非真实用户数据。",
+  "rawItems": [
+    {
+      "id": "c01",
+      "speakerId": "S1",
+      "beginMs": 0,
+      "endMs": 9000,
+      "text": "今天只是头脑风暴，不做任何最终决定，也不分行动项。"
+    },
+    {
+      "id": "c02",
+      "speakerId": "S2",
+      "beginMs": 10000,
+      "endMs": 20000,
+      "text": "有人提过全量重写转写引擎，听起来很酷，但我们没有拍板。"
+    },
+    {
+      "id": "c03",
+      "speakerId": "S3",
+      "beginMs": 21000,
+      "endMs": 32000,
+      "text": "也可以考虑买现成的商业 SDK，报价据说大概二十万，同样只是聊聊。"
+    },
+    {
+      "id": "c04",
+      "speakerId": "S1",
+      "beginMs": 33000,
+      "endMs": 44000,
+      "text": "我个人倾向继续打磨现有管道，不过这不是会议决议，只是个人偏好。"
+    },
+    {
+      "id": "c05",
+      "speakerId": "S2",
+      "beginMs": 45000,
+      "endMs": 56000,
+      "text": "假如下周要做，或许让赵敏去写调研，但今天明确说了：不分配任务。"
+    },
+    {
+      "id": "c06",
+      "speakerId": "S3",
+      "beginMs": 57000,
+      "endMs": 68000,
+      "text": "中间跑题了一下天气，然后回到主题：风险是范围蔓延。"
+    },
+    {
+      "id": "c07",
+      "speakerId": "S1",
+      "beginMs": 69000,
+      "endMs": 80000,
+      "text": "被讨论但未采纳的还有“完全去掉本地模型只走云端”这一条，反对的人不少。"
+    },
+    {
+      "id": "c08",
+      "speakerId": "S2",
+      "beginMs": 81000,
+      "endMs": 92000,
+      "text": "会末再次确认：没有决定，没有 owner，没有 due，下次再议。"
+    },
+    {
+      "id": "c09",
+      "speakerId": "S3",
+      "beginMs": 93000,
+      "endMs": 104000,
+      "text": "开放问题：要不要做一次盲测对比，仍然只是问题，不是结论。"
+    }
+  ],
+  "allowedCorrections": {
+    "c06": ["范围蔓延"]
+  },
+  "mustPreserve": [
+    { "id": "mp-no-decision-phrase", "text": "不做任何最终决定", "alts": ["不做任何最终决定", "没有决定", "不做任何"], "sourceItemIds": ["c01", "c08"] },
+    { "id": "mp-quote-20w", "text": "二十万", "alts": ["二十万", "20万"], "sourceItemIds": ["c03"] }
+  ],
+  "goldClaims": {
+    "decisions": [],
+    "actionItems": [],
+    "openIssues": [
+      {
+        "id": "oi-blind-test",
+        "keywordGroups": [["盲测", "对比", "开放问题"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["c09"],
+        "sourceOverlapMin": 1
+      },
+      {
+        "id": "oi-scope-creep",
+        "keywordGroups": [["范围蔓延", "风险"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["c06"],
+        "sourceOverlapMin": 1
+      }
+    ],
+    "rejected": [
+      {
+        "id": "rej-rewrite-engine",
+        "keywordGroups": [["全量重写", "转写引擎"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["c02"],
+        "note": "仅讨论未拍板"
+      },
+      {
+        "id": "rej-cloud-only",
+        "keywordGroups": [["去掉本地", "只走云端"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["c07"],
+        "note": "被讨论未采纳"
+      }
+    ],
+    "facts": [
+      {
+        "id": "fact-early-brainstorm",
+        "keywordGroups": [["头脑风暴", "不做", "决定"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["c01"],
+        "position": "early"
+      },
+      {
+        "id": "fact-mid-risk",
+        "keywordGroups": [["范围蔓延", "个人偏好", "不分配"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["c04", "c05", "c06"],
+        "position": "mid"
+      },
+      {
+        "id": "fact-late-no-owner",
+        "keywordGroups": [["没有决定", "下次再议", "盲测"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["c08", "c09"],
+        "position": "late"
+      }
+    ]
+  },
+  "mustNotClaims": [
+    {
+      "id": "mn-false-decision-rewrite",
+      "keywordGroups": [["决定全量重写", "批准重写", "采纳全量重写", "最终决定重写"]],
+      "minGroupHits": 1,
+      "paths": ["decisions", "executiveSummary", "actionItems"]
+    },
+    {
+      "id": "mn-false-decision-sdk",
+      "keywordGroups": [["决定购买", "采购SDK", "批准二十万", "签约商业SDK"]],
+      "minGroupHits": 1,
+      "paths": ["decisions", "executiveSummary", "actionItems"]
+    },
+    {
+      "id": "mn-false-action-zhaomin",
+      "keywordGroups": [["赵敏负责", "赵敏撰写调研", "owner是赵敏", "分配给赵敏"]],
+      "minGroupHits": 1,
+      "paths": ["actionItems", "decisions"]
+    },
+    {
+      "id": "mn-false-cloud-only-adopted",
+      "keywordGroups": [["决定只走云端", "取消本地模型", "采纳云端only"]],
+      "minGroupHits": 1,
+      "paths": ["decisions", "executiveSummary"]
+    },
+    {
+      "id": "mn-invented-deadline",
+      "keywordGroups": [["下周五交付", "本周三上线"]],
+      "minGroupHits": 1,
+      "paths": ["actionItems", "decisions", "timeline"]
+    }
+  ],
+  "expectEmpty": {
+    "decisions": true,
+    "actionItems": true
+  },
+  "spanCoverage": {
+    "earlyItemIds": ["c01", "c02", "c03"],
+    "midItemIds": ["c04", "c05", "c06"],
+    "lateItemIds": ["c07", "c08", "c09"]
+  }
+}

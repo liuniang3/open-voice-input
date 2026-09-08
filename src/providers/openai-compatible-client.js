@@ -21,8 +21,11 @@ function createOpenAiCompatibleClient({
   model,
   requestTimeoutMs = 60000,
   headerName = "Authorization",
-  headerValuePrefix = "Bearer "
+  headerValuePrefix = "Bearer ",
+  fetchImpl = null
 }) {
+  const fetchFn = fetchImpl || globalThis.fetch.bind(globalThis);
+
   function resolveApiKey() {
     return resolveMaybeFunction(apiKey) || "";
   }
@@ -40,21 +43,43 @@ function createOpenAiCompatibleClient({
     return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 60000;
   }
 
-  async function requestChat(messages, { extraBody = {}, maxTokens = 1024 } = {}) {
+  /**
+   * @param {Array} messages
+   * @param {{ extraBody?: object, maxTokens?: number, signal?: AbortSignal }} [options]
+   * Caller abort => error.code = "aborted"
+   * Internal timer => timeout error (not aborted)
+   */
+  async function requestChat(messages, { extraBody = {}, maxTokens = 1024, signal = null } = {}) {
     const resolvedApiKey = resolveApiKey();
     if (!resolvedApiKey) {
       throw new Error("OpenAI-compatible API key is not configured.");
     }
 
+    if (signal?.aborted) {
+      const err = new Error("aborted");
+      err.code = "aborted";
+      throw err;
+    }
+
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), resolveRequestTimeoutMs());
+    let timedOut = false;
+    const onCallerAbort = () => controller.abort();
+    if (signal) {
+      signal.addEventListener("abort", onCallerAbort, { once: true });
+    }
+    const limit = resolveRequestTimeoutMs();
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, limit);
+
     const headers = {
       "Content-Type": "application/json"
     };
     headers[headerName] = `${headerValuePrefix}${resolvedApiKey}`;
 
     try {
-      const response = await fetch(`${resolveBaseUrl()}/chat/completions`, {
+      const response = await fetchFn(`${resolveBaseUrl()}/chat/completions`, {
         method: "POST",
         signal: controller.signal,
         headers,
@@ -71,7 +96,9 @@ function createOpenAiCompatibleClient({
 
       const bodyText = await response.text();
       if (!response.ok) {
-        throw new Error(`OpenAI-compatible API ${response.status} at ${resolveBaseUrl()}: ${bodyText}`);
+        throw new Error(
+          `OpenAI-compatible API ${response.status} at ${resolveBaseUrl()}: ${String(bodyText).slice(0, 500)}`
+        );
       }
 
       const parsed = parseChatCompletionBody(bodyText);
@@ -81,8 +108,32 @@ function createOpenAiCompatibleClient({
         reasoningContent: String(message.reasoning_content || "").trim(),
         body: parsed.body
       };
+    } catch (error) {
+      if (signal?.aborted && !timedOut) {
+        const err = new Error("aborted");
+        err.code = "aborted";
+        throw err;
+      }
+      if (error?.name === "AbortError" || error?.code === "ABORT_ERR") {
+        if (timedOut) {
+          const err = new Error(`OpenAI-compatible request timed out after ${limit} ms.`);
+          err.code = "request_timeout";
+          throw err;
+        }
+        const err = new Error("aborted");
+        err.code = "aborted";
+        throw err;
+      }
+      if (error?.code === "aborted") throw error;
+      if (error instanceof TypeError) {
+        throw new Error(`OpenAI-compatible network request failed: ${error.cause?.message || error.message}`, {
+          cause: error
+        });
+      }
+      throw error;
     } finally {
       clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", onCallerAbort);
     }
   }
 

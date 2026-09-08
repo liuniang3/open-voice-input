@@ -1,0 +1,52 @@
+{
+  "schema": "meeting_analysis_benchmark_output_v1",
+  "description": "Single JSON object the model must return. Covers meeting + personal templates.",
+  "required": ["schema", "template", "correctedItems"],
+  "properties": {
+    "schema": { "const": "meeting_analysis_benchmark_output_v1" },
+    "template": { "enum": ["meeting", "personal"] },
+    "correctedItems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sourceItemId", "correctedText"],
+        "properties": {
+          "sourceItemId": { "type": "string" },
+          "correctedText": { "type": "string" },
+          "ops": { "type": "array" },
+          "uncertain": { "type": "array" }
+        }
+      }
+    },
+    "executiveSummary": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "sourceItemIds": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "topicsOutline": { "type": "array" },
+    "timeline": { "type": "array" },
+    "speakerPoints": { "type": "array" },
+    "decisions": { "type": "array" },
+    "actionItems": { "type": "array" },
+    "openIssues": { "type": "array" },
+    "risks": { "type": "array" },
+    "keyQuotes": { "type": "array" },
+    "coreIdeas": { "type": "array" },
+    "argumentOutline": { "type": "array" },
+    "supportingPoints": { "type": "array" },
+    "assumptions": { "type": "array" },
+    "openQuestions": { "type": "array" },
+    "nextSteps": { "type": "array" },
+    "flaggedUncertain": { "type": "array" },
+    "facts": { "type": "array" }
+  },
+  "claimObjectHint": {
+    "text": "string",
+    "sourceItemIds": ["item-id"],
+    "owner": "optional string for actionItems",
+    "due": "optional string for actionItems",
+    "speakerId": "optional"
+  }
+}

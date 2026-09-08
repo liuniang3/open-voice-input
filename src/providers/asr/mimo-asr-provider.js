@@ -8,7 +8,7 @@ function normalizeMimoAsrModel(model) {
 }
 
 function createMimoAsrProvider({ client, cleanTranscript, getOptions = () => ({}) }) {
-  async function transcribeRaw({ audioDataUrl }) {
+  async function transcribeRaw({ audioDataUrl, signal = null }) {
     const options = getOptions();
     const response = await client.requestChat(
       [
@@ -33,6 +33,7 @@ function createMimoAsrProvider({ client, cleanTranscript, getOptions = () => ({}
         includeSampling: false,
         maxTokens: 2048,
         model: normalizeMimoAsrModel(options.model),
+        signal: signal || undefined,
         stream: true
       }
     );
@@ -48,12 +49,31 @@ function createMimoAsrProvider({ client, cleanTranscript, getOptions = () => ({}
     return transcribeRaw(payload);
   }
 
+  /**
+   * File/meeting segment path. The current audio segment is the only input;
+   * no prior transcript or cleanup instruction is sent to MiMo.
+   */
+  async function transcribeMeetingSegment({ audioDataUrl, signal = null } = {}) {
+    const result = await transcribeRaw({ audioDataUrl, signal });
+    return {
+      provider: "mimo",
+      transport: "meeting-segment-base64",
+      mode: "file",
+      diarization: false,
+      text: String(result?.text || "").trim(),
+      raw: result?.raw,
+      timestampPrecision: "none",
+      speakerIds: null
+    };
+  }
+
   return {
     id: "mimo",
     kind: "dedicated-asr",
     model: MIMO_ASR_MODEL,
     transcribeFast,
-    transcribeRaw
+    transcribeRaw,
+    transcribeMeetingSegment
   };
 }
 

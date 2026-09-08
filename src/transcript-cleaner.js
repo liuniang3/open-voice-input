@@ -45,8 +45,14 @@ function cleanTranscript(value) {
   return ensureTerminalPunctuation(cleaned);
 }
 
+const REGEX_REPEAT_CLEANUP_ENABLED = false;
+
 function removeDeterministicFillers(value) {
-  return collapseRepeatedFragments(value)
+  const text = REGEX_REPEAT_CLEANUP_ENABLED
+    ? collapseRepeatedFragments(value)
+    : String(value || "");
+
+  return text
     .replace(/(^|[，,。.!！?？；;：:\s])(?:呃|额|嗯|唔|啊|哦|呃呃|嗯嗯|额额|哦哦)(?=($|[，,。.!！?？；;：:\s]))/g, "$1")
     .replace(/(^|[，,。.!！?？；;：:\s])(?:呃|额|嗯|唔|啊|哦|呃呃|嗯嗯|额额|哦哦)(?=(?:现在|目前|这个|那个|就是|我们|我|你|他|它|再|然后|所以|如果|比如|但是|不过|还有|应该|可以|需要|希望|按|用|在|的))/g, "$1")
     .replace(/(^|[，,。.!！?？；;：:\s])(?:呃|额|嗯|唔|啊|哦){2,}(?=\S)/g, "$1")

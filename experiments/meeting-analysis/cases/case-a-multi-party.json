@@ -1,0 +1,164 @@
+{
+  "id": "A",
+  "name": "multi-party-decision",
+  "template": "meeting",
+  "description": "合成多人短会：含最终决定、被否决方案、owner/due、说话人、前中后事实、不确定专名。非真实用户数据。",
+  "rawItems": [
+    {
+      "id": "a01",
+      "speakerId": "S1",
+      "beginMs": 0,
+      "endMs": 8000,
+      "text": "好，我们开始今天的排期会。先确认一下，Q3 要不要上新的语音入口。"
+    },
+    {
+      "id": "a02",
+      "speakerId": "S2",
+      "beginMs": 8200,
+      "endMs": 16000,
+      "text": "我建议做双入口，一个悬浮球一个快捷键，这样覆盖更全。"
+    },
+    {
+      "id": "a03",
+      "speakerId": "S3",
+      "beginMs": 16500,
+      "endMs": 24000,
+      "text": "双入口成本太高，我反对。先只保留快捷键，悬浮球放到以后再说。"
+    },
+    {
+      "id": "a04",
+      "speakerId": "S1",
+      "beginMs": 24500,
+      "endMs": 32000,
+      "text": "同意，否决双入口方案。最终决定：Q3 只上线快捷键语音入口。"
+    },
+    {
+      "id": "a05",
+      "speakerId": "S2",
+      "beginMs": 32500,
+      "endMs": 42000,
+      "text": "那延迟目标呢？我这边测到平均二百八十毫秒，峰值四百。"
+    },
+    {
+      "id": "a06",
+      "speakerId": "S3",
+      "beginMs": 42500,
+      "endMs": 52000,
+      "text": "行动项：林晓负责把快捷键入口的 PRD 写完，截止下周五。"
+    },
+    {
+      "id": "a07",
+      "speakerId": "S1",
+      "beginMs": 52500,
+      "endMs": 60000,
+      "text": "另外那个合作方名字我没听清，好像是柯林斯塔还是科林斯塔，先标不确定。"
+    },
+    {
+      "id": "a08",
+      "speakerId": "S2",
+      "beginMs": 60500,
+      "endMs": 70000,
+      "text": "中段补充：灰度先给内部一百人，不对外开放。"
+    },
+    {
+      "id": "a09",
+      "speakerId": "S3",
+      "beginMs": 70500,
+      "endMs": 80000,
+      "text": "会末确认：下周一同步进度，没有其他决议了。"
+    }
+  ],
+  "allowedCorrections": {
+    "a01": ["排期", "语音入口"],
+    "a05": ["280", "400", "二百八十", "四百"]
+  },
+  "mustPreserve": [
+    { "id": "mp-latency-280", "text": "280", "alts": ["二百八十", "280毫秒", "280 ms"], "sourceItemIds": ["a05"] },
+    { "id": "mp-latency-400", "text": "400", "alts": ["四百", "400毫秒", "峰值四百"], "sourceItemIds": ["a05"] },
+    { "id": "mp-gray-100", "text": "一百人", "alts": ["100人", "100", "内部一百人"], "sourceItemIds": ["a08"] },
+    { "id": "mp-owner", "text": "林晓", "alts": ["林晓"], "sourceItemIds": ["a06"] },
+    { "id": "mp-due", "text": "下周五", "alts": ["下周五"], "sourceItemIds": ["a06"] },
+    { "id": "mp-uncertain-name", "text": "柯林斯塔", "alts": ["科林斯塔", "柯林斯塔"], "sourceItemIds": ["a07"] }
+  ],
+  "goldClaims": {
+    "decisions": [
+      {
+        "id": "dec-hotkey-only",
+        "keywordGroups": [["快捷键"], ["Q3", "上线", "只"], ["否决", "双入口", "最终决定"]],
+        "requireAnyGroup": true,
+        "minGroupHits": 2,
+        "sourceItemIds": ["a03", "a04"],
+        "sourceOverlapMin": 1
+      }
+    ],
+    "actionItems": [
+      {
+        "id": "ai-prd",
+        "keywordGroups": [["林晓"], ["PRD", "快捷键"], ["下周五"]],
+        "minGroupHits": 2,
+        "sourceItemIds": ["a06"],
+        "sourceOverlapMin": 1
+      }
+    ],
+    "facts": [
+      {
+        "id": "fact-early-topic",
+        "keywordGroups": [["语音入口", "排期", "Q3"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["a01"],
+        "sourceOverlapMin": 1,
+        "position": "early"
+      },
+      {
+        "id": "fact-mid-gray",
+        "keywordGroups": [["灰度", "一百人", "100人", "内部"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["a08"],
+        "sourceOverlapMin": 1,
+        "position": "mid"
+      },
+      {
+        "id": "fact-late-sync",
+        "keywordGroups": [["下周一", "同步"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["a09"],
+        "sourceOverlapMin": 1,
+        "position": "late"
+      }
+    ],
+    "rejected": [
+      {
+        "id": "rej-dual-entry",
+        "keywordGroups": [["双入口"], ["否决", "反对", "不"]],
+        "minGroupHits": 1,
+        "sourceItemIds": ["a02", "a03", "a04"],
+        "note": "被否决方案可出现在 openIssues/risks/decisions 叙述中，但不得写成已采纳决定"
+      }
+    ]
+  },
+  "mustNotClaims": [
+    {
+      "id": "mn-adopt-dual",
+      "keywordGroups": [["采用双入口", "上线双入口", "决定双入口", "双入口方案通过"]],
+      "minGroupHits": 1,
+      "paths": ["decisions", "actionItems", "executiveSummary"]
+    },
+    {
+      "id": "mn-fake-budget",
+      "keywordGroups": [["预算", "五十万", "500000"]],
+      "minGroupHits": 1,
+      "paths": ["decisions", "actionItems", "facts", "executiveSummary", "openIssues"]
+    },
+    {
+      "id": "mn-fake-owner",
+      "keywordGroups": [["张伟负责", "王芳写PRD"]],
+      "minGroupHits": 1,
+      "paths": ["actionItems"]
+    }
+  ],
+  "spanCoverage": {
+    "earlyItemIds": ["a01", "a02", "a03"],
+    "midItemIds": ["a04", "a05", "a06"],
+    "lateItemIds": ["a07", "a08", "a09"]
+  }
+}

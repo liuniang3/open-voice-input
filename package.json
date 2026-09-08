@@ -8,12 +8,30 @@
     "start": "electron .",
     "check": "node scripts/check-config.js",
     "check:secrets": "node scripts/check-secrets.js",
+    "check:helper": "node scripts/check-audio-capture-helper.js",
+    "build:helper": "node scripts/build-audio-capture-helper.js",
+    "prepare:ffmpeg": "node scripts/prepare-ffmpeg.js",
+    "check:ffmpeg": "node scripts/check-ffmpeg.js",
     "checksums": "node scripts/write-checksums.js",
-    "test:clean": "node scripts/test-clean-transcript.js",
-    "test:pipeline": "node scripts/test-voice-pipeline.js",
-    "build:dir": "npm run check:secrets && node scripts/run-electron-builder.js --dir --win --x64",
-    "dist": "npm run check:secrets && npm run test:pipeline && npm run test:clean && node scripts/run-electron-builder.js --win nsis portable --x64 && npm run checksums",
-    "dist:portable": "npm run check:secrets && node scripts/run-electron-builder.js --win portable --x64 && npm run checksums"
+    "benchmark:cleaner": "python experiments/cleaner_benchmark.py",
+    "benchmark:meeting-analysis": "node scripts/benchmark-meeting-analysis.js",
+    "test:clean": "node scripts/test-clean-transcript.js && node scripts/test-cleanup-method.js",
+    "test:pipeline": "node scripts/test-audio-segmentation.js && node scripts/test-voice-pipeline.js",
+    "test:runtime-log": "node scripts/test-runtime-log.js",
+    "test:settings": "node scripts/test-settings-shortcuts.js",
+    "test:meeting": "node scripts/test-meeting-stage0a.js",
+    "test:meeting:1a": "node scripts/test-meeting-stage1a.js",
+    "test:meeting:2a": "node scripts/test-meeting-stage2a.js",
+    "test:meeting:2b": "node scripts/test-meeting-stage2b.js",
+    "test:meeting:3a": "node scripts/test-meeting-stage3a.js",
+    "test:meeting:ui": "node scripts/test-meeting-ui.js",
+    "test:meeting:4b": "node scripts/test-meeting-stage4b.js",
+    "test:meeting:video": "node scripts/test-meeting-stage4b-video.js",
+    "test:meeting:4c": "node scripts/test-meeting-stage4c.js",
+    "test:meeting:file": "node scripts/test-meeting-file-transcription.js",
+    "build:dir": "npm run check:secrets && npm run build:helper && npm run check:helper && npm run prepare:ffmpeg && npm run check:ffmpeg && node scripts/run-electron-builder.js --dir --win --x64",
+    "dist": "npm run check:secrets && npm run build:helper && npm run check:helper && npm run prepare:ffmpeg && npm run check:ffmpeg && npm run test:runtime-log && npm run test:settings && npm run test:pipeline && npm run test:clean && npm run test:meeting && npm run test:meeting:1a && npm run test:meeting:2a && npm run test:meeting:2b && npm run test:meeting:3a && npm run test:meeting:ui && npm run test:meeting:4b && npm run test:meeting:video && npm run test:meeting:4c && npm run test:meeting:file && node scripts/run-electron-builder.js --win nsis portable --x64 && npm run checksums",
+    "dist:portable": "npm run check:secrets && npm run build:helper && npm run check:helper && npm run prepare:ffmpeg && npm run check:ffmpeg && node scripts/run-electron-builder.js --win portable --x64 && npm run checksums"
   },
   "keywords": [
     "asr",
@@ -28,9 +46,11 @@
   "private": true,
   "devDependencies": {
     "electron": "39.8.9",
-    "electron-builder": "26.15.3"
+    "electron-builder": "26.15.3",
+    "ffmpeg-static": "5.3.0"
   },
   "dependencies": {
+    "ali-oss": "6.23.0",
     "ws": "8.21.0"
   },
   "build": {
@@ -43,7 +63,10 @@
     "files": [
       "src/**/*",
       "package.json",
-      "!src/win-hotkey-helper.ps1"
+      "!src/win-hotkey-helper.ps1",
+      "!native/**/*",
+      "!**/ffmpeg-static/**",
+      "!node_modules/ffmpeg-static/**"
     ],
     "extraResources": [
       {
@@ -57,6 +80,22 @@
       {
         "from": "assets/mimo-tray.png",
         "to": "assets/mimo-tray.png"
+      },
+      {
+        "from": "native/audio-capture-helper/target/release/audio-capture-helper.exe",
+        "to": "native/audio-capture-helper.exe"
+      },
+      {
+        "from": "native/ffmpeg/ffmpeg.exe",
+        "to": "native/ffmpeg.exe"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "licenses/THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "node_modules/ffmpeg-static/LICENSE",
+        "to": "licenses/FFMPEG-GPL-3.0.txt"
       }
     ],
     "win": {

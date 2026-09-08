@@ -53,6 +53,49 @@ async function run() {
   assert.deepEqual(calls.filter(([name]) => name !== "log"), [["raw"], ["clean", "raw text"]]);
 
   calls.length = 0;
+  const fallbackPipeline = createVoicePipeline({
+    getSettings: () => ({ asrProvider: "mimo", cleanerProvider: "mimo", cleanerModel: "mimo-v2.5", transcriptionMode: "stable" }),
+    logEvent: (message, detail) => calls.push(["log", message, detail]),
+    providerOverrides: {
+      asrProviders: {
+        mimo: {
+          id: "test-asr",
+          transcribeRaw: async () => ({ text: "raw fallback text" })
+        }
+      },
+      cleanerProviders: {
+        mimo: {
+          id: "test-cleaner",
+          clean: async () => {
+            throw new TypeError("fetch failed");
+          }
+        }
+      }
+    }
+  });
+  const fallbackText = await fallbackPipeline.transcribe({
+    audioDataUrl: "data:audio/wav;base64,test",
+    transcriptionMode: "stable"
+  });
+  assert.equal(fallbackText, "raw fallback text");
+  assert.equal(calls.some((entry) => entry[1] === "voice-pipeline: cleaner failed, using raw"), true);
+
+  calls.length = 0;
+  const segmentedText = await pipeline.transcribe({
+    audioSegments: [
+      { audioDataUrl: "data:audio/wav;base64,one" },
+      { audioDataUrl: "data:audio/wav;base64,two" }
+    ],
+    transcriptionMode: "stable"
+  });
+  assert.equal(segmentedText, "raw text raw text cleaned");
+  assert.deepEqual(calls.filter(([name]) => name !== "log"), [
+    ["raw"],
+    ["raw"],
+    ["clean", "raw text raw text"]
+  ]);
+
+  calls.length = 0;
   const switchedPipeline = createVoicePipeline({
     getSettings: () => ({ asrProvider: "qwen3-asr", cleanerProvider: "openai-compatible", transcriptionMode: "stable" }),
     logEvent: (message, detail) => calls.push(["log", message, detail]),

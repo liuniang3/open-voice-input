@@ -14,8 +14,18 @@
           <p id="apiState">正在检查 API Key...</p>
         </div>
         <div class="window-actions">
-          <button id="settingsBtn" class="icon-btn" title="设置">⚙</button>
-          <button id="closeBtn" class="icon-btn" title="隐藏">×</button>
+          <button id="settingsBtn" class="icon-btn" title="设置" aria-label="设置">⚙</button>
+          <button id="fileBtn" class="workspace-entry-btn" title="打开文件转写" aria-label="打开文件转写">
+            <span class="workspace-entry-mark file-entry-mark" aria-hidden="true"></span>
+            <span>文件转写</span>
+          </button>
+          <button id="meetingBtn" class="meeting-entry-btn" title="打开会议工作台" aria-label="打开会议工作台">
+            <span class="meeting-entry-mark" aria-hidden="true"></span>
+            <span>会议工作台</span>
+          </button>
+          <button id="minimizeBtn" class="icon-btn window-control-btn" title="最小化" aria-label="最小化"></button>
+          <button id="maximizeBtn" class="icon-btn window-control-btn" title="最大化" aria-label="最大化"></button>
+          <button id="closeBtn" class="icon-btn" title="隐藏" aria-label="隐藏">×</button>
         </div>
       </header>
 
@@ -44,7 +54,7 @@
         <div class="settings-head">
           <div>
             <strong>设置</strong>
-            <span>配置录音、识别、清理和快捷键。保存前不会覆盖已有 API 配置。</span>
+            <span>配置录音、识别、清理和快捷键。每个模型独立保存接口与 Key。</span>
           </div>
           <div class="settings-head-actions">
             <button id="testConnectionBtn">测试连接</button>
@@ -52,148 +62,693 @@
           </div>
         </div>
 
-        <div class="settings-layout">
-          <section class="settings-section">
-            <div class="section-title">
-              <strong>工作方式</strong>
-              <span>决定速度、质量和快捷键。</span>
-            </div>
-            <fieldset class="field mode-field">
-              <span>转写模式</span>
-              <div class="mode-toggle" role="group" aria-label="转写模式">
-                <button id="stableModeBtn" type="button" class="mode-button" data-mode="stable">
-                  <strong>稳定</strong>
-                  <span>先识别再清理</span>
-                </button>
-                <button id="fastModeBtn" type="button" class="mode-button" data-mode="fast">
-                  <strong>快速</strong>
-                  <span>仅语音识别</span>
-                </button>
+        <nav class="settings-tabs" role="tablist" aria-label="设置分类">
+          <button type="button" class="settings-tab is-active" role="tab" aria-selected="true" data-settings-tab="general">常规</button>
+          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="asr">语音识别</button>
+          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="cleaner">文本清理</button>
+          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="meeting">会议</button>
+        </nav>
+
+        <div class="settings-tab-content">
+          <div class="settings-tab-panel is-active" role="tabpanel" data-settings-panel="general">
+            <section class="settings-group">
+              <div class="section-title">
+                <strong>工作方式</strong>
+                <span>决定速度、质量和快捷键。</span>
               </div>
-            </fieldset>
-            <label class="field">
-              <span>全局快捷键</span>
-              <input id="hotkeyInput" type="text" placeholder="CommandOrControl+Alt+M" autocomplete="off" />
-              <small id="hotkeyHint" class="hotkey-hint" hidden>选中后直接按新的快捷键组合，Esc 取消。</small>
-            </label>
-          </section>
+              <fieldset class="field mode-field">
+                <span>转写模式</span>
+                <div class="mode-toggle" role="group" aria-label="转写模式">
+                  <button id="stableModeBtn" type="button" class="mode-button" data-mode="stable">
+                    <strong>稳定</strong>
+                    <span>先识别再清理</span>
+                  </button>
+                  <button id="fastModeBtn" type="button" class="mode-button" data-mode="fast">
+                    <strong>快速</strong>
+                    <span>仅语音识别</span>
+                  </button>
+                </div>
+              </fieldset>
+              <label class="field">
+                <span>短语音输入快捷键</span>
+                <input id="hotkeyInput" type="text" placeholder="CommandOrControl+Alt+M" autocomplete="off" />
+                <small id="hotkeyHint" class="hotkey-hint" hidden>选中后直接按新的快捷键组合，Esc 取消。</small>
+                <small id="hotkeyStatus" class="hotkey-hint" aria-live="polite"></small>
+              </label>
+              <label class="field">
+                <span>长内容转录快捷键</span>
+                <input id="meetingHotkeyInput" type="text" placeholder="CommandOrControl+Alt+Shift+M" autocomplete="off" />
+                <small id="meetingHotkeyHint" class="hotkey-hint" hidden>按下组合键后会打开并置前会议工作台，Esc 取消。</small>
+                <small id="meetingHotkeyStatus" class="hotkey-hint" aria-live="polite"></small>
+              </label>
+            </section>
 
-          <section class="settings-section">
-            <div class="section-title">
-              <strong>输入设备</strong>
-              <span>选择麦克风并刷新设备列表。</span>
-            </div>
-            <label class="field">
-              <span>麦克风</span>
-              <select id="microphoneSelect">
-                <option value="">系统默认麦克风</option>
-              </select>
-              <small id="microphoneHint" class="microphone-hint">录音时会显示实际使用的输入源。</small>
-            </label>
-            <button id="refreshDevicesBtn" type="button">刷新麦克风</button>
-          </section>
+            <section class="settings-group">
+              <div class="section-title">
+                <strong>输入设备</strong>
+                <span>选择麦克风并刷新设备列表。</span>
+              </div>
+              <label class="field">
+                <span>麦克风</span>
+                <select id="microphoneSelect">
+                  <option value="">系统默认麦克风</option>
+                </select>
+                <small id="microphoneHint" class="microphone-hint">录音时会显示实际使用的输入源。</small>
+              </label>
+              <button id="refreshDevicesBtn" type="button">刷新麦克风</button>
+            </section>
+          </div>
 
-          <section class="settings-section settings-section-wide">
-            <div class="section-title">
-              <strong>第一步：语音识别</strong>
-              <span>推荐 MiMo `mimo-v2.5-asr`；实时预览会因供应商能力不同而不同。</span>
-            </div>
-            <div class="provider-grid">
-              <label class="field">
-                <span>语音识别供应商</span>
-                <select id="asrProviderSelect">
-                  <option value="mimo">MiMo ASR（推荐）</option>
-                  <option value="qwen3-asr">Qwen3-ASR 专用识别</option>
-                  <option value="fun-asr">Fun-ASR 专用识别</option>
-                </select>
+          <div class="settings-tab-panel" role="tabpanel" data-settings-panel="asr" hidden>
+            <section class="settings-group">
+              <div class="section-title">
+                <strong>第一步：语音识别</strong>
+                <span>每个模型独立保存接口与 Key，切换模型时自动恢复。</span>
+              </div>
+              <div class="provider-grid">
+                <label class="field">
+                  <span>ASR 模型</span>
+                  <select id="asrModelPresetSelect">
+                    <option value="mimo-v2.5-asr">MiMo V2.5 ASR（推荐）</option>
+                    <option value="qwen3-asr-flash">Qwen3-ASR Flash</option>
+                    <option value="fun-asr">Fun-ASR</option>
+                    <option value="__custom__">自定义模型</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>语音识别供应商</span>
+                  <select id="asrProviderSelect">
+                    <option value="mimo">MiMo ASR</option>
+                    <option value="qwen3-asr">Qwen3-ASR</option>
+                    <option value="fun-asr">Fun-ASR</option>
+                  </select>
+                </label>
+              </div>
+              <div class="provider-grid">
+                <label id="asrCustomModelField" class="field" hidden>
+                  <span>自定义最终转写模型</span>
+                  <input id="asrModelInput" type="text" placeholder="输入 ASR 模型 ID" />
+                </label>
+                <label class="field">
+                  <span>识别显示模式</span>
+                  <select id="asrModeSelect">
+                    <option value="batch">非实时：录完后转写</option>
+                    <option value="realtime">实时预览：边录边显示</option>
+                  </select>
+                </label>
+              </div>
+              <div class="provider-grid">
+                <label class="field">
+                  <span>实时预览模型</span>
+                  <select id="asrRealtimeModelPresetSelect">
+                    <option value="mimo-v2.5-asr" data-asr-provider="mimo">MiMo V2.5 ASR</option>
+                    <option value="qwen3-asr-flash-realtime" data-asr-provider="qwen3-asr">Qwen3-ASR Flash Realtime</option>
+                    <option value="qwen3-asr-flash-realtime-2026-02-10" data-asr-provider="qwen3-asr">Qwen3-ASR Flash Realtime 2026-02-10</option>
+                    <option value="fun-asr-realtime" data-asr-provider="fun-asr">Fun-ASR Realtime</option>
+                    <option value="__custom_realtime__">自定义实时模型</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>识别语言</span>
+                  <input id="asrLanguageInput" type="text" placeholder="可选，例如 zh 或 en" />
+                </label>
+              </div>
+              <label id="asrCustomRealtimeModelField" class="field" hidden>
+                <span>自定义实时预览模型</span>
+                <input id="asrRealtimeModelInput" type="text" placeholder="输入实时模型 ID" />
               </label>
-              <label class="field">
-                <span>识别显示模式</span>
-                <select id="asrModeSelect">
-                  <option value="batch">非实时：录完后转写</option>
-                  <option value="realtime">实时预览：边录边显示</option>
-                </select>
-              </label>
-            </div>
-            <div class="provider-grid">
-              <label class="field">
-                <span>最终转写模型</span>
-                <input id="asrModelInput" type="text" placeholder="例如 mimo-v2.5-asr、qwen3-asr-flash 或 fun-asr" />
-              </label>
-              <label class="field">
-                <span>实时预览模型</span>
-                <input id="asrRealtimeModelInput" type="text" placeholder="例如 qwen3-asr-flash-realtime 或 fun-asr-realtime" />
-              </label>
-            </div>
-            <div class="provider-grid">
               <label class="field">
                 <span>语音识别 Base URL</span>
                 <input id="asrBaseUrlInput" type="text" placeholder="留空使用供应商默认地址" />
               </label>
-              <label class="field">
-                <span>语音识别 API Key</span>
-                <input id="asrApiKeyInput" type="password" placeholder="留空复用主 API Key" />
-              </label>
-            </div>
-            <div class="provider-grid">
-              <label class="field">
-                <span>识别语言</span>
-                <input id="asrLanguageInput" type="text" placeholder="可选，例如 zh 或 en" />
-              </label>
+              <div class="field">
+                <label for="asrApiKeyInput">语音识别 API Key</label>
+                <div class="secret-control">
+                  <input id="asrApiKeyInput" type="password" placeholder="当前 ASR 模型的独立 API Key" />
+                  <button type="button" class="secret-action" data-secret-toggle="asrApiKeyInput" title="显示或隐藏语音识别 API Key">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="asrApiKeyInput" title="复制语音识别 API Key">复制</button>
+                </div>
+              </div>
               <label class="check-field">
                 <input id="asrEnableItnInput" type="checkbox" />
                 <span>启用数字、日期等文本规范化</span>
               </label>
-            </div>
-          </section>
+            </section>
+          </div>
 
-          <section class="settings-section settings-section-wide">
-            <div class="section-title">
-              <strong>第二步：文本清理</strong>
-              <span>稳定模式下用于删除口头词、合并重复片段并补标点。</span>
-            </div>
-            <div class="provider-grid">
-              <label class="field">
-                <span>文本清理供应商</span>
-                <select id="cleanerProviderSelect">
-                  <option value="mimo">MiMo 聊天清理</option>
-                  <option value="openai-compatible">OpenAI 兼容接口清理</option>
-                </select>
+          <div class="settings-tab-panel" role="tabpanel" data-settings-panel="cleaner" hidden>
+            <section class="settings-group">
+              <div class="section-title">
+                <strong>第二步：文本清理</strong>
+                <span>使用保守的删除跨度方法；每个模型独立保存连接配置。</span>
+              </div>
+              <div class="provider-grid">
+                <label class="field">
+                  <span>文本清理模型</span>
+                  <select id="cleanerModelPresetSelect">
+                    <option value="gpt-5.4-mini">GPT-5.4 mini（推荐）</option>
+                    <option value="grok-4.5">Grok 4.5</option>
+                    <option value="mimo-v2.5">MiMo V2.5</option>
+                    <option value="mimo-v2.5-pro">MiMo V2.5 Pro</option>
+                    <option value="__custom__">自定义模型</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>文本清理供应商</span>
+                  <select id="cleanerProviderSelect">
+                    <option value="mimo">MiMo 聊天清理</option>
+                    <option value="openai-compatible">OpenAI 兼容接口清理</option>
+                  </select>
+                </label>
+              </div>
+              <label id="cleanerCustomModelField" class="field" hidden>
+                <span>自定义模型名称</span>
+                <input id="cleanerModelInput" type="text" placeholder="输入接口支持的模型 ID" />
               </label>
-              <label class="field">
-                <span>文本清理模型</span>
-                <input id="cleanerModelInput" type="text" placeholder="例如 mimo-v2.5 或 gpt-5.4-mini" />
-              </label>
-            </div>
-            <div class="provider-grid">
               <label class="field">
                 <span>文本清理 Base URL</span>
                 <input id="cleanerBaseUrlInput" type="text" placeholder="https://api.openai.com/v1 或兼容接口地址" />
               </label>
-              <label class="field">
-                <span>文本清理 API Key</span>
-                <input id="cleanerApiKeyInput" type="password" placeholder="留空复用主 API Key" />
+              <div class="field">
+                <label for="cleanerApiKeyInput">文本清理 API Key</label>
+                <div class="secret-control">
+                  <input id="cleanerApiKeyInput" type="password" placeholder="当前清理模型的独立 API Key" />
+                  <button type="button" class="secret-action" data-secret-toggle="cleanerApiKeyInput" title="显示或隐藏文本清理 API Key">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="cleanerApiKeyInput" title="复制文本清理 API Key">复制</button>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div class="settings-tab-panel" role="tabpanel" data-settings-panel="meeting" hidden>
+            <section class="settings-group">
+              <div class="section-title">
+                <strong>默认处理</strong>
+                <span>基础不上传；增强上传系统轨到 OSS 做说话人分离。</span>
+              </div>
+              <fieldset class="field mode-field">
+                <span>默认处理模式</span>
+                <div class="mode-toggle meeting-settings-mode" role="group" aria-label="默认处理模式">
+                  <button type="button" id="meetingSettingsModeBasicBtn" class="mode-button is-active" data-meeting-process-mode="basic" aria-pressed="true">
+                    <strong>基础</strong>
+                    <span>本地转写，零上传</span>
+                  </button>
+                  <button type="button" id="meetingSettingsModeEnhancedBtn" class="mode-button" data-meeting-process-mode="enhanced" aria-pressed="false">
+                    <strong>增强</strong>
+                    <span>系统轨上传 + 分离</span>
+                  </button>
+                </div>
+              </fieldset>
+              <label class="field" id="meetingSettingsBitrateField">
+                <span>默认上传质量</span>
+                <select id="meetingUploadBitrateSelect">
+                  <option value="32">32 kbps · 约14 MB/小时</option>
+                  <option value="48" selected>48 kbps · 约21 MB/小时</option>
+                  <option value="64">64 kbps · 约28 MB/小时</option>
+                </select>
               </label>
+            </section>
+            <section class="settings-group">
+              <div class="section-title">
+                <strong>会议原文（Qwen）</strong>
+                <span>麦克风与基础模式；与短语音 ASR Key 分离。</span>
+              </div>
+              <label class="field">
+                <span>会议 Qwen 模型</span>
+                <select id="meetingQwenModelPresetSelect">
+                  <option value="qwen3-asr-flash">Qwen3-ASR Flash</option>
+                  <option value="qwen3-asr-flash-filetrans">Qwen3-ASR 文件转写</option>
+                  <option value="__custom__">自定义模型</option>
+                </select>
+              </label>
+              <label id="meetingQwenCustomModelField" class="field" hidden>
+                <span>自定义 Qwen 模型 ID</span>
+                <input id="meetingQwenModelInput" type="text" placeholder="输入模型 ID" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>会议 Qwen Base URL</span>
+                <input id="meetingQwenBaseUrlInput" type="text" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" autocomplete="off" />
+              </label>
+              <div class="field">
+                <label for="meetingQwenApiKeyInput">会议 Qwen API Key</label>
+                <div class="secret-control">
+                  <input id="meetingQwenApiKeyInput" type="password" placeholder="或使用 OVI_MEETING_QWEN_API_KEY / DASHSCOPE_API_KEY" autocomplete="off" />
+                  <button type="button" class="secret-action" data-secret-toggle="meetingQwenApiKeyInput" title="显示或隐藏">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="meetingQwenApiKeyInput" title="复制">复制</button>
+                </div>
+              </div>
+            </section>
+            <section class="settings-group">
+              <div class="section-title">
+                <strong>文件转写 ASR</strong>
+                <span>仅用于导入音频或视频；不进入会议增强/OSS 流程。</span>
+              </div>
+              <div class="provider-grid">
+                <label class="field">
+                  <span>文件 ASR 供应商</span>
+                  <select id="meetingFileAsrProviderSelect">
+                    <option value="mimo">MiMo V2.5 ASR</option>
+                    <option value="qwen3-asr">Qwen3-ASR</option>
+                    <option value="fun-asr">Fun-ASR（暂不支持本地文件分段）</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>文件 ASR 模型</span>
+                  <select id="meetingFileAsrModelPresetSelect">
+                    <option value="mimo-v2.5-asr">MiMo V2.5 ASR</option>
+                    <option value="qwen3-asr-flash">Qwen3-ASR Flash</option>
+                    <option value="qwen3-asr-flash-filetrans">Qwen3-ASR 文件转写</option>
+                    <option value="fun-asr">Fun-ASR</option>
+                    <option value="__custom__">自定义模型</option>
+                  </select>
+                </label>
+              </div>
+              <label id="meetingFileAsrCustomModelField" class="field" hidden>
+                <span>自定义文件 ASR 模型 ID</span>
+                <input id="meetingFileAsrModelInput" type="text" placeholder="输入模型 ID" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>文件 ASR Base URL</span>
+                <input id="meetingFileAsrBaseUrlInput" type="text" placeholder="根据供应商自动填充" autocomplete="off" />
+              </label>
+              <div class="field">
+                <label for="meetingFileAsrApiKeyInput">文件 ASR API Key</label>
+                <div class="secret-control">
+                  <input id="meetingFileAsrApiKeyInput" type="password" placeholder="当前文件 ASR 模型的独立 Key" autocomplete="off" />
+                  <button type="button" class="secret-action" data-secret-toggle="meetingFileAsrApiKeyInput" title="显示或隐藏">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="meetingFileAsrApiKeyInput" title="复制">复制</button>
+                </div>
+              </div>
+              <p class="settings-note">导入完成后点击“生成原文”，会使用这里选择的模型；完成后可继续“校订并总结”。</p>
+            </section>
+            <section class="settings-group">
+              <div class="section-title">
+                <strong>增强 · Fun-ASR</strong>
+                <span>仅增强模式系统轨；不回退短语音 Key。</span>
+              </div>
+              <label class="field">
+                <span>Fun-ASR 模型</span>
+                <select id="meetingFunAsrModelPresetSelect">
+                  <option value="fun-asr">Fun-ASR</option>
+                  <option value="fun-asr-mtl">Fun-ASR MTL</option>
+                  <option value="__custom__">自定义模型</option>
+                </select>
+              </label>
+              <label id="meetingFunAsrCustomModelField" class="field" hidden>
+                <span>自定义 Fun-ASR 模型 ID</span>
+                <input id="meetingFunAsrModelInput" type="text" placeholder="输入模型 ID" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Fun-ASR Base URL</span>
+                <input id="meetingFunAsrBaseUrlInput" type="text" placeholder="https://dashscope.aliyuncs.com/api/v1" autocomplete="off" />
+              </label>
+              <div class="field">
+                <label for="meetingFunAsrApiKeyInput">Fun-ASR API Key</label>
+                <div class="secret-control">
+                  <input id="meetingFunAsrApiKeyInput" type="password" placeholder="或 OVI_MEETING_FUN_ASR_API_KEY / DASHSCOPE_API_KEY" autocomplete="off" />
+                  <button type="button" class="secret-action" data-secret-toggle="meetingFunAsrApiKeyInput" title="显示或隐藏">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="meetingFunAsrApiKeyInput" title="复制">复制</button>
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button type="button" id="meetingFunTestBtn">测试 Fun-ASR</button>
+                <span id="meetingFunTestResult" class="meeting-test-result" aria-live="polite"></span>
+              </div>
+            </section>
+            <section class="settings-group">
+              <div class="section-title">
+                <strong>增强 · OSS</strong>
+                <span>私有对象上传；成功后删除。凭证仅运行时。</span>
+              </div>
+              <div class="provider-grid">
+                <label class="field">
+                  <span>Region</span>
+                  <input id="meetingOssRegionInput" type="text" placeholder="cn-hangzhou" autocomplete="off" />
+                </label>
+                <label class="field">
+                  <span>Endpoint</span>
+                  <input id="meetingOssEndpointInput" type="text" placeholder="可选" autocomplete="off" />
+                </label>
+              </div>
+              <div class="provider-grid">
+                <label class="field">
+                  <span>Bucket</span>
+                  <input id="meetingOssBucketInput" type="text" placeholder="bucket" autocomplete="off" />
+                </label>
+                <label class="field">
+                  <span>Prefix</span>
+                  <input id="meetingOssPrefixInput" type="text" placeholder="meeting" autocomplete="off" />
+                </label>
+              </div>
+              <div class="field">
+                <label for="meetingOssAccessKeyIdInput">AccessKeyId</label>
+                <div class="secret-control">
+                  <input id="meetingOssAccessKeyIdInput" type="password" placeholder="或 OVI_MEETING_OSS_ACCESS_KEY_ID" autocomplete="off" />
+                  <button type="button" class="secret-action" data-secret-toggle="meetingOssAccessKeyIdInput" title="显示或隐藏">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="meetingOssAccessKeyIdInput" title="复制">复制</button>
+                </div>
+              </div>
+              <div class="field">
+                <label for="meetingOssAccessKeySecretInput">AccessKeySecret</label>
+                <div class="secret-control">
+                  <input id="meetingOssAccessKeySecretInput" type="password" placeholder="或 OVI_MEETING_OSS_ACCESS_KEY_SECRET" autocomplete="off" />
+                  <button type="button" class="secret-action" data-secret-toggle="meetingOssAccessKeySecretInput" title="显示或隐藏">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="meetingOssAccessKeySecretInput" title="复制">复制</button>
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button type="button" id="meetingOssTestBtn">测试 OSS</button>
+                <span id="meetingOssTestResult" class="meeting-test-result" aria-live="polite"></span>
+              </div>
+            </section>
+            <section class="settings-group">
+              <div class="section-title">
+                <strong>会议校订与总结</strong>
+                <span>独立长内容模型，不复用短语音清理 Key。无需 OSS。</span>
+              </div>
+              <label class="field">
+                <span>分析模型</span>
+                <select id="meetingAnalysisModelPresetSelect">
+                  <option value="gpt-5.4-mini">GPT-5.4 mini</option>
+                  <option value="gpt-5.5">GPT-5.5</option>
+                  <option value="grok-4.5">Grok 4.5</option>
+                  <option value="glm-5.2">GLM 5.2</option>
+                  <option value="mimo-v2.5-pro">MiMo V2.5 Pro</option>
+                  <option value="__custom__">自定义模型</option>
+                </select>
+              </label>
+              <label id="meetingAnalysisCustomModelField" class="field" hidden>
+                <span>自定义分析模型 ID</span>
+                <input id="meetingAnalysisModelInput" type="text" placeholder="输入模型 ID" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>分析 Base URL</span>
+                <input id="meetingAnalysisBaseUrlInput" type="text" placeholder="https://api.openai.com/v1" autocomplete="off" />
+              </label>
+              <div class="field">
+                <label for="meetingAnalysisApiKeyInput">分析 API Key</label>
+                <div class="secret-control">
+                  <input id="meetingAnalysisApiKeyInput" type="password" placeholder="或使用 OVI_MEETING_ANALYSIS_API_KEY" autocomplete="off" />
+                  <button type="button" class="secret-action" data-secret-toggle="meetingAnalysisApiKeyInput" title="显示或隐藏">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="meetingAnalysisApiKeyInput" title="复制">复制</button>
+                </div>
+              </div>
+              <div class="provider-grid">
+                <label class="field">
+                  <span>上下文窗口（tokens）</span>
+                  <input id="meetingAnalysisContextInput" type="number" min="1024" step="1024" placeholder="128000" />
+                </label>
+                <label class="field">
+                  <span>最大输出</span>
+                  <input id="meetingAnalysisMaxOutputInput" type="number" min="256" step="256" placeholder="8192" />
+                </label>
+              </div>
+              <div class="provider-grid">
+                <label class="field">
+                  <span>推理等级</span>
+                  <input id="meetingAnalysisReasoningInput" type="text" placeholder="可选 high / medium / low" autocomplete="off" />
+                </label>
+                <label class="field">
+                  <span>超时（ms）</span>
+                  <input id="meetingAnalysisTimeoutInput" type="number" min="5000" step="1000" placeholder="120000" />
+                </label>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section id="filePanel" class="file-panel" hidden aria-label="文件转写">
+        <aside class="file-sidebar">
+          <div class="file-sidebar-head">
+            <div>
+              <strong>文件转写</strong>
+              <span>音频或视频文件</span>
+            </div>
+            <button type="button" id="fileRefreshBtn" class="icon-btn" title="刷新文件列表" aria-label="刷新文件列表">↻</button>
+          </div>
+          <button type="button" id="fileChooseBtn" class="primary file-choose-btn" title="选择音频或视频文件">选择文件</button>
+          <label class="field file-search">
+            <span class="sr-only">搜索文件</span>
+            <input id="fileSessionSearch" type="search" placeholder="搜索文件名或日期" autocomplete="off" />
+          </label>
+          <div id="fileSessionList" class="file-session-list" role="listbox" aria-label="文件转写记录"></div>
+        </aside>
+
+        <div class="file-main">
+          <section class="file-console" aria-label="文件选择">
+            <div class="file-console-head">
+              <div>
+                <span class="file-eyebrow">独立文件处理</span>
+                <h2 id="fileSelectedName">还没有选择文件</h2>
+                <p id="fileSelectedMeta" class="file-muted">支持音频和视频；视频会先提取音轨。</p>
+              </div>
+              <div class="file-status-stack">
+                <span id="fileImportStatus" class="file-pill" data-kind="idle">未选择</span>
+                <span id="fileAsrModelLabel" class="file-muted">当前 ASR：—</span>
+              </div>
+            </div>
+            <div class="file-model-row">
+              <label class="field inline">
+                <span>文件 ASR</span>
+                <select id="fileAsrProviderSelect" title="选择文件转写供应商">
+                  <option value="mimo">MiMo V2.5 ASR</option>
+                  <option value="qwen3-asr">Qwen3-ASR</option>
+                </select>
+              </label>
+              <label class="field inline grow">
+                <span>模型</span>
+                <select id="fileAsrModelSelect" title="选择文件转写模型">
+                  <option value="mimo-v2.5-asr">mimo-v2.5-asr</option>
+                  <option value="qwen3-asr-flash">qwen3-asr-flash</option>
+                  <option value="qwen3-asr-flash-filetrans">qwen3-asr-flash-filetrans</option>
+                  <option value="__custom__">自定义模型</option>
+                </select>
+                <input id="fileAsrCustomModelInput" class="file-custom-model-input" type="text" placeholder="输入模型 ID" autocomplete="off" hidden />
+              </label>
+              <span id="fileAsrConfigStatus" class="file-muted" aria-live="polite"></span>
+            </div>
+            <div class="file-console-actions">
+              <label class="field grow">
+                <span>结果标题</span>
+                <input id="fileTitleInput" type="text" maxlength="200" placeholder="默认使用文件名" autocomplete="off" />
+              </label>
+              <button type="button" id="fileChooseInlineBtn" class="primary" title="选择音频或视频文件">选择文件</button>
+            </div>
+            <p id="fileHint" class="file-hint">选择一个文件后，会在本地建立独立记录，再按当前文件 ASR 配置转写。</p>
+          </section>
+
+          <section class="file-process" aria-label="文件处理">
+            <div class="file-process-row">
+              <div>
+                <span class="file-section-label">第一步 · 原始转写</span>
+                <strong id="fileProcessLabel">尚未开始</strong>
+              </div>
+              <span id="fileProcessProgress" class="file-muted" aria-live="polite">—</span>
+              <div class="file-action-group">
+                <button type="button" id="fileProcessStartBtn" class="primary" disabled>开始转写</button>
+                <button type="button" id="fileProcessRetryBtn" disabled>重试转写</button>
+                <button type="button" id="fileProcessCancelBtn" disabled>取消</button>
+              </div>
+            </div>
+            <div class="file-process-row">
+              <div>
+                <span class="file-section-label">第二步 · 校订与总结</span>
+                <strong id="fileAnalysisLabel">尚未开始</strong>
+              </div>
+              <select id="fileAnalysisTemplateSelect" title="总结模板">
+                <option value="auto">自动判断</option>
+                <option value="meeting">会议纪要</option>
+                <option value="personal">个人思考</option>
+              </select>
+              <div class="file-action-group">
+                <button type="button" id="fileAnalysisStartBtn" disabled>校订并总结</button>
+                <button type="button" id="fileAnalysisRetryBtn" disabled>重试分析</button>
+                <button type="button" id="fileAnalysisCancelBtn" disabled>取消</button>
+              </div>
             </div>
           </section>
 
-          <section class="settings-section settings-section-wide">
-            <div class="section-title">
-              <strong>通用凭证</strong>
-              <span>MiMo 默认凭证，也可被 ASR 或清理步骤复用。</span>
+          <section class="file-results" aria-label="文件结果">
+            <div class="file-results-head">
+              <div class="file-tabs" role="tablist" aria-label="文件结果视图">
+                <button type="button" class="file-tab is-active" role="tab" aria-selected="true" data-file-tab="raw">原始转写</button>
+                <button type="button" class="file-tab" role="tab" aria-selected="false" data-file-tab="corrected">校订文本</button>
+                <button type="button" class="file-tab" role="tab" aria-selected="false" data-file-tab="summary">结构化总结</button>
+              </div>
+              <div class="file-export-controls">
+                <label class="field inline">
+                  <span>范围</span>
+                  <select id="fileExportScopeSelect" title="选择导出内容">
+                    <option value="all">全部</option>
+                    <option value="raw">原始转写</option>
+                    <option value="corrected">校订文本</option>
+                    <option value="summary">结构化总结</option>
+                  </select>
+                </label>
+                <label class="field inline">
+                  <span>格式</span>
+                  <select id="fileExportFormatSelect" title="选择导出格式">
+                    <option value="markdown">Markdown</option>
+                    <option value="txt">TXT</option>
+                    <option value="docx">Word</option>
+                  </select>
+                </label>
+                <button type="button" id="fileExportBtn" title="导出文件结果">导出</button>
+                <button type="button" id="fileCopyResultBtn" title="复制当前结果">复制</button>
+              </div>
             </div>
-            <div class="provider-grid">
+            <div id="fileResultPane" class="file-result-pane" tabindex="0">
+              <p class="file-empty" id="fileResultEmpty">选择文件并开始转写后，结果会显示在这里。</p>
+              <div id="fileResultContent" class="file-result-content" hidden></div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="meetingPanel" class="meeting-panel" hidden aria-label="会议工作台">
+        <aside class="meeting-sidebar">
+          <div class="meeting-sidebar-actions">
+            <button type="button" id="meetingNewSessionBtn" class="primary" title="新建会话">新建</button>
+            <button type="button" id="meetingRefreshSessionsBtn" title="刷新列表">刷新</button>
+          </div>
+          <label class="field meeting-search">
+            <span class="sr-only">搜索会话</span>
+            <input id="meetingSessionSearch" type="search" placeholder="搜索标题/来源/日期" autocomplete="off" />
+          </label>
+          <div id="meetingSessionList" class="meeting-session-list" role="listbox" aria-label="历史会话"></div>
+        </aside>
+        <div class="meeting-main">
+          <section class="meeting-console" aria-label="录制控制台">
+            <div class="meeting-console-row">
+              <label class="field grow">
+                <span>标题</span>
+                <input id="meetingTitleInput" type="text" maxlength="200" placeholder="可选标题" autocomplete="off" />
+              </label>
+              <button type="button" id="meetingRenameBtn" title="保存标题">重命名</button>
+              <div class="meeting-timer" aria-live="polite">
+                <strong id="meetingElapsed">00:00</strong>
+                <span id="meetingCaptureBadge" data-kind="idle">空闲</span>
+              </div>
+            </div>
+            <div class="meeting-console-row meeting-device-row">
               <label class="field">
-                <span>主 API Key</span>
-                <input id="apiKeyInput" type="password" placeholder="留空则使用 MIMO_API_KEY 环境变量" />
+                <span>麦克风</span>
+                <select id="meetingMicSelect">
+                  <option value="">系统默认</option>
+                </select>
               </label>
               <label class="field">
-                <span>主 Base URL</span>
-                <input id="baseUrlInput" type="text" placeholder="默认 https://api.xiaomimimo.com/v1；token plan 可填专用地址" />
+                <span>系统输出</span>
+                <select id="meetingSystemSelect">
+                  <option value="">系统默认</option>
+                </select>
               </label>
+              <label class="field">
+                <span>模式</span>
+                <select id="meetingCaptureModeSelect">
+                  <option value="dual">双轨</option>
+                  <option value="microphone">仅麦克风</option>
+                </select>
+              </label>
+              <button type="button" id="meetingRefreshDevicesBtn" title="刷新设备">设备</button>
             </div>
-            <div class="settings-actions">
-              <button id="clearApiKeyBtn" type="button">使用环境变量 Key</button>
+            <div class="meeting-console-footer">
+              <div class="meeting-console-actions" role="group" aria-label="录制控制">
+                <button type="button" id="meetingStartBtn" class="primary">开始</button>
+                <button type="button" id="meetingPauseBtn" disabled>暂停</button>
+                <button type="button" id="meetingResumeBtn" disabled>继续</button>
+                <button type="button" id="meetingStopBtn" disabled>停止</button>
+              </div>
+              <p id="meetingConsoleHint" class="meeting-hint">录制停止后可生成原文；会议工作台只处理实时会议录制。</p>
+            </div>
+          </section>
+
+          <section class="meeting-strip" aria-label="处理">
+            <div class="meeting-strip-row meeting-process-mode-row">
+              <div class="meeting-mode-toggle" role="group" aria-label="处理模式">
+                <button type="button" id="meetingProcessModeBasicBtn" class="meeting-mode-btn is-active" data-meeting-process-mode="basic" aria-pressed="true" title="本地转写，零上传">基础转写</button>
+                <button type="button" id="meetingProcessModeEnhancedBtn" class="meeting-mode-btn" data-meeting-process-mode="enhanced" aria-pressed="false" title="系统轨上传 OSS，说话人分离">说话人分离</button>
+              </div>
+              <div id="meetingBitrateGroup" class="meeting-bitrate-group" hidden role="group" aria-label="上传质量">
+                <button type="button" class="meeting-bitrate-btn" data-bitrate="32" aria-pressed="false" title="约14 MB/小时">32 · 14MB/h</button>
+                <button type="button" class="meeting-bitrate-btn is-active" data-bitrate="48" aria-pressed="true" title="约21 MB/小时">48 · 21MB/h</button>
+                <button type="button" class="meeting-bitrate-btn" data-bitrate="64" aria-pressed="false" title="约28 MB/小时">64 · 28MB/h</button>
+              </div>
+              <span id="meetingProcessModeHint" class="meeting-muted">基础转写：本地，不上传</span>
+            </div>
+            <div class="meeting-strip-row">
+              <button type="button" id="meetingProcessStartBtn" class="primary">生成原文</button>
+              <button type="button" id="meetingProcessRetryBtn" disabled>重试原文</button>
+              <button type="button" id="meetingProcessCancelBtn" disabled>取消原文</button>
+              <span id="meetingProcessStatus" class="meeting-pill" data-kind="idle">未处理</span>
+              <span id="meetingProcessProgress" class="meeting-muted" aria-live="polite">—</span>
+            </div>
+            <div class="meeting-strip-row">
+              <label class="field inline">
+                <span>模板</span>
+                <select id="meetingAnalysisTemplateSelect">
+                  <option value="auto">自动</option>
+                  <option value="meeting">会议</option>
+                  <option value="personal">个人思考</option>
+                </select>
+              </label>
+              <button type="button" id="meetingAnalysisStartBtn">校订并总结</button>
+              <button type="button" id="meetingAnalysisRetryBtn" disabled>重试分析</button>
+              <button type="button" id="meetingAnalysisCancelBtn" disabled>取消分析</button>
+              <span id="meetingAnalysisStatus" class="meeting-pill" data-kind="idle">未分析</span>
+            </div>
+            <div class="meeting-strip-row meeting-export-row">
+              <label class="field inline meeting-export-select">
+                <span>导出</span>
+                <select id="meetingExportFormatSelect">
+                  <option value="markdown">Markdown</option>
+                  <option value="json">JSON</option>
+                  <option value="txt">TXT</option>
+                  <option value="srt">SRT</option>
+                </select>
+              </label>
+              <label class="field inline meeting-export-select">
+                <span>范围</span>
+                <select id="meetingExportScopeSelect">
+                  <option value="all">全部</option>
+                  <option value="raw">原文</option>
+                  <option value="corrected">校订</option>
+                  <option value="summary">总结</option>
+                </select>
+              </label>
+              <button type="button" id="meetingExportBtn">导出…</button>
+              <label class="field inline meeting-speaker-field">
+                <span>说话人</span>
+                <select id="meetingSpeakerSelect" aria-label="选择说话人">
+                  <option value="">选择…</option>
+                </select>
+              </label>
+              <label class="field inline meeting-speaker-name-field">
+                <span>名称</span>
+                <input id="meetingSpeakerNameInput" type="text" maxlength="80" placeholder="显示名" autocomplete="off" />
+              </label>
+              <button type="button" id="meetingSpeakerSaveBtn">保存名称</button>
+            </div>
+          </section>
+
+          <section class="meeting-playback" aria-label="音频回放">
+            <audio id="meetingAudio" controls preload="metadata"></audio>
+            <span id="meetingPlaybackHint" class="meeting-muted">点击转写块可跳转；仅单轨 archive 回放。</span>
+          </section>
+
+          <section class="meeting-results" aria-label="结果">
+            <div class="meeting-results-head">
+              <div class="meeting-tabs" role="tablist" aria-label="结果视图">
+                <button type="button" class="meeting-tab is-active" role="tab" aria-selected="true" data-meeting-tab="raw">原始转写</button>
+                <button type="button" class="meeting-tab" role="tab" aria-selected="false" data-meeting-tab="corrected">校订文本</button>
+                <button type="button" class="meeting-tab" role="tab" aria-selected="false" data-meeting-tab="summary">结构化总结</button>
+              </div>
+              <button type="button" id="meetingCopyResultBtn" title="复制当前结果">复制</button>
+            </div>
+            <div id="meetingResultPane" class="meeting-result-pane" tabindex="0">
+              <p class="meeting-empty" id="meetingResultEmpty">选择会话并生成结果后显示在这里。</p>
+              <div id="meetingResultContent" class="meeting-result-content" hidden></div>
             </div>
           </section>
         </div>
@@ -217,6 +772,9 @@
         <span>Esc 隐藏</span>
       </footer>
     </main>
+    <script src="../audio-utils.js"></script>
+    <script src="./meeting-ui.js"></script>
+    <script src="./file-ui.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

@@ -14,6 +14,9 @@ const TEXT_EXTENSIONS = new Set([
   ".json",
   ".md",
   ".ps1",
+  ".py",
+  ".rs",
+  ".toml",
   ".txt",
   ".vbs",
   ".yaml",
@@ -21,7 +24,9 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 const SECRET_PATTERNS = [
   { name: "API key", pattern: /\b(?:sk|tp)-[A-Za-z0-9_-]{20,}\b/g },
-  { name: "GitHub token", pattern: /\bgh[ps]_[A-Za-z0-9]{30,}\b/g }
+  { name: "GitHub token", pattern: /\bgh[ps]_[A-Za-z0-9]{30,}\b/g },
+  // Aliyun AccessKeyId prefix (real keys look like LTAI5t…); allow short doc placeholders
+  { name: "Aliyun AccessKeyId", pattern: /\bLTAI[A-Za-z0-9]{16,}\b/g }
 ];
 
 const findings = [];
