@@ -19,6 +19,22 @@ const REQUIRED_CAPABILITIES = Object.freeze([
   "durable_subchunk_seal_frame_aligned"
 ]);
 
+const MACOS_REQUIRED_CAPABILITIES = Object.freeze([
+  "dual_track",
+  "system_audio_screencapturekit",
+  "microphone_avaudioengine",
+  "dual_start_single_rpc",
+  "clock_mach_host_time",
+  "pause_holes_shared_host_time",
+  "durable_subchunk_seal_frame_aligned"
+]);
+
+function requiredCapabilitiesForPlatform(platform = process.platform) {
+  // Keep the historical Windows constant for callers/tests of the WASAPI protocol.
+  if (platform === "darwin") return MACOS_REQUIRED_CAPABILITIES;
+  return REQUIRED_CAPABILITIES;
+}
+
 const COMMANDS = Object.freeze([
   "hello",
   "ping",
@@ -52,6 +68,8 @@ module.exports = {
   CAPTURE_MODE_DUAL,
   CAPTURE_MODE_MICROPHONE,
   REQUIRED_CAPABILITIES,
+  MACOS_REQUIRED_CAPABILITIES,
+  requiredCapabilitiesForPlatform,
   COMMANDS,
   TARGET_L1_FORMAT
 };

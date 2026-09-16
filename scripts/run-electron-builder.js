@@ -6,7 +6,10 @@ if (!process.env.CI) {
 }
 
 const cliPath = require.resolve("electron-builder/cli.js");
-const result = spawnSync(process.execPath, [cliPath, ...process.argv.slice(2)], {
+const args = process.argv.slice(2);
+// Release workflows upload audited artifacts explicitly after every build/check succeeds.
+if (!args.some(arg => arg === "--publish" || arg.startsWith("--publish="))) args.push("--publish", "never");
+const result = spawnSync(process.execPath, [cliPath, ...args], {
   env: process.env,
   stdio: "inherit"
 });

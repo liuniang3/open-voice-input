@@ -320,6 +320,9 @@ function migrateConnectionProfiles(raw) {
 
 function applyActiveProfilesToTopLevel(settings) {
   const next = settings;
+  // Live meetings select a model independently; never copy an active provider's key.
+  next.meetingRealtimeModel = trimStr(next.meetingRealtimeModel) || MIMO_ASR_MODEL;
+  next.meetingRealtimeDestination = trimStr(next.meetingRealtimeDestination);
   const asrModel = trimStr(next.asrModel) || MIMO_ASR_MODEL;
   const asr = next.asrProfiles?.[asrModel] || defaultAsrProfile(asrModel);
   next.asrProvider = trimStr(asr.provider) || next.asrProvider || "mimo";

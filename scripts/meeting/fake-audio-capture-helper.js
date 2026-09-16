@@ -14,6 +14,10 @@ const VERSION = process.env.FAKE_HELPER_VERSION || "0.2.0";
 const PROTOCOL_VERSION = 1;
 
 const CAPABILITIES = [
+  "system_audio_screencapturekit",
+  "microphone_avaudioengine",
+  "clock_mach_host_time",
+  "pause_holes_shared_host_time",
   "dual_track",
   "system_loopback_shared",
   "dual_start_single_rpc",
@@ -60,9 +64,10 @@ function hasParent(p) {
 }
 
 function underRoot(root, candidate) {
-  const r = path.resolve(root).toLowerCase();
-  const c = path.resolve(candidate).toLowerCase();
-  return c === r || c.startsWith(r.endsWith("\\") ? r : `${r}\\`);
+  const r = path.resolve(root);
+  const c = path.resolve(candidate);
+  const relative = path.relative(r, c);
+  return !relative || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
 function writeFakeManifest(out, track, role) {

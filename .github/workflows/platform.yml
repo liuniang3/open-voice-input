@@ -1,0 +1,87 @@
+name: Platform Tests and macOS Native Builds
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'native/**'
+      - 'build/**'
+      - 'package*.json'
+      - '.github/workflows/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check:secrets
+      - run: npm run test:platform
+      - run: npm run test:meeting:live
+      - run: npm run test:meeting:live:ui
+      - run: npm run test:pipeline
+      - run: npm run test:clean
+
+  desktop:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            arch: x64
+          - runner: macos-15-intel
+            arch: x64
+          - runner: macos-15
+            arch: arm64
+    env:
+      OVI_TARGET_ARCH: ${{ matrix.arch }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          architecture: ${{ matrix.arch }}
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.85.1
+        if: runner.os == 'Windows'
+      - uses: Swatinem/rust-cache@v2
+        if: runner.os == 'Windows'
+        with:
+          workspaces: native/audio-capture-helper
+      - run: npm ci
+      - run: npm run check:secrets
+      - run: npm run build:helper
+      - run: npm run check:helper
+      - run: npm run prepare:ffmpeg
+      - run: npm run check:ffmpeg
+      - name: Run every shared regression sequentially with native prerequisites
+        run: npm run test:all
+      - name: Package unsigned architecture-specific app (no hardware permission claims)
+        if: runner.os == 'macOS'
+        run: node scripts/run-electron-builder.js --mac zip --${{ matrix.arch }} --publish never
+      - run: npm run checksums
+        if: runner.os == 'macOS'
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: open-voice-input-macos-${{ matrix.arch }}-unsigned
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS.txt

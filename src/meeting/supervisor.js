@@ -7,7 +7,7 @@ const {
   DEFAULT_SUBCHUNK_MS,
   TRACK_MICROPHONE,
   CAPTURE_MODE_DUAL,
-  REQUIRED_CAPABILITIES
+  requiredCapabilitiesForPlatform
 } = require("./constants");
 const {
   assertHelperReady,
@@ -37,8 +37,9 @@ function createAudioCaptureSupervisor(options = {}) {
     appRoot = process.cwd(),
     sessionRoot = "",
     parentPid = process.pid,
+    platform = process.platform,
     requiredVersion = HELPER_VERSION,
-    requiredCapabilities = REQUIRED_CAPABILITIES,
+    requiredCapabilities = requiredCapabilitiesForPlatform(platform),
     spawnImpl = spawn,
     logger = () => {},
     commandTimeoutMs = 15000
@@ -72,6 +73,7 @@ function createAudioCaptureSupervisor(options = {}) {
       isPackaged,
       resourcesPath,
       appRoot,
+      platform,
       overridePath: overrideHelperPath
     });
   }

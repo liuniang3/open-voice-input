@@ -1367,6 +1367,13 @@ fn qpc_now_and_freq() -> Result<(u64, u64), String> {
             .map_err(|e| format!("QueryPerformanceFrequency: {e}"))?;
         let mut v: i64 = 0;
         QueryPerformanceCounter(&mut v).map_err(|e| format!("QueryPerformanceCounter: {e}"))?;
-        Ok((v as u64, freq as u64))
+        // WASAPI GetBuffer/GetPosition return QPC timestamps in 100 ns units,
+        // not raw QueryPerformanceCounter ticks. All shared origins and holes
+        // must use that same clock unit, even when the hardware QPC rate differs.
+        if freq <= 0 || v < 0 {
+            return Err("invalid performance counter".to_string());
+        }
+        let units = (v as u128 * 10_000_000u128) / freq as u128;
+        Ok((units as u64, 10_000_000))
     }
 }

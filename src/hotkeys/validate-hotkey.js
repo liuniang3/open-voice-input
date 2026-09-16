@@ -52,28 +52,34 @@ const MODIFIER_TOKENS = new Set([
   "cmd"
 ]);
 
-function normalizeAccelerator(value) {
+function normalizeAccelerator(value, platform = process.platform) {
   const parts = String(value || "").split("+").map((part) => part.trim()).filter(Boolean);
   if (!parts.length) return "";
-  const modifiers = { control: false, alt: false, shift: false, super: false };
+  const modifiers = { control: false, command: false, alt: false, shift: false, super: false };
   let key = "";
   for (const part of parts) {
     const lower = part.toLowerCase();
-    if (lower === "commandorcontrol" || lower === "cmdorctrl" || lower === "control" || lower === "ctrl") {
+    if (lower === "commandorcontrol" || lower === "cmdorctrl") {
+      modifiers[platform === "darwin" ? "command" : "control"] = true;
+    } else if (lower === "control" || lower === "ctrl") {
       modifiers.control = true;
     } else if (lower === "alt" || lower === "option") {
       modifiers.alt = true;
     } else if (lower === "shift") {
       modifiers.shift = true;
     } else if (lower === "super" || lower === "meta" || lower === "win" || lower === "windows" || lower === "command" || lower === "cmd") {
-      modifiers.super = true;
+      modifiers[platform === "darwin" ? "command" : "super"] = true;
     } else {
+      // Do not silently discard a second main key.
+      if (key) return "";
       key = /^[a-z]$/i.test(part) ? part.toUpperCase() : part;
+      if (/^(esc|escape)$/i.test(key)) key = "Escape";
     }
   }
   if (!key) return "";
   const mods = [];
-  if (modifiers.control) mods.push("CommandOrControl");
+  if (modifiers.control) mods.push(platform === "darwin" ? "Control" : "CommandOrControl");
+  if (modifiers.command) mods.push("Command");
   if (modifiers.alt) mods.push("Alt");
   if (modifiers.shift) mods.push("Shift");
   if (modifiers.super) mods.push("Super");
@@ -108,18 +114,26 @@ function isValidFormat(accelerator) {
 }
 
 function isReservedWindows(accelerator) {
-  const normalized = normalizeAccelerator(accelerator);
+  const normalized = normalizeAccelerator(accelerator, "win32");
   if (!normalized) return true;
   return RESERVED_WINDOWS.has(normalized);
 }
 
+const RESERVED_MAC = new Set([
+  ...["C", "V", "X", "A", "Z", "S", "P", "N", "O", "W", "F", "H", "Q", "M", "Tab", "Space", ","].map((key) => `Command+${key}`),
+  "Command+Shift+Z", "Command+Shift+Q", "Command+Alt+Escape", "Command+Alt+H",
+  "Command+Alt+Space", "Command+Shift+3", "Command+Shift+4", "Command+Shift+5",
+  "Control+Command+Q", "Control+Space", "Control+Up", "Control+Down", "Control+Left", "Control+Right"
+]);
+
 function validateHotkey(accelerator, opts) {
   opts = opts || {};
+  const platform = opts.platform || process.platform;
   const raw = String(accelerator || "").trim();
   if (!raw) {
     return { ok: false, code: "empty", accelerator: "", message: "快捷键不能为空" };
   }
-  const normalized = normalizeAccelerator(raw);
+  const normalized = normalizeAccelerator(raw, platform);
   if (!normalized || !isValidFormat(normalized)) {
     return {
       ok: false,
@@ -128,12 +142,12 @@ function validateHotkey(accelerator, opts) {
       message: "快捷键格式无效，请使用修饰键 + 主键（例如 CommandOrControl+Alt+M）"
     };
   }
-  if (isReservedWindows(normalized)) {
+  if (platform === "darwin" ? RESERVED_MAC.has(normalized) : isReservedWindows(normalized)) {
     return { ok: false, code: "reserved", accelerator: normalized, message: "该组合是系统保留快捷键，请更换" };
   }
   const others = Array.isArray(opts.otherHotkeys) ? opts.otherHotkeys : [];
   for (const other of others) {
-    if (normalizeAccelerator(other) === normalized) {
+    if (normalizeAccelerator(other, platform) === normalized) {
       return { ok: false, code: "app_conflict", accelerator: normalized, message: "与应用内另一个快捷键冲突" };
     }
   }
@@ -150,6 +164,7 @@ function validateHotkey(accelerator, opts) {
 
 module.exports = {
   RESERVED_WINDOWS,
+  RESERVED_MAC,
   normalizeAccelerator,
   isValidFormat,
   isReservedWindows,

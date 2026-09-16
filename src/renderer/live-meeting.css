@@ -1,0 +1,125 @@
+/* Realtime owns the primary view; history keeps its existing internal layout. */
+body.meeting-mode .meeting-panel {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.meeting-panel [hidden],
+.meeting-panel .legacy-capture-controls {
+  display: none !important;
+}
+
+body.meeting-mode #apiState { display: none; }
+body.meeting-mode #meetingBtn { display: none; }
+body.meeting-mode .topbar > div:first-child { min-width: 0; }
+body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
+
+.live-navigation {
+  display: flex;
+  gap: 20px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--ovi-border);
+}
+
+.live-navigation button {
+  min-height: 42px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ovi-muted);
+}
+
+.live-navigation button[aria-selected="true"] {
+  color: var(--ovi-primary);
+  border-bottom-color: var(--ovi-primary);
+}
+
+.live-meeting {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px;
+  gap: 10px;
+  -webkit-app-region: no-drag;
+}
+
+.live-meeting > :not(.live-results) { flex: 0 0 auto; }
+.live-meeting .field { margin: 0; min-width: 0; gap: 5px; }
+.live-meeting :is(input, select) { width: 100%; min-width: 0; }
+.live-meeting :is(button, input, select, pre), .live-navigation button {
+  -webkit-app-region: no-drag;
+  letter-spacing: 0;
+}
+.live-meeting button { min-height: 36px; border-radius: 6px; white-space: normal; }
+.live-meeting :is(button, input, select, pre):focus-visible,
+.live-navigation button:focus-visible { outline: 2px solid var(--ovi-primary); outline-offset: 2px; }
+
+.live-setup { display: grid; grid-template-columns: minmax(160px, 1.3fr) repeat(2, minmax(160px, 1fr)); gap: 12px; }
+.live-setup:has(#liveCustomModelField:not([hidden])) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.live-destination, .live-transport, .live-health, .live-recovery, .live-outputs, .live-audio-outputs, .live-cleanup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.live-destination { padding-bottom: 12px; border-bottom: 1px solid var(--ovi-border); }
+.live-path-field { flex: 1 1 300px; min-width: 0; font-size: 12px; }
+.live-path-field > span { color: var(--ovi-muted); }
+.live-path-field output { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
+.live-clock { display: flex; align-items: baseline; gap: 8px; margin-left: auto; font-size: 12px; color: var(--ovi-muted); }
+.live-clock strong { color: var(--ovi-text); font-variant-numeric: tabular-nums; font-size: 21px; min-width: 90px; text-align: right; }
+.live-stop { color: #943a30; border-color: rgba(148, 58, 48, 0.3); }
+.live-health { justify-content: space-between; font-size: 12px; color: var(--ovi-muted); }
+#liveSaved[data-kind="warning"] { color: #8b550e; }
+#liveSaved[data-kind="saved"] { color: var(--ovi-primary); }
+.live-error { flex: 1 0 100%; margin: 0; color: #a0372d; font-size: 13px; overflow-wrap: anywhere; }
+.live-recovery button { min-height: 30px; font-size: 12px; }
+.live-recover-field { flex: 1 1 180px; max-width: 320px; }
+.live-outputs { font-size: 12px; }
+.live-outputs button { font-size: 12px; }
+.live-results { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 0 220px; min-height: 220px; gap: 16px; }
+.live-results.has-corrected { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.live-text-section { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.live-text-section h2 { margin: 0; padding: 8px 0; font-size: 14px; font-weight: 650; border-bottom: 1px solid var(--ovi-border); }
+.live-transcript {
+  flex: 1;
+  min-height: 140px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.8;
+  user-select: text;
+}
+.live-cleanup { border-top: 1px solid var(--ovi-border); padding-top: 10px; font-size: 12px; }
+.live-cleanup .field { flex: 1 1 180px; max-width: 300px; }
+.live-cleaned-path { flex: 1 0 100%; overflow-wrap: anywhere; color: var(--ovi-muted); }
+.meeting-history { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; overflow: hidden; }
+.meeting-history .meeting-sidebar-actions { grid-template-columns: 1fr; }
+
+@media (max-width: 760px) {
+  .live-meeting { padding: 12px; }
+  .live-setup { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .live-title-field { grid-column: 1 / -1; }
+  .live-results.has-corrected { grid-template-columns: minmax(0, 1fr); flex-basis: 440px; }
+  .meeting-history { grid-template-columns: 180px minmax(0, 1fr); }
+}
+
+@media (max-width: 480px) {
+  body.meeting-mode .topbar { flex-wrap: wrap; gap: 6px; }
+  body.meeting-mode .window-actions { flex-wrap: wrap; }
+  .live-setup, .live-setup:has(#liveCustomModelField:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
+  .live-title-field { grid-column: auto; }
+  .live-clock { margin-left: 0; }
+  .live-destination button { flex: 1 1 auto; }
+  .meeting-history { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
+  .meeting-history .meeting-sidebar { max-height: 180px; }
+  .meeting-history .meeting-main { overflow: visible; }
+}

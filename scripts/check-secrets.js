@@ -16,6 +16,8 @@ const TEXT_EXTENSIONS = new Set([
   ".ps1",
   ".py",
   ".rs",
+  ".swift",
+  ".plist",
   ".toml",
   ".txt",
   ".vbs",

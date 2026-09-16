@@ -5,12 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Open Voice Input</title>
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./live-meeting.css" />
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
         <div>
-          <h1>Open Voice Input</h1>
+          <h1 id="workspaceHeading">Open Voice Input</h1>
           <p id="apiState">正在检查 API Key...</p>
         </div>
         <div class="window-actions">
@@ -19,9 +20,9 @@
             <span class="workspace-entry-mark file-entry-mark" aria-hidden="true"></span>
             <span>文件转写</span>
           </button>
-          <button id="meetingBtn" class="meeting-entry-btn" title="打开会议工作台" aria-label="打开会议工作台">
+          <button id="meetingBtn" class="meeting-entry-btn" title="打开会议实时转录" aria-label="打开会议实时转录">
             <span class="meeting-entry-mark" aria-hidden="true"></span>
-            <span>会议工作台</span>
+            <span>会议实时转录</span>
           </button>
           <button id="minimizeBtn" class="icon-btn window-control-btn" title="最小化" aria-label="最小化"></button>
           <button id="maximizeBtn" class="icon-btn window-control-btn" title="最大化" aria-label="最大化"></button>
@@ -96,9 +97,9 @@
                 <small id="hotkeyStatus" class="hotkey-hint" aria-live="polite"></small>
               </label>
               <label class="field">
-                <span>长内容转录快捷键</span>
+                <span>开始会议实时转录快捷键</span>
                 <input id="meetingHotkeyInput" type="text" placeholder="CommandOrControl+Alt+Shift+M" autocomplete="off" />
-                <small id="meetingHotkeyHint" class="hotkey-hint" hidden>按下组合键后会打开并置前会议工作台，Esc 取消。</small>
+                <small id="meetingHotkeyHint" class="hotkey-hint" hidden>快捷键打开会议工作台并开始实时转录；录制中仅置前。Esc 取消修改。</small>
                 <small id="meetingHotkeyStatus" class="hotkey-hint" aria-live="polite"></small>
               </label>
             </section>
@@ -301,7 +302,7 @@
             <section class="settings-group">
               <div class="section-title">
                 <strong>文件转写 ASR</strong>
-                <span>仅用于导入音频或视频；不进入会议增强/OSS 流程。</span>
+                <span>MiMo 独立配置也用于会议实时转录；不进入会议增强/OSS 流程。</span>
               </div>
               <div class="provider-grid">
                 <label class="field">
@@ -606,10 +607,78 @@
         </div>
       </section>
 
-      <section id="meetingPanel" class="meeting-panel" hidden aria-label="会议工作台">
+      <section id="meetingPanel" class="meeting-panel" hidden aria-label="会议实时转录">
+        <nav class="live-navigation" role="tablist" aria-label="会议视图">
+          <button id="liveMeetingTab" type="button" role="tab" aria-selected="true" aria-controls="liveMeetingPanel">实时转录</button>
+          <button id="liveHistoryTab" type="button" role="tab" aria-selected="false" aria-controls="meetingHistoryPanel" tabindex="-1">会议历史</button>
+        </nav>
+        <section id="liveMeetingPanel" class="live-meeting" role="tabpanel" aria-labelledby="liveMeetingTab">
+          <div class="live-setup">
+            <label class="field live-title-field">
+              <span>会议标题</span>
+              <input id="liveTitle" type="text" maxlength="200" placeholder="未命名会议" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>识别模型</span>
+              <select id="liveModel" aria-label="实时识别模型"><option value="mimo-v2.5-asr">MiMo V2.5 ASR</option></select>
+            </label>
+            <label id="liveCustomModelField" class="field" hidden>
+              <span>自定义批量识别模型 ID</span>
+              <input id="liveCustomModel" type="text" maxlength="160" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>音源</span>
+              <select id="liveCaptureMode"><option value="dual">麦克风 + 系统声音</option><option value="microphone">仅麦克风</option></select>
+            </label>
+          </div>
+          <div class="live-destination">
+            <div class="live-path-field"><span>原文保存位置</span><output id="liveDestination">文稿 / Open Voice Input / Meetings（自动新建）</output></div>
+            <button id="liveChooseDestination" type="button">选择文件…</button>
+            <button id="liveDefaultDestination" type="button">使用默认位置</button>
+          </div>
+          <div class="live-transport">
+            <button id="liveStart" type="button" class="primary" disabled>开始实时转录</button>
+            <button id="liveStop" type="button" class="live-stop" disabled>停止并保存</button>
+            <span id="liveStatus" class="meeting-pill" role="status" data-kind="idle">等待连接</span>
+            <span class="live-clock"><span id="liveElapsedLabel">本页计时</span><strong id="liveElapsed">00:00</strong></span>
+          </div>
+          <div class="live-health" role="status" aria-live="polite">
+            <span id="liveQueue">待识别 0 段 · 失败 0 段</span>
+            <span id="liveSaved" data-kind="idle">每 30 秒自动保存 · 尚未保存</span>
+          </div>
+          <div class="live-recovery">
+            <p id="liveError" class="live-error" role="alert" hidden></p>
+            <button id="liveRefresh" type="button">刷新状态</button>
+            <button id="liveRetry" type="button" disabled>重试未完成片段</button>
+            <label class="field live-recover-field"><span class="sr-only">可恢复的会话</span><select id="liveRecoverSession" aria-label="可恢复的会话"><option value="">最近会话</option></select></label>
+            <button id="liveRecover" type="button" disabled>恢复中断会话</button>
+          </div>
+          <div class="live-outputs" aria-label="会议输出">
+            <button id="liveOpenMarkdown" type="button" disabled>打开原文 Markdown</button>
+            <div id="liveAudioOutputs" class="live-audio-outputs"></div>
+          </div>
+          <div id="liveResults" class="live-results">
+            <section class="live-text-section" aria-labelledby="liveRawHeading">
+              <h2 id="liveRawHeading">原始转写</h2>
+              <pre id="liveRaw" class="live-transcript" tabindex="0">尚无转写内容</pre>
+            </section>
+            <section id="liveCorrectedSection" class="live-text-section" aria-labelledby="liveCorrectedHeading" hidden>
+              <h2 id="liveCorrectedHeading">校订文本</h2>
+              <pre id="liveCorrected" class="live-transcript" tabindex="0"></pre>
+            </section>
+          </div>
+          <div id="liveCleanupSection" class="live-cleanup" hidden>
+            <label class="field"><span>停止后校订（可选）</span><select id="liveCleanerModel" aria-label="校订模型"></select></label>
+            <button id="liveCleanup" type="button" disabled>校订原文</button>
+            <span id="liveCleanupStatus" role="status">未校订</span>
+            <button id="liveOpenCleaned" type="button" disabled>打开校订 Markdown</button>
+            <output id="liveCleanedPath" class="live-cleaned-path"></output>
+          </div>
+        </section>
+        <div id="meetingHistoryPanel" class="meeting-history" role="tabpanel" aria-labelledby="liveHistoryTab" hidden>
         <aside class="meeting-sidebar">
           <div class="meeting-sidebar-actions">
-            <button type="button" id="meetingNewSessionBtn" class="primary" title="新建会话">新建</button>
+            <button type="button" id="meetingNewSessionBtn" class="primary legacy-capture-controls" title="新建会话" hidden>新建</button>
             <button type="button" id="meetingRefreshSessionsBtn" title="刷新列表">刷新</button>
           </div>
           <label class="field meeting-search">
@@ -619,7 +688,7 @@
           <div id="meetingSessionList" class="meeting-session-list" role="listbox" aria-label="历史会话"></div>
         </aside>
         <div class="meeting-main">
-          <section class="meeting-console" aria-label="录制控制台">
+          <section class="meeting-console" aria-label="历史会话">
             <div class="meeting-console-row">
               <label class="field grow">
                 <span>标题</span>
@@ -631,7 +700,7 @@
                 <span id="meetingCaptureBadge" data-kind="idle">空闲</span>
               </div>
             </div>
-            <div class="meeting-console-row meeting-device-row">
+            <div class="meeting-console-row meeting-device-row legacy-capture-controls" hidden>
               <label class="field">
                 <span>麦克风</span>
                 <select id="meetingMicSelect">
@@ -654,13 +723,13 @@
               <button type="button" id="meetingRefreshDevicesBtn" title="刷新设备">设备</button>
             </div>
             <div class="meeting-console-footer">
-              <div class="meeting-console-actions" role="group" aria-label="录制控制">
+              <div class="meeting-console-actions legacy-capture-controls" role="group" aria-label="录制控制" hidden>
                 <button type="button" id="meetingStartBtn" class="primary">开始</button>
                 <button type="button" id="meetingPauseBtn" disabled>暂停</button>
                 <button type="button" id="meetingResumeBtn" disabled>继续</button>
                 <button type="button" id="meetingStopBtn" disabled>停止</button>
               </div>
-              <p id="meetingConsoleHint" class="meeting-hint">录制停止后可生成原文；会议工作台只处理实时会议录制。</p>
+              <p id="meetingConsoleHint" class="meeting-hint">会议历史</p>
             </div>
           </section>
 
@@ -752,6 +821,7 @@
             </div>
           </section>
         </div>
+        </div>
       </section>
 
       <label class="field result-field advanced-field">
@@ -775,6 +845,7 @@
     <script src="../audio-utils.js"></script>
     <script src="./meeting-ui.js"></script>
     <script src="./file-ui.js"></script>
+    <script src="./live-meeting-ui.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

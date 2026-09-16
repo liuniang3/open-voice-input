@@ -30,6 +30,23 @@ contextBridge.exposeInMainWorld("mimoInput", {
   openResultWindow: () => ipcRenderer.invoke("window:result"),
   openMeetingWorkspace: () => ipcRenderer.invoke("window:meeting"),
   openFileWorkspace: () => ipcRenderer.invoke("window:file"),
+  getPermissionStatus: () => ipcRenderer.invoke("app:permissions:status"),
+  requestMicrophoneAccess: () => ipcRenderer.invoke("app:permissions:microphone"),
+  openPermissionSettings: (kind) => ipcRenderer.invoke("app:permissions:open-settings", kind),
+  meetingLiveStart: (payload) => ipcRenderer.invoke("meeting:live:start", payload),
+  meetingLiveStop: () => ipcRenderer.invoke("meeting:live:stop"),
+  meetingLiveRetry: (payload) => ipcRenderer.invoke("meeting:live:retry", payload),
+  meetingLiveCleanup: (payload) => ipcRenderer.invoke("meeting:live:cleanup", payload),
+  meetingLiveStatus: () => ipcRenderer.invoke("meeting:live:status"),
+  meetingLiveRecover: (payload) => ipcRenderer.invoke("meeting:live:recover", payload),
+  meetingLiveChooseDestination: () => ipcRenderer.invoke("meeting:live:choose-destination"),
+  meetingLiveOpenPath: (payload) => ipcRenderer.invoke("meeting:live:open-path", payload),
+  onMeetingLiveUpdate: (callback) => {
+    if (typeof callback !== "function") throw new TypeError("callback required");
+    const listener = (_event, dto) => callback(dto);
+    ipcRenderer.on("meeting:live:update", listener);
+    return () => ipcRenderer.removeListener("meeting:live:update", listener);
+  },
   onHotkeyRecord: (callback) => ipcRenderer.on("hotkey-record", callback),
   onRecordingCommand: (callback) => ipcRenderer.on("recording-command", (_event, command) => callback(command)),
   onRetryLastVoiceRequest: (callback) => ipcRenderer.on("retry-last-voice-request", callback),

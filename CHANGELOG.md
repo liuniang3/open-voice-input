@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Cross-Platform Meeting Realtime Transcription
+
+- Added a macOS native microphone/system audio helper, permission and paste handling, platform-aware hotkeys, and macOS build/CI configuration alongside Windows.
+- Added a primary meeting realtime workspace: hotkey start, MiMo ASR by default, independent 30-second Markdown autosave, complete audio archives, persisted retries, and crash recovery.
+- Meeting realtime recording never invokes cleanup or speaker diarization. Explicit post-recording cleanup uses a selected model and writes a separate Markdown result.
+- Added tests for complete audio tails, stalled ASR, crash replay, note protection, model profile isolation, and cross-platform integration.
+- Native macOS recording and paste require Mac hardware validation; Windows automation does not establish macOS runtime compatibility.
+
 ### Added
 
 - Added an independent file transcription workspace with per-file ASR selection, transcript correction, structured summarization, and Markdown/TXT/DOCX export.

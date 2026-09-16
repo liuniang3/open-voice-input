@@ -1,5 +1,9 @@
 # Open Voice Input
 
+The current development version adds Windows/macOS platform support and a **meeting realtime transcription** workspace. Start from the configurable meeting hotkey, keep full audio locally, and autosave Markdown every 30 seconds. MiMo ASR is the default; text cleanup is optional and runs only after recording ends. See [meeting realtime behavior and recovery](docs/MEETING_REALTIME.md).
+
+macOS native capture uses AVAudioEngine and ScreenCaptureKit (macOS 13+), with microphone, screen/system audio and accessibility permission handling. macOS build jobs are provided for Apple Silicon and Intel; native capture/paste still require validation on a Mac. `npm run dist:mac` must run on macOS with Xcode Command Line Tools. Windows remains supported by `npm run dist`.
+
 Windows voice input assistant with pluggable ASR providers and optional LLM text cleanup.
 
 Open Voice Input is an Electron MVP for global dictation on Windows. It is not a Windows IME driver. It records speech, transcribes it through a selected ASR provider, optionally cleans the raw transcript with a text model, writes the result to the clipboard, and pastes it into the previously focused app.

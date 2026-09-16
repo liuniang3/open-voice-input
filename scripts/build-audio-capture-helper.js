@@ -136,10 +136,27 @@ function fail(messageEn, messageZh) {
 }
 
 function main() {
+  if (process.platform === "darwin") {
+    const arch = process.env.OVI_TARGET_ARCH || process.arch;
+    if (!["x64", "arm64"].includes(arch)) fail(`Unsupported macOS architecture: ${arch}`);
+    // FFmpeg and Electron must match the build host. CI runs one native host per arch.
+    if (arch !== process.arch) fail("Build on a native matching macOS runner; do not mix helper/FFmpeg architectures.");
+    const packageDir = path.join(ROOT, "native", "macos-audio-capture-helper");
+    const plist = path.join(packageDir, "Info.plist");
+    const result = spawnSync("xcrun", ["swift", "build", "--package-path", packageDir,
+      "-c", "release", "--arch", arch === "x64" ? "x86_64" : "arm64",
+      "-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", plist],
+    { stdio: "inherit", env: { ...process.env, MACOSX_DEPLOYMENT_TARGET: "13.0" } });
+    if (result.error || result.status !== 0) fail(result.error?.message || "Swift helper build failed");
+    const helper = path.join(packageDir, ".build", "release", "audio-capture-helper");
+    if (!existsFile(helper)) fail(`Swift build produced no helper: ${helper}`);
+    fs.chmodSync(helper, 0o755);
+    console.log(`macOS ${arch} capture helper ready: ${helper}`);
+    return;
+  }
   if (process.platform !== "win32") {
     fail(
-      "audio-capture-helper build is Windows-only (WASAPI).",
-      "audio-capture-helper 仅支持在 Windows 上构建（WASAPI）。"
+      "audio-capture-helper builds only on Windows (WASAPI) or macOS 13+ (Swift/ScreenCaptureKit)."
     );
   }
   if (!existsFile(MANIFEST)) {
@@ -181,7 +198,7 @@ function main() {
 
   // Write a short .cmd so paths with spaces (Program Files (x86)) are reliable.
   const tmpDir = require("node:os").tmpdir();
-  const batPath = path.join(tmpDir, `ovi-build-helper-${process.pid}.cmd`);
+  const batPath = path.join(tmpDir, `ovi-build-helper-${process.pid}-${Date.now()}.cmd`);
   const batBody = [
     "@echo off",
     "setlocal",
@@ -200,9 +217,8 @@ function main() {
   console.log(`Manifest: ${relativeManifest}`);
   console.log("Building audio-capture-helper (release)...");
 
-  let result;
-  try {
-    result = spawnSync("cmd.exe", ["/d", "/c", batPath], {
+  // Retain the generated build script for diagnostics; do not delete workspace/user files.
+  const result = spawnSync("cmd.exe", ["/d", "/c", batPath], {
       cwd: ROOT,
       env: {
         ...process.env,
@@ -210,14 +226,7 @@ function main() {
       },
       stdio: "inherit",
       windowsHide: true
-    });
-  } finally {
-    try {
-      fs.unlinkSync(batPath);
-    } catch {
-      // ignore temp cleanup failure
-    }
-  }
+  });
 
   if (result.error) {
     fail(result.error.message || String(result.error));

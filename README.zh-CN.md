@@ -1,5 +1,9 @@
 # Open Voice Input
 
+当前开发版加入 Windows/macOS 双端适配和 **会议实时转录** 工作区：自定义快捷键开始、默认 MiMo ASR、完整音频持续保留、每 30 秒自动保存 Markdown。录制中不清理文本、不区分讲话人；结束后可选择模型生成独立清理稿。详见 [会议实时转录与恢复说明](docs/MEETING_REALTIME.md)。
+
+macOS 原生采集使用 AVAudioEngine 与 ScreenCaptureKit（macOS 13+），并增加麦克风、屏幕/系统音频、辅助功能权限处理。已提供 Apple Silicon/Intel 构建配置；Mac 原生采集和粘贴仍需要真机验证。在装有 Xcode Command Line Tools 的 Mac 上执行 `npm run dist:mac`，Windows 继续执行 `npm run dist`。
+
 一个支持可插拔 ASR 供应商和可选 LLM 文本清理的 Windows 语音输入助手。
 
 Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱动。它会录制语音，通过用户选择的 ASR 供应商转写文本，再按需调用文本模型清理口头词、重复片段和标点，最后写入剪贴板，并尝试粘贴到之前光标所在的应用里。

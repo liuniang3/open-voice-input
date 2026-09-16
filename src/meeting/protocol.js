@@ -5,7 +5,7 @@ const {
   HELPER_NAME,
   HELPER_VERSION,
   PROTOCOL_VERSION,
-  REQUIRED_CAPABILITIES
+  requiredCapabilitiesForPlatform
 } = require("./constants");
 
 function createCommandId(prefix = "cmd") {
@@ -54,7 +54,8 @@ function resultError(message) {
 
 function assertHelloCompatible(
   hello,
-  { requiredVersion = HELPER_VERSION, requiredCapabilities = REQUIRED_CAPABILITIES } = {}
+  { requiredVersion = HELPER_VERSION, platform = process.platform,
+    requiredCapabilities = requiredCapabilitiesForPlatform(platform) } = {}
 ) {
   if (!hello || hello.type !== "hello") {
     return { ok: false, code: "missing_hello", message: "helper did not emit hello" };

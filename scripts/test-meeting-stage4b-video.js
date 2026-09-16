@@ -19,7 +19,8 @@ const { IMPORT_SESSION_ORIGIN_QPC, IMPORT_QPC_FREQUENCY } = require("../src/meet
 const ui = require("../src/renderer/meeting-ui.js");
 
 const ROOT = path.resolve(__dirname, "..");
-const PREPARED = path.join(ROOT, "native", "ffmpeg", "ffmpeg.exe");
+const BINARY_NAME = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+const PREPARED = path.join(ROOT, "native", "ffmpeg", BINARY_NAME);
 
 let passed = 0;
 function test(name, fn) {
@@ -278,15 +279,15 @@ async function main() {
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
     assert.equal(pkg.devDependencies["ffmpeg-static"], "5.3.0");
     assert.equal(pkg.dependencies["ffmpeg-static"], undefined);
-    const resources = pkg.build?.extraResources || [];
-    assert.ok(resources.some((r) => String(r.to || "").replace(/\\/g, "/") === "native/ffmpeg.exe"));
+    const resources = [...(pkg.build?.extraResources || []), ...(pkg.build?.[process.platform === "win32" ? "win" : "mac"]?.extraResources || [])];
+    assert.ok(resources.some((r) => String(r.to || "").replace(/\\/g, "/") === `native/${BINARY_NAME}`));
     assert.ok(resources.some((r) => String(r.to || "").includes("THIRD_PARTY_NOTICES")));
     assert.ok(resources.some((r) => String(r.to || "").includes("FFMPEG-GPL-3.0")));
     assert.ok(pkg.build.files.some((f) => String(f).includes("ffmpeg-static")));
     assert.ok(fs.existsSync(PREPARED));
     // only one prepared binary path under native/ffmpeg
     const ffDir = path.join(ROOT, "native", "ffmpeg");
-    const exes = fs.readdirSync(ffDir).filter((n) => n.toLowerCase().endsWith(".exe"));
+    const exes = fs.readdirSync(ffDir).filter((n) => n === BINARY_NAME);
     assert.equal(exes.length, 1);
     assert.ok(fs.existsSync(path.join(ROOT, "THIRD_PARTY_NOTICES.md")));
     assert.ok(fs.existsSync(path.join(ROOT, "node_modules", "ffmpeg-static", "LICENSE")));

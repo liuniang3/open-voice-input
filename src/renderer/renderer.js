@@ -152,6 +152,7 @@ let recordingAudioPolicy = {
 let recordingSegmentState = null;
 let silenceGainNode;
 let isRecording = false;
+let isStartingRecording = false;
 let isTranscribing = false;
 let appSettings = {};
 let autoSendAfterTranscript = false;
@@ -893,13 +894,16 @@ async function refreshStatus() {
 }
 
 async function startRecording({ autoSend = true } = {}) {
-  if (isRecording || isTranscribing) return;
+  if (isRecording || isTranscribing || isStartingRecording) return;
+  isStartingRecording = true;
   logRenderer("recording: start requested", `autoSend=${autoSend}`);
   let status;
   try {
     status = await refreshStatus();
   } catch (error) {
     logRenderer("settings: refresh before recording failed", error.message || String(error));
+  } finally {
+    isStartingRecording = false;
   }
   autoSendAfterTranscript = autoSend;
   recordingTranscriptionMode = normalizeTranscriptionMode(appSettings.transcriptionMode);
@@ -1513,9 +1517,16 @@ async function sendResult({ hideAfterSend = false } = {}) {
 
 async function refreshMicrophones({ requestPermission = false } = {}) {
   try {
-    if (requestPermission) {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((track) => track.stop());
+    if (requestPermission && !isRecording && !isStartingRecording) {
+      let probeStream;
+      try {
+        probeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } finally {
+        probeStream?.getTracks().forEach((track) => track.stop());
+        // A permission probe temporarily reserves short capture in the main process.
+        // Never release that reservation after an actual recording has started.
+        if (!isRecording && !isStartingRecording) await window.mimoInput.clearRecordingKeys();
+      }
     }
 
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -1593,7 +1604,9 @@ function formatHotkey(event) {
   if (!baseKey) return "";
 
   const parts = [];
-  if (event.ctrlKey || event.metaKey) parts.push("CommandOrControl");
+  const isMac = /Mac/i.test(navigator.userAgentData?.platform || navigator.platform || "");
+  if (event.ctrlKey) parts.push(isMac ? "Control" : "CommandOrControl");
+  if (event.metaKey) parts.push(isMac ? "Command" : "Super");
   if (event.altKey) parts.push("Alt");
   if (event.shiftKey) parts.push("Shift");
 
@@ -1791,7 +1804,13 @@ function applyWindowMode(mode) {
   }
   if (mode !== "meeting") {
     stopMeetingPolling();
+    window.MeetingLiveUi?.close();
+  } else {
+    void window.MeetingLiveUi?.open();
   }
+  const heading = document.getElementById("workspaceHeading");
+  if (heading) heading.textContent = mode === "meeting" ? "会议实时转录" : "Open Voice Input";
+  document.title = mode === "meeting" ? "会议实时转录" : "Open Voice Input";
   if (mode !== "file") {
     window.FileTranscriptionUi?.stopPolling?.();
   }
@@ -3193,17 +3212,19 @@ async function openMeetingWorkspace({ fromModeEvent = false } = {}) {
     applyWindowMode("meeting");
     if (settingsPanel) settingsPanel.hidden = true;
     if (meetingPanel) meetingPanel.hidden = false;
-    const hint = meetingEls().hint;
-    if (hint) hint.textContent = "停止仅落盘本地；需手动生成原文。";
-    try {
-      await refreshMeetingDevices();
-      await refreshMeetingSessions();
-      if (meetingState.selectedId) await selectMeetingSession(meetingState.selectedId);
-      else updateMeetingControls();
-    } catch (error) {
-      if (hint) hint.textContent = error.message || String(error);
-    }
   });
+}
+
+async function openMeetingHistory() {
+  const hint = meetingEls().hint;
+  if (hint) hint.textContent = "会议历史";
+  try {
+    await refreshMeetingSessions();
+    if (meetingState.selectedId) await selectMeetingSession(meetingState.selectedId);
+    else updateMeetingControls();
+  } catch (error) {
+    if (hint) hint.textContent = error.message || String(error);
+  }
 }
 
 async function meetingCreateSession() {
@@ -3534,6 +3555,10 @@ function meetingCopyCurrent() {
 
 function bindMeetingUi() {
   if (!meetingPanel) return;
+  document.getElementById("liveHistoryTab")?.addEventListener("click", () => {
+    void openMeetingHistory();
+  });
+  document.getElementById("liveMeetingTab")?.addEventListener("click", stopMeetingPolling);
   document.getElementById("meetingNewSessionBtn")?.addEventListener("click", () => {
     meetingCreateSession().catch((e) => {
       const h = meetingEls().hint;

@@ -92,7 +92,7 @@ function makeSupervisor(sessionsRoot, extra = {}) {
 async function run() {
   await test("protocol: parse and hello compatibility", () => {
     const hello = parseHelperLine(JSON.stringify(stage0bHello()));
-    const ok = assertHelloCompatible(hello);
+    const ok = assertHelloCompatible(hello, { requiredCapabilities: REQUIRED_CAPABILITIES });
     assert.equal(ok.ok, true);
     const bad = assertHelloCompatible(
       stage0bHello({ version: "9.9.9" })
@@ -538,7 +538,7 @@ async function run() {
       appRoot: ROOT,
       resourcesPath: path.join(ROOT, "resources-fake")
     });
-    assert.equal(pkgPath, path.join(ROOT, "resources-fake", "native", "audio-capture-helper.exe"));
+    assert.equal(pkgPath, path.join(ROOT, "resources-fake", "native", process.platform === "win32" ? "audio-capture-helper.exe" : "audio-capture-helper"));
   });
 
   await test("supervisor: hang prepare returns bounded + recoverable", async () => {

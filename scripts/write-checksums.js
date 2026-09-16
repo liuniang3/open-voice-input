@@ -4,11 +4,11 @@ const path = require("node:path");
 
 const distDir = path.resolve(__dirname, "..", "dist");
 const executables = fs.existsSync(distDir)
-  ? fs.readdirSync(distDir).filter((file) => file.toLowerCase().endsWith(".exe")).sort()
+  ? fs.readdirSync(distDir).filter((file) => /\.(exe|dmg|zip)$/i.test(file) && fs.statSync(path.join(distDir, file)).isFile()).sort()
   : [];
 
 if (!executables.length) {
-  console.error("No .exe artifacts were found in dist/.");
+  console.error("No .exe/.dmg/.zip artifacts were found in dist/.");
   process.exit(1);
 }
 

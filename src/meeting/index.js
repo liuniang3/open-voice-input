@@ -257,7 +257,7 @@ function createMeetingCaptureService(options = {}) {
       startedAtMs,
       tracks: {
         microphone: { role: "self" },
-        system: { role: "remote_mix_for_diarization", captureScope: "endpoint_mix" }
+        system: { role: "remote_mix_for_diarization", captureScope: process.platform === "darwin" ? "screencapturekit_display_mix" : "endpoint_mix" }
       }
     };
   }
@@ -328,6 +328,12 @@ function createMeetingCaptureService(options = {}) {
     const sup = getSupervisor();
     try {
       const response = await sup.stopCapture();
+      if (response.result?.result?.data?.sessionFaulted || response.error?.code === "capture_tail_failed") {
+        const error = { code: "capture_tail_failed", message: "Capture stopped with an archive fault; recover retained native audio" };
+        lifecycle = { ...lifecycle, status: "faulted", lastError: error };
+        if (id) await store.updateSession(id, { status: "faulted", lastError: error });
+        return { ok: false, sessionId: id, captureStopped: true, error };
+      }
       if (response.ok === false) {
         const err = {
           code: response.error?.code || "stop_failed",
@@ -396,7 +402,7 @@ function createMeetingCaptureService(options = {}) {
         reason: avail.available ? null : avail.code || "helper_missing"
       },
       limitations: [
-        "endpoint_mix_includes_this_app_audio",
+        process.platform === "darwin" ? "screencapturekit_system_mix_includes_app_audio" : "endpoint_mix_includes_this_app_audio",
         "drm_may_silence_loopback",
         "no_process_isolation",
         "no_asr",

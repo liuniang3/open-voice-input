@@ -1,4 +1,4 @@
-name: Build Windows Release
+name: Build Desktop Release
 
 on:
   workflow_dispatch:
@@ -52,4 +52,46 @@ jobs:
           files: |
             dist/*.exe
             dist/SHA256SUMS.txt
+          generate_release_notes: true
+
+  build-macos:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x64
+          - runner: macos-15
+            arch: arm64
+    env:
+      OVI_TARGET_ARCH: ${{ matrix.arch }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          architecture: ${{ matrix.arch }}
+          cache: npm
+      - run: npm ci
+      - name: Build and test unsigned macOS distribution
+        run: npm run dist:mac
+      - name: Keep platform checksums separate
+        run: cp dist/SHA256SUMS.txt dist/macOS-${{ matrix.arch }}-SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: open-voice-input-macos-${{ matrix.arch }}-unsigned
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/macOS-*-SHA256SUMS.txt
+      - name: Publish unsigned macOS assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.zip
+            dist/macOS-*-SHA256SUMS.txt
           generate_release_notes: true

@@ -5,8 +5,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
-const PREPARED = path.join(ROOT, "native", "ffmpeg", "ffmpeg.exe");
-const REL = "native/ffmpeg/ffmpeg.exe";
+const NAME = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+const PREPARED = path.join(ROOT, "native", "ffmpeg", NAME);
+const REL = `native/ffmpeg/${NAME}`;
 
 function main() {
   if (!fs.existsSync(PREPARED)) {
@@ -30,6 +31,13 @@ function main() {
     console.error("unexpected ffmpeg -version output");
     process.exitCode = 1;
     return;
+  }
+  if (process.platform === "darwin") {
+    const result = spawnSync("lipo", ["-archs", PREPARED], { encoding: "utf8" });
+    const expected = process.arch === "x64" ? "x86_64" : "arm64";
+    if (result.status !== 0 || !String(result.stdout).trim().split(/\s+/).includes(expected)) {
+      throw new Error(`Prepared FFmpeg does not contain native ${expected} architecture`);
+    }
   }
   console.log("ffmpeg ok:", REL);
 }

@@ -1,10 +1,12 @@
 {
   "name": "open-voice-input",
   "productName": "Open Voice Input",
-  "version": "0.2.0",
-  "description": "Windows voice input assistant with pluggable ASR providers and optional LLM cleanup.",
+  "version": "0.3.0",
+  "description": "Windows and macOS voice input assistant with pluggable ASR providers and optional LLM cleanup.",
   "main": "src/main.js",
   "scripts": {
+    "test": "node scripts/run-tests.js",
+    "test:all": "node scripts/run-tests.js",
     "start": "electron .",
     "check": "node scripts/check-config.js",
     "check:secrets": "node scripts/check-secrets.js",
@@ -19,6 +21,9 @@
     "test:pipeline": "node scripts/test-audio-segmentation.js && node scripts/test-voice-pipeline.js",
     "test:runtime-log": "node scripts/test-runtime-log.js",
     "test:settings": "node scripts/test-settings-shortcuts.js",
+    "test:platform": "node scripts/test-platform.js",
+    "test:meeting:live": "node scripts/test-meeting-realtime.js",
+    "test:meeting:live:ui": "node scripts/test-meeting-live-ui.js",
     "test:meeting": "node scripts/test-meeting-stage0a.js",
     "test:meeting:1a": "node scripts/test-meeting-stage1a.js",
     "test:meeting:2a": "node scripts/test-meeting-stage2a.js",
@@ -30,8 +35,10 @@
     "test:meeting:4c": "node scripts/test-meeting-stage4c.js",
     "test:meeting:file": "node scripts/test-meeting-file-transcription.js",
     "build:dir": "npm run check:secrets && npm run build:helper && npm run check:helper && npm run prepare:ffmpeg && npm run check:ffmpeg && node scripts/run-electron-builder.js --dir --win --x64",
-    "dist": "npm run check:secrets && npm run build:helper && npm run check:helper && npm run prepare:ffmpeg && npm run check:ffmpeg && npm run test:runtime-log && npm run test:settings && npm run test:pipeline && npm run test:clean && npm run test:meeting && npm run test:meeting:1a && npm run test:meeting:2a && npm run test:meeting:2b && npm run test:meeting:3a && npm run test:meeting:ui && npm run test:meeting:4b && npm run test:meeting:video && npm run test:meeting:4c && npm run test:meeting:file && node scripts/run-electron-builder.js --win nsis portable --x64 && npm run checksums",
-    "dist:portable": "npm run check:secrets && npm run build:helper && npm run check:helper && npm run prepare:ffmpeg && npm run check:ffmpeg && node scripts/run-electron-builder.js --win portable --x64 && npm run checksums"
+    "dist": "npm run check:secrets && npm run build:helper && npm run check:helper && npm run prepare:ffmpeg && npm run check:ffmpeg && npm run test:all && node scripts/run-electron-builder.js --win nsis portable --x64 && npm run checksums",
+    "dist:portable": "npm run check:secrets && npm run build:helper && npm run check:helper && npm run prepare:ffmpeg && npm run check:ffmpeg && node scripts/run-electron-builder.js --win portable --x64 && npm run checksums",
+    "build:dir:mac": "npm run check:secrets && npm run build:helper && npm run check:helper && npm run prepare:ffmpeg && npm run check:ffmpeg && node scripts/run-electron-builder.js --dir --mac",
+    "dist:mac": "npm run check:secrets && npm run build:helper && npm run check:helper && npm run prepare:ffmpeg && npm run check:ffmpeg && npm run test:all && node scripts/run-electron-builder.js --mac dmg zip && npm run checksums"
   },
   "keywords": [
     "asr",
@@ -70,24 +77,8 @@
     ],
     "extraResources": [
       {
-        "from": "src/win-hotkey-helper.ps1",
-        "to": "win-hotkey-helper.ps1"
-      },
-      {
-        "from": "assets/mimo-icon.ico",
-        "to": "assets/mimo-icon.ico"
-      },
-      {
         "from": "assets/mimo-tray.png",
         "to": "assets/mimo-tray.png"
-      },
-      {
-        "from": "native/audio-capture-helper/target/release/audio-capture-helper.exe",
-        "to": "native/audio-capture-helper.exe"
-      },
-      {
-        "from": "native/ffmpeg/ffmpeg.exe",
-        "to": "native/ffmpeg.exe"
       },
       {
         "from": "THIRD_PARTY_NOTICES.md",
@@ -100,6 +91,12 @@
     ],
     "win": {
       "icon": "assets/mimo-icon.ico",
+      "extraResources": [
+        { "from": "src/win-hotkey-helper.ps1", "to": "win-hotkey-helper.ps1" },
+        { "from": "assets/mimo-icon.ico", "to": "assets/mimo-icon.ico" },
+        { "from": "native/audio-capture-helper/target/release/audio-capture-helper.exe", "to": "native/audio-capture-helper.exe" },
+        { "from": "native/ffmpeg/ffmpeg.exe", "to": "native/ffmpeg.exe" }
+      ],
       "target": [
         {
           "target": "nsis",
@@ -113,6 +110,25 @@
             "x64"
           ]
         }
+      ]
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/mimo-icon.png",
+      "minimumSystemVersion": "13.0",
+      "target": ["dmg", "zip"],
+      "artifactName": "${productName}-macOS-${version}-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Record your voice and save local meeting audio.",
+        "NSScreenCaptureUsageDescription": "Capture meeting system audio. Screen video is not saved."
+      },
+      "binaries": ["Contents/Resources/native/audio-capture-helper", "Contents/Resources/native/ffmpeg"],
+      "extraResources": [
+        { "from": "native/macos-audio-capture-helper/.build/release/audio-capture-helper", "to": "native/audio-capture-helper" },
+        { "from": "native/ffmpeg/ffmpeg", "to": "native/ffmpeg" }
       ]
     },
     "nsis": {

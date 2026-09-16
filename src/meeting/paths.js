@@ -11,10 +11,10 @@ function stripExtendedPrefix(input) {
   return value;
 }
 
-function normalizePathForCompare(input) {
-  return stripExtendedPrefix(path.resolve(String(input || "")))
-    .replace(/\//g, "\\")
-    .toLowerCase();
+function normalizePathForCompare(input, platform = process.platform) {
+  const value = stripExtendedPrefix(path.resolve(String(input || "")));
+  // APFS can be case sensitive. Never lowercase POSIX paths for containment.
+  return platform === "win32" ? value.replace(/\//g, "\\").toLowerCase() : value;
 }
 
 function tryRealpath(input) {
@@ -73,7 +73,8 @@ function isPathInsideRoot(rootDir, candidatePath) {
   const root = normalizePathForCompare(rootReal);
   const candidate = normalizePathForCompare(candidatePath);
   if (candidate === root) return true;
-  const prefix = root.endsWith("\\") ? root : `${root}\\`;
+  const separator = process.platform === "win32" ? "\\" : path.sep;
+  const prefix = root.endsWith(separator) ? root : `${root}${separator}`;
   return candidate.startsWith(prefix);
 }
 
@@ -137,12 +138,19 @@ function getSystemTrackDir(sessionDir) {
   return path.join(sessionDir, "audio", "system");
 }
 
-function resolveHelperPath({ isPackaged, resourcesPath, appRoot, overridePath }) {
+function resolveHelperPath({ isPackaged, resourcesPath, appRoot, overridePath, platform = process.platform }) {
   if (overridePath) {
     return path.resolve(overridePath);
   }
+  if (!["win32", "darwin"].includes(platform)) {
+    throw Object.assign(new Error(`native meeting capture unsupported on ${platform}`), { code: "platform_unsupported" });
+  }
+  const name = platform === "win32" ? `${HELPER_NAME}.exe` : HELPER_NAME;
   if (isPackaged) {
-    return path.join(resourcesPath, "native", `${HELPER_NAME}.exe`);
+    return path.join(resourcesPath, "native", name);
+  }
+  if (platform === "darwin") {
+    return path.join(appRoot, "native", "macos-audio-capture-helper", ".build", "release", name);
   }
   const candidates = [
     path.join(appRoot, "native", "audio-capture-helper", "target", "release", `${HELPER_NAME}.exe`),
