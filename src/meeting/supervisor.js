@@ -12,6 +12,7 @@ const {
 const {
   assertHelperReady,
   assertPathInsideRoot,
+  resolveCanonicalCandidate,
   resolveHelperPath
 } = require("./paths");
 const {
@@ -49,6 +50,7 @@ function createAudioCaptureSupervisor(options = {}) {
   let stdoutRl = null;
   let started = false;
   let configured = false;
+  let configuredRoot = "";
   let hello = null;
   let activeSessionId = null;
   let activeOutputDir = null;
@@ -172,6 +174,7 @@ function createAudioCaptureSupervisor(options = {}) {
       stdoutRl = null;
       started = false;
       configured = false;
+      configuredRoot = "";
       hello = null;
       activeSessionId = null;
       activeOutputDir = null;
@@ -272,8 +275,9 @@ function createAudioCaptureSupervisor(options = {}) {
       throw error;
     }
     if (!started) await start();
+    const safeRoot = resolveCanonicalCandidate(root).resolved;
     const response = await sendCommand("configure", {
-      session_root: root,
+      session_root: safeRoot,
       parent_pid: pid
     });
     if (!response.ok) {
@@ -282,6 +286,7 @@ function createAudioCaptureSupervisor(options = {}) {
       throw error;
     }
     configured = true;
+    configuredRoot = safeRoot;
     return response;
   }
 
@@ -317,8 +322,8 @@ function createAudioCaptureSupervisor(options = {}) {
         throw error;
       }
     }
-    const safeMic = assertPathInsideRoot(sessionRoot || microphoneOutputDir, microphoneOutputDir);
-    const safeSys = assertPathInsideRoot(sessionRoot || systemOutputDir, systemOutputDir);
+    const safeMic = assertPathInsideRoot(configuredRoot, microphoneOutputDir);
+    const safeSys = assertPathInsideRoot(configuredRoot, systemOutputDir);
 
     if (
       activeSessionId &&
@@ -401,7 +406,7 @@ function createAudioCaptureSupervisor(options = {}) {
       error.code = pathCheck.code;
       throw error;
     }
-    const safeOutputDir = assertPathInsideRoot(sessionRoot || outputDir, outputDir);
+    const safeOutputDir = assertPathInsideRoot(configuredRoot, outputDir);
 
     if (
       activeSessionId &&
@@ -492,6 +497,7 @@ function createAudioCaptureSupervisor(options = {}) {
     child = null;
     started = false;
     configured = false;
+    configuredRoot = "";
     activeSessionId = null;
     activeOutputDir = null;
     activeSystemOutputDir = null;
