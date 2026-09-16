@@ -63,9 +63,37 @@ function hasParent(p) {
   return /(^|[\\/])\.\.([\\/]|$)/.test(String(p || ""));
 }
 
+function canonicalPath(input) {
+  const abs = path.resolve(input);
+  try {
+    return fs.realpathSync.native(abs);
+  } catch {
+    try {
+      return fs.realpathSync(abs);
+    } catch {
+      let current = abs;
+      const suffix = [];
+      while (true) {
+        const parent = path.dirname(current);
+        if (!parent || parent === current) return abs;
+        suffix.unshift(path.basename(current));
+        try {
+          return path.join(fs.realpathSync.native(parent), ...suffix);
+        } catch {
+          try {
+            return path.join(fs.realpathSync(parent), ...suffix);
+          } catch {
+            current = parent;
+          }
+        }
+      }
+    }
+  }
+}
+
 function underRoot(root, candidate) {
-  const r = path.resolve(root);
-  const c = path.resolve(candidate);
+  const r = canonicalPath(root);
+  const c = canonicalPath(candidate);
   const relative = path.relative(r, c);
   return !relative || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
@@ -157,7 +185,7 @@ rl.on("line", (line) => {
       }
       try {
         fs.mkdirSync(msg.session_root, { recursive: true });
-        sessionRoot = path.resolve(msg.session_root);
+        sessionRoot = canonicalPath(msg.session_root);
         ok(id, {
           configured: true,
           jobObject: false,
