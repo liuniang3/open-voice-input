@@ -71,7 +71,12 @@ function resolveCanonicalCandidate(candidatePath) {
 function isPathInsideRoot(rootDir, candidatePath) {
   const rootReal = tryRealpath(rootDir) || path.resolve(rootDir);
   const root = normalizePathForCompare(rootReal);
-  const candidate = normalizePathForCompare(candidatePath);
+  let candidate;
+  try {
+    candidate = normalizePathForCompare(resolveCanonicalCandidate(candidatePath).resolved);
+  } catch {
+    return false;
+  }
   if (candidate === root) return true;
   const separator = process.platform === "win32" ? "\\" : path.sep;
   const prefix = root.endsWith(separator) ? root : `${root}${separator}`;

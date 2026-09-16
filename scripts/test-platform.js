@@ -9,7 +9,12 @@ const { PassThrough } = require("node:stream");
 const { spawn, spawnSync } = require("node:child_process");
 const { MACOS_REQUIRED_CAPABILITIES, REQUIRED_CAPABILITIES, requiredCapabilitiesForPlatform } = require("../src/meeting/constants");
 const { assertHelloCompatible } = require("../src/meeting/protocol");
-const { resolveHelperPath, assertPathInsideRoot, normalizePathForCompare } = require("../src/meeting/paths");
+const {
+  resolveHelperPath,
+  assertPathInsideRoot,
+  normalizePathForCompare,
+  resolveCanonicalCandidate
+} = require("../src/meeting/paths");
 const { resolveFfmpegPath } = require("../src/meeting/import/resolve-ffmpeg");
 const { createAudioCaptureSupervisor } = require("../src/meeting/supervisor");
 const { createMacOSUtilities } = require("../src/platform/macos");
@@ -58,7 +63,8 @@ async function run() {
     const root = path.join(temp, "root");
     const outside = path.join(temp, "root-other");
     fs.mkdirSync(root); fs.mkdirSync(outside);
-    assert.equal(assertPathInsideRoot(root, path.join(root, "new")), path.join(root, "new"));
+    const newPath = path.join(root, "new");
+    assert.equal(assertPathInsideRoot(root, newPath), resolveCanonicalCandidate(newPath).resolved);
     assert.throws(() => assertPathInsideRoot(root, outside), { code: "path_denied" });
     assert.throws(() => assertPathInsideRoot(root, "../outside"), { code: "path_denied" });
     fs.symlinkSync(outside, path.join(root, "escape"), process.platform === "win32" ? "junction" : "dir");

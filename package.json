@@ -1,7 +1,7 @@
 {
   "name": "open-voice-input",
   "productName": "Open Voice Input",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Windows and macOS voice input assistant with pluggable ASR providers and optional LLM cleanup.",
   "main": "src/main.js",
   "scripts": {
