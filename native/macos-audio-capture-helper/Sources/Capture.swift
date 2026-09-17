@@ -138,7 +138,7 @@ final class CaptureSession: NSObject, SCStreamOutput, SCStreamDelegate {
     let mode: String
     let origin = HostClock.now()
     private let emit: ([String: Any]) -> Void
-    private let engine = AVAudioEngine()
+    private var engine: AVAudioEngine?
     private var stream: SCStream?
     private var installedTap = false
     private var stopping = false
@@ -169,45 +169,44 @@ final class CaptureSession: NSObject, SCStreamOutput, SCStreamDelegate {
     func start(root: URL, command: [String: Any]) async throws -> [String: Any] {
         starting = true
         defer { starting = false }
-        let status = AVCaptureDevice.authorizationStatus(for: .audio)
-        if status == .notDetermined {
-            // Trigger a prompt but do not block JSONL command handling for human input.
-            AVCaptureDevice.requestAccess(for: .audio) { _ in }
-            throw HelperFailure("microphone_permission_required", "Grant Microphone access, then retry recording")
+        // System-only must not query/request mic permission or instantiate an input engine.
+        if mode != "system" {
+            let status = AVCaptureDevice.authorizationStatus(for: .audio)
+            if status == .notDetermined {
+                AVCaptureDevice.requestAccess(for: .audio) { _ in }
+                throw HelperFailure("microphone_permission_required", "Grant Microphone access, then retry recording")
+            }
+            guard status == .authorized else { throw HelperFailure("microphone_permission_denied", "Microphone access is denied or restricted") }
         }
-        guard status == .authorized else { throw HelperFailure("microphone_permission_denied", "Microphone access is denied or restricted") }
-        if mode == "dual", !CGPreflightScreenCaptureAccess() {
+        if mode != "microphone", !CGPreflightScreenCaptureAccess() {
             DispatchQueue.main.async { _ = CGRequestScreenCaptureAccess() }
             throw HelperFailure("screen_permission_required", "Grant Screen Recording access in System Settings, restart the app if requested, then retry")
         }
-        let micSpec = mode == "dual" ? command["microphone"] as? [String: Any] : command
-        guard let micSpec = micSpec, let micPath = micSpec["output_dir"] as? String else {
-            throw HelperFailure("invalid_start", "Microphone output_dir is required")
-        }
-        let microphoneDirectory = try canonicalDirectory(micPath, root: root)
         let subchunkMS = (command["subchunk_ms"] as? Int) ?? 1000
         guard (100...10000).contains(subchunkMS) else { throw HelperFailure("invalid_subchunk", "subchunk_ms must be 100-10000") }
-        let input = engine.inputNode
-        if let idText = micSpec["device_id"] as? String, !idText.isEmpty {
-            guard var deviceID = AudioDeviceID(idText), microphoneDevices().contains(where: { $0["id"] as? String == idText }),
-                  let unit = input.audioUnit else { throw HelperFailure("device_not_found", "Selected microphone is not available") }
-            guard AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
-                0, &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)) == noErr else {
-                throw HelperFailure("device_select_failed", "Could not select the microphone")
-            }
-        }
-        let nativeFormat = input.outputFormat(forBus: 0)
-        let micFormat = try PCMFormat(nativeFormat)
         var result: [String: Any] = ["started": true, "sessionId": sessionID, "captureMode": mode,
             "sessionOriginQpc": origin, "qpcFrequency": HostClock.frequency, "clockSource": "mach_absolute_time",
             "clockUnitNote": "Legacy qpc keys contain mach host ticks, not Windows QPC or IAudioClock", "archivePending": true]
+        var microphoneDirectory: URL?
+        if mode != "system" {
+            let spec = command["microphone"] as? [String: Any] ?? (mode == "microphone" ? command : nil)
+            guard let spec = spec, let output = spec["output_dir"] as? String else {
+                throw HelperFailure("invalid_start", "Microphone output_dir is required")
+            }
+            let directory = try canonicalDirectory(output, root: root)
+            microphoneDirectory = directory
+            let info = try prepareMicrophone(directory: directory, spec: spec, subchunkMS: subchunkMS)
+            result["microphone"] = info
+            if mode == "microphone" { result.merge(info) { _, new in new } }
+        }
         var systemDirectory: URL?
-        if mode == "dual" {
-            guard let spec = command["system"] as? [String: Any], let output = spec["output_dir"] as? String else {
+        if mode != "microphone" {
+            let spec = command["system"] as? [String: Any] ?? (mode == "system" ? command : nil)
+            guard let spec = spec, let output = spec["output_dir"] as? String else {
                 throw HelperFailure("invalid_start", "System output_dir is required")
             }
             let directory = try canonicalDirectory(output, root: root)
-            guard directory != microphoneDirectory else { throw HelperFailure("path_denied", "Track directories must differ") }
+            guard microphoneDirectory != directory else { throw HelperFailure("path_denied", "Track directories must differ") }
             systemDirectory = directory
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             try checkActive()
@@ -237,12 +236,37 @@ final class CaptureSession: NSObject, SCStreamOutput, SCStreamDelegate {
                 "notes": ["not an output-endpoint loopback", "includes app playback", "protected content may be silent", "video is discarded"]]
         }
         try checkActive()
-        try sink.prepare(track: "microphone", directory: microphoneDirectory, sessionID: sessionID,
-            format: micFormat, origin: origin, subchunkMS: subchunkMS) { [weak self] entry in self?.progress("microphone", "subchunk_sealed", entry) }
         if let directory = systemDirectory {
             try sink.prepare(track: "system", directory: directory, sessionID: sessionID,
                 format: PCMFormat(rate: 48000, channels: 2), origin: origin, subchunkMS: subchunkMS) { [weak self] entry in self?.progress("system", "subchunk_sealed", entry) }
         }
+        try sink.markRecording()
+        if let engine = engine {
+            engine.prepare()
+            try engine.start()
+        }
+        if let stream = stream { try await stream.startCapture() }
+        try checkActive()
+        if mode == "system", let info = result["system"] as? [String: Any] { result.merge(info) { _, new in new } }
+        return result
+    }
+
+    private func prepareMicrophone(directory: URL, spec: [String: Any], subchunkMS: Int) throws -> [String: Any] {
+        let engine = AVAudioEngine()
+        self.engine = engine
+        let input = engine.inputNode
+        if let idText = spec["device_id"] as? String, !idText.isEmpty {
+            guard var deviceID = AudioDeviceID(idText), microphoneDevices().contains(where: { $0["id"] as? String == idText }),
+                  let unit = input.audioUnit else { throw HelperFailure("device_not_found", "Selected microphone is not available") }
+            guard AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
+                0, &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)) == noErr else {
+                throw HelperFailure("device_select_failed", "Could not select the microphone")
+            }
+        }
+        let nativeFormat = input.outputFormat(forBus: 0)
+        let micFormat = try PCMFormat(nativeFormat)
+        try sink.prepare(track: "microphone", directory: directory, sessionID: sessionID,
+            format: micFormat, origin: origin, subchunkMS: subchunkMS) { [weak self] entry in self?.progress("microphone", "subchunk_sealed", entry) }
         input.installTap(onBus: 0, bufferSize: 2048, format: nativeFormat) { [weak self] buffer, time in
             guard let self = self else { return }
             do {
@@ -256,16 +280,8 @@ final class CaptureSession: NSObject, SCStreamOutput, SCStreamDelegate {
             object: engine, queue: nil) { [weak self] _ in
                 self?.sink.fault("microphone", "Audio device configuration changed; recording stopped to preserve format integrity")
             }
-        try sink.markRecording()
-        engine.prepare()
-        try engine.start()
-        if let stream = stream { try await stream.startCapture() }
-        try checkActive()
-        let micInfo: [String: Any] = ["track": "microphone", "role": "self", "outputDir": microphoneDirectory.path,
-            "deviceId": micSpec["device_id"] as? String ?? "default", "actualL0Format": micFormat.json, "captureScope": "microphone"]
-        result["microphone"] = micInfo
-        if mode == "microphone" { result.merge(micInfo) { _, new in new } }
-        return result
+        return ["track": "microphone", "role": "self", "outputDir": directory.path,
+            "deviceId": spec["device_id"] as? String ?? "default", "actualL0Format": micFormat.json, "captureScope": "microphone"]
     }
 
     func pause(_ value: Bool) throws -> [String: Any] {
@@ -288,8 +304,9 @@ final class CaptureSession: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         stopping = true
         if let observer = configurationObserver { NotificationCenter.default.removeObserver(observer); configurationObserver = nil }
-        engine.stop()
-        if installedTap { engine.inputNode.removeTap(onBus: 0); installedTap = false }
+        engine?.stop()
+        if installedTap { engine?.inputNode.removeTap(onBus: 0); installedTap = false }
+        engine = nil
         var finalReason = reason
         if let capture = stream {
             do { try await capture.stopCapture() } catch { if finalReason == nil { finalReason = "ScreenCaptureKit stop failed: \(error)" } }

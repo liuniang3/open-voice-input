@@ -58,7 +58,9 @@ function createMeetingCaptureService(options = {}) {
     resourcesPath = "",
     appRoot = "",
     logger = () => {},
-    helperPath
+    helperPath,
+    platform = process.platform,
+    spawnImpl
   } = options;
 
   const store = createSessionStore({ userDataPath });
@@ -79,6 +81,8 @@ function createMeetingCaptureService(options = {}) {
         sessionRoot: store.sessionsRoot,
         parentPid: process.pid,
         helperPath,
+        platform,
+        spawnImpl,
         logger
       });
       supervisor.onFault(async (message) => {
@@ -157,7 +161,7 @@ function createMeetingCaptureService(options = {}) {
     };
   }
 
-  async function startMicrophone(sessionId, { deviceId } = {}) {
+  async function startSingle(sessionId, { deviceId, subchunkMs } = {}, track = "microphone") {
     const id = String(sessionId || "");
     const current = await store.readSession(id);
     if (!current) {
@@ -165,7 +169,9 @@ function createMeetingCaptureService(options = {}) {
       error.code = "session_not_found";
       throw error;
     }
-    const micDir = store.getMicrophoneTrackDir(current.sessionDir);
+    const outputDir = track === "system"
+      ? store.getSystemTrackDir(current.sessionDir)
+      : store.getMicrophoneTrackDir(current.sessionDir);
     const sup = getSupervisor();
     if (!sup.getState().configured) {
       await sup.start();
@@ -173,17 +179,23 @@ function createMeetingCaptureService(options = {}) {
     }
     const response = await sup.startCapture({
       sessionId: id,
-      outputDir: micDir,
+      outputDir,
+      track,
+      subchunkMs,
       deviceId: deviceId ? String(deviceId).slice(0, 512) : null
     });
+    const status = response.idempotent && lifecycle.status === "paused" ? "paused" : "recording";
+    const role = track === "system" ? "remote_mix_for_diarization" : "self";
     await store.updateSession(id, {
-      status: "recording",
+      status,
+      captureMode: track,
       tracks: {
         ...current.session.tracks,
-        microphone: {
-          ...(current.session.tracks?.microphone || {}),
-          status: "recording",
-          role: "self"
+        [track]: {
+          ...(current.session.tracks?.[track] || {}),
+          relativeDir: `audio/${track}`,
+          status,
+          role
         }
       }
     });
@@ -191,19 +203,36 @@ function createMeetingCaptureService(options = {}) {
       response.idempotent && lifecycle.sessionId === id && lifecycle.startedAtMs
         ? lifecycle.startedAtMs
         : Date.now();
-    lifecycle = { status: "recording", sessionId: id, lastError: null, startedAtMs };
+    lifecycle = { status, sessionId: id, captureMode: track, lastError: null, startedAtMs };
     return {
       ok: true,
       sessionId: id,
       started: true,
-      captureMode: "microphone",
+      captureMode: track,
       idempotent: Boolean(response.idempotent),
       archivePending: true,
-      startedAtMs
+      startedAtMs,
+      tracks: { [track]: { role, captureScope: track === "system"
+        ? (platform === "darwin" ? "screencapturekit_display_mix" : "endpoint_mix") : "microphone" } }
     };
   }
 
-  async function startDual(sessionId, { deviceId = null, systemDeviceId = null } = {}) {
+  function startMicrophone(sessionId, options = {}) {
+    return startSingle(sessionId, options, "microphone");
+  }
+
+  function startSystem(sessionId, { systemDeviceId, deviceId, ...options } = {}) {
+    return startSingle(sessionId, { ...options, deviceId: systemDeviceId ?? deviceId }, "system");
+  }
+
+  async function start({ sessionId, captureMode = "dual", ...options } = {}) {
+    protocol.validateCaptureMode(captureMode);
+    if (captureMode === "system") return startSystem(sessionId, options);
+    if (captureMode === "microphone") return startMicrophone(sessionId, options);
+    return startDual(sessionId, options);
+  }
+
+  async function startDual(sessionId, { deviceId = null, systemDeviceId = null, subchunkMs } = {}) {
     const id = String(sessionId || "");
     const current = await store.readSession(id);
     if (!current) {
@@ -222,22 +251,25 @@ function createMeetingCaptureService(options = {}) {
       sessionId: id,
       microphoneOutputDir: micDir,
       systemOutputDir: sysDir,
+      subchunkMs,
       microphoneDeviceId: deviceId ? String(deviceId).slice(0, 512) : null,
       systemDeviceId: systemDeviceId ? String(systemDeviceId).slice(0, 512) : null
     });
+    const status = response.idempotent && lifecycle.status === "paused" ? "paused" : "recording";
     await store.updateSession(id, {
-      status: "recording",
+      status,
+      captureMode: "dual",
       tracks: {
         microphone: {
           ...(current.session.tracks?.microphone || {}),
           relativeDir: "audio/microphone",
-          status: "recording",
+          status,
           role: "self"
         },
         system: {
           ...(current.session.tracks?.system || {}),
           relativeDir: "audio/system",
-          status: "recording",
+          status,
           role: "remote_mix_for_diarization"
         }
       }
@@ -246,7 +278,7 @@ function createMeetingCaptureService(options = {}) {
       response.idempotent && lifecycle.sessionId === id && lifecycle.startedAtMs
         ? lifecycle.startedAtMs
         : Date.now();
-    lifecycle = { status: "recording", sessionId: id, lastError: null, startedAtMs };
+    lifecycle = { status, sessionId: id, captureMode: "dual", lastError: null, startedAtMs };
     return {
       ok: true,
       sessionId: id,
@@ -257,13 +289,14 @@ function createMeetingCaptureService(options = {}) {
       startedAtMs,
       tracks: {
         microphone: { role: "self" },
-        system: { role: "remote_mix_for_diarization", captureScope: process.platform === "darwin" ? "screencapturekit_display_mix" : "endpoint_mix" }
+        system: { role: "remote_mix_for_diarization", captureScope: platform === "darwin" ? "screencapturekit_display_mix" : "endpoint_mix" }
       }
     };
   }
 
   async function pause(sessionId) {
     const id = sessionId ? String(sessionId) : lifecycle.sessionId;
+    assertActiveSession(id);
     const sup = getSupervisor();
     try {
       const response = await sup.pause();
@@ -297,6 +330,7 @@ function createMeetingCaptureService(options = {}) {
 
   async function resume(sessionId) {
     const id = sessionId ? String(sessionId) : lifecycle.sessionId;
+    assertActiveSession(id);
     const sup = getSupervisor();
     try {
       const response = await sup.resume();
@@ -320,6 +354,15 @@ function createMeetingCaptureService(options = {}) {
       const err = { code: error.code || "resume_failed", message: error.message };
       lifecycle = { ...lifecycle, lastError: err };
       throw error;
+    }
+  }
+
+  function assertActiveSession(id) {
+    const activeId = supervisor?.getState().activeSessionId;
+    if (!activeId || id !== activeId) {
+      throw Object.assign(new Error("Pause/resume requires the active capture session"), {
+        code: activeId ? "session_mismatch" : "not_started"
+      });
     }
   }
 
@@ -389,6 +432,8 @@ function createMeetingCaptureService(options = {}) {
         microphoneCaptureHelper: true,
         systemLoopback: true,
         dualTrack: true,
+        systemOnly: true,
+        pauseResume: true,
         processLoopback: false,
         asr: false,
         summary: false,
@@ -475,7 +520,9 @@ function createMeetingCaptureService(options = {}) {
     ensureReady,
     helperAvailability,
     createAndPrepareSession,
+    start,
     startMicrophone,
+    startSystem,
     startDual,
     pause,
     resume,

@@ -96,8 +96,14 @@ async function repairWave(file) {
   try {
     const bytes = (await h.stat()).size - HEADER_BYTES;
     if (bytes < 0 || bytes % 2) throw new Error("audio_archive_invalid");
-    await writeAll(h, wavHeader(bytes), 0);
-    await h.sync();
+    const expected = wavHeader(bytes);
+    const existing = Buffer.alloc(HEADER_BYTES);
+    const { bytesRead } = await h.read(existing, 0, existing.length, 0);
+    // Opening an intact archive must not invalidate content-based review checkpoints.
+    if (bytesRead !== expected.length || !existing.equals(expected)) {
+      await writeAll(h, expected, 0);
+      await h.sync();
+    }
     return bytes / 2;
   } finally { await h.close(); }
 }

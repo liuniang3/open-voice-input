@@ -1,7 +1,10 @@
 "use strict";
 
+const { isSupportedAliMeetingModel } = require("../providers/asr/ali-meeting-stream");
+
 const MIMO_ASR_MODEL = "mimo-v2.5-asr";
 const QWEN_ASR_MODEL = "qwen3-asr-flash";
+const MEETING_LIVE_MODEL = "qwen-audio-3.0-asr-flash-streaming";
 const FUN_ASR_MODEL = "fun-asr";
 const QWEN_ASR_REALTIME_MODEL = "qwen3-asr-flash-realtime";
 const FUN_ASR_REALTIME_MODEL = "fun-asr-realtime";
@@ -12,7 +15,7 @@ const MEETING_FILE_ASR_MODEL = MIMO_ASR_MODEL;
 
 const ASR_PRESETS = new Set([MIMO_ASR_MODEL, QWEN_ASR_MODEL, FUN_ASR_MODEL]);
 const CLEANER_PRESETS = new Set(["gpt-5.4-mini", "grok-4.5", "mimo-v2.5", "mimo-v2.5-pro"]);
-const MEETING_QWEN_PRESETS = new Set(["qwen3-asr-flash", "qwen3-asr-flash-filetrans"]);
+const MEETING_QWEN_PRESETS = new Set([MEETING_LIVE_MODEL, FUN_ASR_REALTIME_MODEL]);
 const MEETING_FUN_PRESETS = new Set(["fun-asr", "fun-asr-mtl"]);
 const MEETING_FILE_ASR_PRESETS = new Set([
   MIMO_ASR_MODEL,
@@ -82,10 +85,10 @@ function defaultCleanerProfile(model) {
 
 function defaultMeetingQwenProfile(model) {
   return {
-    provider: "qwen3-asr",
+    provider: /fun-asr/i.test(model) ? "fun-asr" : "qwen3-asr",
     baseUrl: QWEN_ASR_BASE_URL,
     apiKey: "",
-    model: trimStr(model) || "qwen3-asr-flash"
+    model: trimStr(model) || MEETING_LIVE_MODEL
   };
 }
 
@@ -154,6 +157,7 @@ function migrateConnectionProfiles(raw) {
   next.asrProfiles = ensureProfilesMap(next.asrProfiles);
   next.cleanerProfiles = ensureProfilesMap(next.cleanerProfiles);
   next.meetingQwenProfiles = ensureProfilesMap(next.meetingQwenProfiles);
+  next.meetingRealtimeProfiles = ensureProfilesMap(next.meetingRealtimeProfiles);
   next.meetingFileAsrProfiles = ensureProfilesMap(next.meetingFileAsrProfiles);
   next.meetingFunAsrProfiles = ensureProfilesMap(next.meetingFunAsrProfiles);
   next.meetingAnalysisProfiles = ensureProfilesMap(next.meetingAnalysisProfiles);
@@ -220,7 +224,9 @@ function migrateConnectionProfiles(raw) {
     migrated.push("cleaner:from-global");
   }
 
-  const meetingQwenModel = trimStr(next.meetingQwenModel) || "qwen3-asr-flash";
+  // Unlabelled legacy credentials belonged to the old batch model, never streaming.
+  const meetingQwenModel = trimStr(next.meetingQwenModel)
+    || (trimStr(next.meetingQwenApiKey) ? QWEN_ASR_MODEL : MEETING_LIVE_MODEL);
   next.meetingQwenModel = meetingQwenModel;
   if (!next.meetingQwenProfiles[meetingQwenModel]) {
     const base = defaultMeetingQwenProfile(meetingQwenModel);
@@ -321,7 +327,9 @@ function migrateConnectionProfiles(raw) {
 function applyActiveProfilesToTopLevel(settings) {
   const next = settings;
   // Live meetings select a model independently; never copy an active provider's key.
-  next.meetingRealtimeModel = trimStr(next.meetingRealtimeModel) || MIMO_ASR_MODEL;
+  const savedMeetingRealtimeModel = typeof next.meetingRealtimeModel === "string" ? next.meetingRealtimeModel : "";
+  next.meetingRealtimeModel = savedMeetingRealtimeModel || MEETING_LIVE_MODEL;
+  if (!isSupportedAliMeetingModel(next.meetingRealtimeModel)) next.meetingRealtimeModel = MEETING_LIVE_MODEL;
   next.meetingRealtimeDestination = trimStr(next.meetingRealtimeDestination);
   const asrModel = trimStr(next.asrModel) || MIMO_ASR_MODEL;
   const asr = next.asrProfiles?.[asrModel] || defaultAsrProfile(asrModel);
@@ -339,7 +347,7 @@ function applyActiveProfilesToTopLevel(settings) {
   next.cleanerBaseUrl = trimStr(cleaner.baseUrl) || "";
   next.cleanerApiKey = trimStr(cleaner.apiKey) || "";
 
-  const mqModel = trimStr(next.meetingQwenModel) || "qwen3-asr-flash";
+  const mqModel = trimStr(next.meetingQwenModel) || MEETING_LIVE_MODEL;
   const mq = next.meetingQwenProfiles?.[mqModel] || defaultMeetingQwenProfile(mqModel);
   next.meetingQwenBaseUrl = trimStr(mq.baseUrl) || "";
   next.meetingQwenApiKey = trimStr(mq.apiKey) || "";
@@ -374,6 +382,7 @@ function ensureConnectionProfiles(value) {
   next.asrProfiles = ensureProfilesMap(next.asrProfiles);
   next.cleanerProfiles = ensureProfilesMap(next.cleanerProfiles);
   next.meetingQwenProfiles = ensureProfilesMap(next.meetingQwenProfiles);
+  next.meetingRealtimeProfiles = ensureProfilesMap(next.meetingRealtimeProfiles);
   next.meetingFileAsrProfiles = ensureProfilesMap(next.meetingFileAsrProfiles);
   next.meetingFunAsrProfiles = ensureProfilesMap(next.meetingFunAsrProfiles);
   next.meetingAnalysisProfiles = ensureProfilesMap(next.meetingAnalysisProfiles);
@@ -386,7 +395,7 @@ function ensureConnectionProfiles(value) {
   next.cleanerModel = cleanerModel;
   if (!next.cleanerProfiles[cleanerModel]) next.cleanerProfiles[cleanerModel] = defaultCleanerProfile(cleanerModel);
 
-  const mq = trimStr(next.meetingQwenModel) || "qwen3-asr-flash";
+  const mq = trimStr(next.meetingQwenModel) || MEETING_LIVE_MODEL;
   next.meetingQwenModel = mq;
   if (!next.meetingQwenProfiles[mq]) next.meetingQwenProfiles[mq] = defaultMeetingQwenProfile(mq);
 
@@ -408,6 +417,7 @@ function ensureConnectionProfiles(value) {
 module.exports = {
   MIMO_ASR_MODEL,
   QWEN_ASR_MODEL,
+  MEETING_LIVE_MODEL,
   FUN_ASR_MODEL,
   MEETING_FILE_ASR_MODEL,
   ASR_PRESETS,

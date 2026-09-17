@@ -10,7 +10,7 @@ enum Wire {
     static let capabilities = ["dual_track", "system_audio_screencapturekit", "microphone_avaudioengine",
         "dual_start_single_rpc", "clock_mach_host_time", "pause_holes_shared_host_time",
         "durable_subchunk_seal_frame_aligned", "query_devices", "pause_resume", "l0_device_format",
-        "parent_pid_watch", "stdin_eof_shutdown"]
+        "parent_pid_watch", "stdin_eof_shutdown", "system_only"]
     static func send(_ value: [String: Any]) {
         lock.lock(); defer { lock.unlock() }
         if let data = try? jsonData(value) { try? FileHandle.standardOutput.write(contentsOf: data) }
@@ -140,10 +140,11 @@ final class HelperApp {
                 guard let sessionID = command["session_id"] as? String, !sessionID.isEmpty, sessionID.utf8.count <= 256 else {
                     throw HelperFailure("invalid_session_id", "session_id is required")
                 }
-                let mode = command["capture_mode"] as? String ?? "microphone"
-                guard mode == "dual" || mode == "microphone" else { throw HelperFailure("invalid_capture_mode", "Use dual or microphone") }
-                guard command["track"] == nil || command["track"] as? String == "microphone" else {
-                    throw HelperFailure("invalid_track", "Standalone capture supports microphone only")
+                let mode = command["capture_mode"] as? String ?? command["track"] as? String ??
+                    (command["system"] != nil ? (command["microphone"] != nil ? "dual" : "system") : "microphone")
+                guard ["dual", "microphone", "system"].contains(mode) else { throw HelperFailure("invalid_capture_mode", "Use dual, microphone or system") }
+                guard command["track"] == nil || command["track"] as? String == mode else {
+                    throw HelperFailure("invalid_track", "track must match capture_mode")
                 }
                 let capture = CaptureSession(sessionID: sessionID, mode: mode, emit: Wire.send)
                 session = capture
@@ -179,6 +180,12 @@ struct Main {
     @MainActor static func main() {
         signal(SIGPIPE, SIG_IGN)
         let args = CommandLine.arguments
+        if args.count == 3, args[1] == "--self-test-system-pause" {
+            do {
+                Wire.result("system-pause-test", try systemPauseArchiveSelfTest(directory: canonicalDirectory(args[2])))
+            } catch { Wire.failure("system-pause-test", error); Darwin.exit(1) }
+            return
+        }
         if args.count == 2, args[1] == "--request-screen-access" {
             print(CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() ? "true" : "false")
             return

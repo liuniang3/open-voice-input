@@ -36,12 +36,12 @@ function element(tag = "div") {
 function fixture() {
   const elements = new Map([...html.matchAll(/<(\w+)\b[^>]*\bid="([^"]+)"[^>]*>/g)].map((m) => [m[2], element(m[1])]));
   const $ = (id) => elements.get(id);
-  $("liveModel").value = "mimo-v2.5-asr";
+  $("liveModel").value = "qwen-audio-3.0-asr-flash-streaming";
   $("liveCaptureMode").value = "dual";
   let clock = 1800000000000;
   let status = { status: "idle", recording: false, recoverableSessions: [] };
   let settings = {
-    meetingRealtimeModel: "mimo-v2.5-asr",
+    meetingRealtimeModel: "qwen-audio-3.0-asr-flash-streaming",
     meetingFileAsrProfiles: { "mimo-v2.5-asr": { provider: "mimo" }, "qwen3-asr-flash": { provider: "qwen3-asr" } },
     meetingAnalysisModel: "analysis-a", meetingAnalysisProfiles: { "analysis-a": {}, "analysis-b": {} }
   };
@@ -52,7 +52,7 @@ function fixture() {
     getSettings: () => settings,
     saveSettings: (patch) => { settings = { ...settings, ...patch }; return settings; },
     meetingLiveStatus: () => ({ ok: true, ...status }),
-    meetingLiveStart: () => ({ ok: true, sessionId: "s1", status: "recording", recording: true, modelId: "mimo-v2.5-asr" }),
+    meetingLiveStart: () => ({ ok: true, sessionId: "s1", status: "recording", recording: true, modelId: "qwen-audio-3.0-asr-flash-streaming" }),
     meetingLiveStop: () => ({ ok: true, sessionId: "s1", status: "stopping", recording: false, pendingSegments: 2 }),
     meetingLiveRetry: () => ({ ok: true, ...status, status: "stopping" }),
     meetingLiveRecover: () => ({ ok: true, ...status, status: "interrupted" }),
@@ -60,6 +60,10 @@ function fixture() {
     meetingLiveChooseDestination: () => ({ ok: true, cancelled: false, destinationPath: "C:/mock/notes.md" }),
     meetingLiveOpenPath: () => ({ ok: true })
   };
+  handlers.meetingLivePause = () => ({ ok: true, ...status, paused: true });
+  handlers.meetingLiveResume = () => ({ ok: true, ...status, paused: false });
+  handlers.meetingLiveWindow = (flags) => ({ ok: true, ...flags });
+  handlers.meetingLiveSummarize = () => ({ ok: true, ...status, postprocessStatus: "summarizing" });
   const api = Object.fromEntries(Object.keys(handlers).map((name) => [name, async (...args) => {
     calls.push({ name, args });
     return handlers[name](...args);
@@ -84,7 +88,7 @@ function fixture() {
 const tests = [];
 const test = (name, run) => tests.push({ name, run });
 const completed = (extra = {}) => ({
-  sessionId: "s1", status: "completed", recording: false, modelId: "mimo-v2.5-asr",
+  sessionId: "s1", status: "completed", recording: false, modelId: "qwen-audio-3.0-asr-flash-streaming",
   rawText: "原始转写文本", pendingSegments: 0, failedSegments: 0, cleanupStatus: "idle", ...extra
 });
 
@@ -106,7 +110,7 @@ test("view-only open is single-flight; close unsubscribes and reopen reloads", a
   f.ui.close();
 });
 
-test("saved MiMo and Qwen batch profiles only; custom invalid models cannot start", async () => {
+test("only streaming transports appear as live models; exact and YYYY-MM-DD IDs match transport", async () => {
   const f = fixture();
   f.setSettings({ asrProfiles: {
     "custom-batch": { provider: "qwen3-asr" }, "fun-asr": { provider: "fun-asr" },
@@ -114,21 +118,28 @@ test("saved MiMo and Qwen batch profiles only; custom invalid models cannot star
   } });
   await f.ui.open();
   const ids = f.$("liveModel").children.map((o) => o.value);
-  assert(ids.includes("custom-batch"));
-  assert(ids.includes("qwen3-asr-flash"));
-  assert(!ids.includes("fun-asr") && !ids.includes("qwen-realtime") && !ids.includes("qwen-filetrans"));
+  assert.deepEqual(ids, ["qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "__custom__"]);
   f.$("liveModel").value = "__custom__";
-  f.$("liveCustomModel").value = "qwen-filetrans";
-  f.$("liveModel").dispatch("change");
-  assert.equal(f.$("liveCustomModelField").hidden, false);
-  assert.equal(f.$("liveStart").disabled, true);
-  assert.match(f.$("liveError").textContent, /不支持/);
-  f.$("liveModel").value = "custom-batch";
+  for (const model of ["mimo-v2.5-asr", "qwen3-asr-flash", "custom-batch", "qwen-filetrans", "fun-asr-realtime-2026", "qwen-audio-3.0-asr-flash-streaming-2026", "fun-asr-realtime-2026-9-18"]) {
+    f.$("liveCustomModel").value = model;
+    f.$("liveModel").dispatch("change");
+    assert.equal(f.$("liveCustomModelField").hidden, false);
+    assert.equal(f.$("liveStart").disabled, true);
+    assert.match(f.$("liveError").textContent, /不支持/);
+  }
+  assert.equal(f.count("saveSettings"), 0);
+  f.$("liveCustomModel").value = "fun-asr-realtime-2026-09-18";
+  f.$("liveCustomModel").dispatch("input");
+  assert.equal(f.$("liveStart").disabled, false);
+  await f.click("liveStart");
+  assert.equal(f.last("meetingLiveStart").args[0].modelId, "fun-asr-realtime-2026-09-18");
+  f.push({ status: "idle", recording: false, recoverableSessions: [] });
+  f.$("liveModel").value = "fun-asr-realtime";
   f.$("liveModel").dispatch("change");
   await tick();
   await f.click("liveStart");
-  assert.equal(f.last("meetingLiveStart").args[0].provider, "qwen3-asr");
-  assert.equal(f.last("meetingLiveStart").args[0].modelId, "custom-batch");
+  assert.equal(f.last("meetingLiveStart").args[0].provider, "aliyun-streaming");
+  assert.equal(f.last("meetingLiveStart").args[0].modelId, "fun-asr-realtime");
 });
 
 test("start payload has no credentials; duplicate clicks do not duplicate start", async () => {
@@ -141,7 +152,7 @@ test("start payload has no credentials; duplicate clicks do not duplicate start"
   await f.click("liveStart");
   await f.click("liveStart");
   assert.equal(f.count("meetingLiveStart"), 1);
-  assert.deepEqual(f.last("meetingLiveStart").args, [{ title: "项目例会", modelId: "mimo-v2.5-asr", provider: "mimo", captureMode: "microphone" }]);
+  assert.deepEqual(f.last("meetingLiveStart").args, [{ title: "项目例会", modelId: "qwen-audio-3.0-asr-flash-streaming", provider: "aliyun-streaming", captureMode: "microphone" }]);
   start.resolve({ ok: true, ...completed(), status: "recording", recording: true });
   await tick();
   assert.equal(f.$("liveStop").disabled, false);
@@ -243,7 +254,7 @@ test("cleanup is explicit, uses selected model, reports progress and opens only 
   assert.equal(f.count("meetingLiveCleanup"), 0);
   f.$("liveCleanerModel").value = "analysis-b";
   await f.click("liveCleanup");
-  assert.deepEqual(f.last("meetingLiveCleanup").args, [{ sessionId: "s1", modelId: "analysis-b" }]);
+  assert.deepEqual(f.last("meetingLiveCleanup").args, [{ sessionId: "s1", modelId: "analysis-b", useMimoReview: false, reviewModelId: "mimo-v2.5-asr" }]);
   f.push(completed({ ...output, cleanupStatus: "running", cleanupProgress: { completed: 1, total: 2 }, correctedText: "校订第一段" }));
   assert.match(f.$("liveCleanupStatus").textContent, /1 \/ 2/);
   assert.equal(f.$("liveCorrectedSection").hidden, false);
@@ -392,12 +403,16 @@ async function verifyBrowser(page, screenshotDirectory) {
   await page.addInitScript(() => {
     let dto = { status: "idle", recording: false, recoverableSessions: [] };
     let settings = {
-      meetingRealtimeModel: "mimo-v2.5-asr", meetingFileAsrProfiles: { "mimo-v2.5-asr": { provider: "mimo" }, "qwen3-asr-flash": { provider: "qwen3-asr" } },
+      meetingRealtimeModel: "fun-asr-realtime-2026-09-18",
+      meetingRealtimeProfiles: { "fun-asr-realtime-2026-09-18": { provider: "aliyun-streaming", apiKey: "test-only-live-key", baseUrl: "https://example.invalid/v1" } },
+      meetingQwenProfiles: { "qwen3-asr-flash": { provider: "qwen3-asr", apiKey: "test-only-batch-key" } },
+      meetingFileAsrProfiles: { "mimo-v2.5-asr": { provider: "mimo" }, "qwen3-asr-flash": { provider: "qwen3-asr" } },
       meetingAnalysisModel: "analysis-demo", meetingAnalysisProfiles: { "analysis-demo": {} }
     };
     const hooks = {};
     window.mockCalls = [];
     window.mockPush = (patch) => { dto = { ...dto, ...patch }; hooks.onMeetingLiveUpdate?.(dto); };
+    window.mockOpenSettings = () => hooks.onOpenSettings?.();
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: {
       enumerateDevices: async () => [], getUserMedia: async () => { throw new Error("Microphone forbidden in UI test"); }
     } });
@@ -409,6 +424,15 @@ async function verifyBrowser(page, screenshotDirectory) {
         if (name === "saveSettings") return settings = { ...settings, ...payload };
         if (name === "getStatus") return { settings, hasApiKey: false, registeredHotkeys: [] };
         if (name === "meetingLiveStatus") return { ok: true, ...dto };
+        if (name === "meetingLiveWindow") return { ok: true, ...payload };
+        if (name === "meetingLivePause" || name === "meetingLiveResume") {
+          window.mockPush({ paused: name === "meetingLivePause" });
+          return { ok: true, ...dto };
+        }
+        if (name === "meetingLiveSummarize") {
+          window.mockPush({ postprocessStatus: "summarizing" });
+          return { ok: true, ...dto };
+        }
         if (name === "meetingLiveStart") {
           window.mockPush({ sessionId: "demo", status: "recording", recording: true, modelId: payload.modelId,
             markdownPath: "C:/mock/项目例会-demo.md", audioPaths: ["C:/mock/microphone-complete.wav", "C:/mock/system-complete.wav"],
@@ -433,13 +457,13 @@ async function verifyBrowser(page, screenshotDirectory) {
   await page.locator("#liveRecoverSession").selectOption("recovered");
   await page.locator("#liveRecover").click();
   assert.equal(await page.evaluate(() => window.mockCalls.filter((c) => c.name === "meetingLiveRecover").at(-1).payload.sessionId), "recovered");
-  await page.locator("#liveModel").selectOption("qwen3-asr-flash");
+  await page.locator("#liveModel").selectOption("qwen-audio-3.0-asr-flash-streaming");
   await page.waitForFunction(() => document.getElementById("liveStart").disabled === false);
   await page.locator("#liveChooseDestination").click();
   await page.locator("#liveTitle").fill("产品研发周会");
   await page.locator("#liveStart").click();
   await page.waitForFunction(() => document.getElementById("liveStop").disabled === false);
-  assert.equal(await page.evaluate(() => window.mockCalls.filter((c) => c.name === "meetingLiveStart").at(-1).payload.provider), "qwen3-asr");
+  assert.equal(await page.evaluate(() => window.mockCalls.filter((c) => c.name === "meetingLiveStart").at(-1).payload.provider), "aliyun-streaming");
   await page.evaluate(() => window.mockPush({ rawText: "<script>这只是原文，不应执行</script>\n\n" + "本周完成接口联调，下一步验证恢复与导出。\n".repeat(60) }));
   assert.equal(await page.locator("#liveRaw script").count(), 0);
   await page.locator("#liveStop").click();
@@ -497,7 +521,7 @@ async function verifyBrowser(page, screenshotDirectory) {
   return { viewports, screenshots, errors, result: "real rendered mock UI passed" };
 }
 
-module.exports = { verifyBrowser };
+module.exports = { verifyBrowser, fixture, tick, deferred, completed };
 if (require.main === module) (async () => {
   await run();
   if (process.exitCode || !process.argv.includes("--browser")) return;

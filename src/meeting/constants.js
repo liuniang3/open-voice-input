@@ -8,6 +8,8 @@ const TRACK_MICROPHONE = "microphone";
 const TRACK_SYSTEM = "system";
 const CAPTURE_MODE_DUAL = "dual";
 const CAPTURE_MODE_MICROPHONE = "microphone";
+const CAPTURE_MODE_SYSTEM = "system";
+const SYSTEM_ONLY_CAPABILITY = "system_only";
 
 const REQUIRED_CAPABILITIES = Object.freeze([
   "dual_track",
@@ -67,6 +69,8 @@ module.exports = {
   TRACK_SYSTEM,
   CAPTURE_MODE_DUAL,
   CAPTURE_MODE_MICROPHONE,
+  CAPTURE_MODE_SYSTEM,
+  SYSTEM_ONLY_CAPABILITY,
   REQUIRED_CAPABILITIES,
   MACOS_REQUIRED_CAPABILITIES,
   requiredCapabilitiesForPlatform,

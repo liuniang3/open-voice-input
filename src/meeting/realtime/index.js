@@ -4,11 +4,11 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { RATE, HEADER_BYTES, normalizeChunk, ensureWave, writePcm, repairWave, readMixed } = require("./audio");
 const { atomicWrite, readJson, reserveMarkdown, markdown } = require("./storage");
-const { profileFor, transcriber, cleaner } = require("./providers");
+const { profileFor, transcriber, cleaner, previewProfileFor, DEFAULT_LIVE_MODEL, languageModel } = require("./providers");
 const { RAW_TRANSCRIPT_REL } = require("../analysis/constants");
 
 function createRealtimeMeetingService({ captureService, getSettings = () => ({}), defaultDirectory,
-  onUpdate = () => {}, transcribeImpl, cleanImpl, now = Date.now, pumpIntervalMs = 1000,
+  onUpdate = () => {}, transcribeImpl, cleanImpl, previewStreamImpl, reviewImpl, llmImpl, now = Date.now, pumpIntervalMs = 1000,
   saveIntervalMs = 30000, segmentSeconds = 30, retryBaseMs = 2000, maxAttempts = 3 } = {}) {
   if (!captureService?.store || !defaultDirectory) throw new Error("live_dependencies_missing");
   const store = captureService.store;
@@ -28,6 +28,49 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
   let cleanupController = null;
   let closing = false;
   let history = [];
+  let preview = null;
+  let liveProfile = null;
+
+  function isStreaming() { return state?.transport === "ali-streaming"; }
+  function audioFrames(final = false) {
+    const lengths = Object.values(state.tracks).map(t => t.frames);
+    return final ? Math.max(0, ...lengths) : Math.max(0, Math.min(...lengths), Math.max(...lengths) - RATE * 2);
+  }
+  function syncPreview() {
+    if (!preview || !isStreaming()) return;
+    const snapshot = preview.snapshot();
+    if (JSON.stringify(state.segments) !== JSON.stringify(snapshot.segments)
+      && (state.correctedText || state.summary)) {
+      // Retry can replace the source transcript. Previous exported files remain intact.
+      state.correctedText = ""; state.reviewedText = "";
+      state.cleanedMarkdownPath = ""; state.reviewedMarkdownPath = "";
+      state.summary = null; state.summaryMarkdownPath = "";
+      state.cleanupStatus = "idle"; state.postprocessStatus = "idle";
+    }
+    state.segments = snapshot.segments;
+    state.previewText = snapshot.previewText;
+    state.previewStatus = snapshot.status;
+    state.previewFailed = snapshot.failedSegments || 0;
+    state.previewPending = snapshot.pendingSegments || 0;
+  }
+  function createPreview() {
+    const current = state;
+    const { createMeetingPreview } = require("./preview");
+    preview = createMeetingPreview({ state: current, now,
+      readAudio: (start, end) => readMixed(current.audioPaths, start, end),
+      createStream: (callbacks) => {
+        const profile = liveProfile || previewProfileFor(getSettings(), current.modelId);
+        const factory = previewStreamImpl || require("../../providers/asr/ali-meeting-stream").createAliMeetingStream;
+        return factory({ ...profile, ...callbacks });
+      },
+      persist,
+      onChange: () => {
+        if (state !== current) return;
+        syncPreview(); emit();
+      }
+    });
+    syncPreview();
+  }
 
   function safeError(error, fallback) {
     // Provider error bodies can contain credentials or transcript data. Never persist them.
@@ -47,14 +90,18 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     if (!state) return { status: "idle", recording: false, rawText: "", correctedText: "", audioPaths: [], recoverableSessions: history };
     return {
       sessionId: state.sessionId, title: state.title, status: state.status, recording: state.recording,
+      paused: Boolean(state.paused), previewText: state.previewText || "", previewStatus: state.previewStatus || "idle",
       finalizationPending: Boolean(state.finalizationPending),
       modelId: state.modelId, captureMode: state.captureMode, startedAtMs: state.startedAtMs,
       durationMs: Math.round(Math.max(0, ...Object.values(state.tracks).map(t => t.frames)) * 1000 / RATE),
       rawText: state.segments.filter(s => s.status === "completed").map(s => s.text).filter(Boolean).join("\n\n"),
       correctedText: state.correctedText || "", markdownPath: state.markdownPath,
+      reviewedText: state.reviewedText || "", reviewedMarkdownPath: state.reviewedMarkdownPath || "",
+      summary: state.summary || null, summaryMarkdownPath: state.summaryMarkdownPath || "",
+      postprocessStatus: state.postprocessStatus || "idle", postprocessProgress: state.postprocessProgress || {},
       cleanedMarkdownPath: state.cleanedMarkdownPath || "", audioPaths: [...state.audioPaths],
-      pendingSegments: state.segments.filter(s => s.status === "pending" || s.status === "running").length,
-      failedSegments: state.segments.filter(s => s.status === "failed").length,
+      pendingSegments: isStreaming() ? state.previewPending || 0 : state.segments.filter(s => s.status === "pending" || s.status === "running").length,
+      failedSegments: isStreaming() ? state.previewFailed || 0 : state.segments.filter(s => s.status === "failed").length,
       lastSavedAt: state.lastSavedAt || null, error: state.error || null,
       cleanupStatus: state.cleanupStatus || "idle", cleanupModelId: state.cleanupModelId || "",
       cleanupProgress: state.cleanupProgress || { completed: 0, total: 0 }, recoverableSessions: history
@@ -167,10 +214,11 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
           // Preserve native gaps (e.g. a silent loopback endpoint) on the shared session timeline.
           const expectedStart = sourceStart + t.originOffset;
           const start = Math.max(t.frames, clockStart != null && clockStart - expectedStart > RATE / 4 ? clockStart : expectedStart);
+          if (isStreaming()) preview?.invalidate(start, start + pcm.length / 2);
           await writePcm(t.path, pcm, start);
           // An endpoint can deliver late audio after we previewed its interval as
           // silence. Invalidate exactly those windows; never silently lose late speech.
-          for (const segment of state.segments) {
+          for (const segment of isStreaming() ? [] : state.segments) {
             if (start < segment.endFrame && start + pcm.length / 2 > segment.startFrame) {
               segment.revision = (segment.revision || 0) + 1;
               if (segment.status !== "running") segment.status = "pending";
@@ -196,6 +244,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         if ((await fs.stat(fullPath)).size > 32 * 1024 * 1024) throw new Error("live_chunk_too_large");
         const raw = await fs.readFile(fullPath);
         const pcm = normalizeChunk(raw, format);
+        if (isStreaming()) preview?.invalidate(t.frames, t.frames + pcm.length / 2);
         await writePcm(t.path, pcm, t.frames);
         t.frames += pcm.length / 2;
         t.seq = seq;
@@ -206,6 +255,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       if (info?.size && !t.partRecovered) {
         if (info.size > 32 * 1024 * 1024) throw new Error("live_partial_too_large");
         const pcm = normalizeChunk(await fs.readFile(part), format);
+        if (isStreaming()) preview?.invalidate(t.frames, t.frames + pcm.length / 2);
         await writePcm(t.path, pcm, t.frames);
         t.frames += pcm.length / 2;
         t.partRecovered = true;
@@ -214,6 +264,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
   }
 
   function queueSegments(final) {
+    if (isStreaming()) return;
     const lengths = Object.values(state.tracks).map(t => t.frames);
     // A silent system endpoint may produce no buffers. Allow a two-second arrival margin,
     // then mix absent source samples as silence so microphone ASR continues to progress.
@@ -234,6 +285,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       for (const track of Object.keys(state.tracks)) await ingestTrack(track, final);
       queueSegments(final);
       await persist();
+      if (isStreaming() && !final && !state.paused) preview?.kick(audioFrames());
       emit();
     })();
     try { await pumpPromise; } finally { pumpPromise = null; }
@@ -242,11 +294,17 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
   function settleStatus() {
     if (state.recording || state.status === "interrupted") return;
     if (state.finalizationPending) { state.status = "needs_retry"; return; }
+    if (isStreaming()) {
+      syncPreview();
+      state.status = state.previewFailed ? "needs_retry" : "completed";
+      return;
+    }
     const pending = state.segments.some(s => s.status === "pending" || s.status === "running");
     state.status = pending ? "stopping" : state.segments.some(s => s.status === "failed") ? "needs_retry" : "completed";
   }
 
   function runWorker() {
+    if (isStreaming()) return;
     if (workerPromise || !state || closing || !request) return;
     if (!state.segments.some(s => s.status === "pending" && s.nextAttempt <= now())) return;
     const current = state;
@@ -321,9 +379,12 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       await saveTail.catch(() => {});
       await persistTail;
       const settings = structuredClone(getSettings());
-      const modelId = options.modelId || settings.meetingRealtimeModel || "mimo-v2.5-asr";
-      const profile = transcribeImpl ? { provider: "mimo", modelId } : profileFor(settings, modelId);
-      request = transcribeImpl || transcriber(profile);
+      const modelId = options.modelId || (transcribeImpl ? settings.meetingRealtimeModel || "mimo-v2.5-asr" : settings.meetingRealtimeModel || DEFAULT_LIVE_MODEL);
+      const streaming = Boolean(previewStreamImpl) || !transcribeImpl;
+      const profile = streaming ? (previewStreamImpl ? { provider: "aliyun-streaming", model: modelId } : previewProfileFor(settings, modelId)) : { provider: "mimo", modelId };
+      liveProfile = streaming ? profile : null;
+      request = streaming ? null : transcribeImpl;
+      await preview?.shutdown(); preview = null;
       closing = false;
       await store.init();
       const created = await captureService.createAndPrepareSession({ title: options.title || "会议实时转录" });
@@ -333,20 +394,24 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         defaultDirectory, created.sessionId, { reuseExisting: true });
       state = { schema: "meeting_live_v1", sessionId: created.sessionId, title: options.title || "会议实时转录",
         startedAtMs: now(), status: "starting", recording: false, modelId, provider: profile.provider,
-        captureMode: options.captureMode === "microphone" ? "microphone" : "dual",
+        transport: streaming ? "ali-streaming" : "batch", paused: false,
+        captureMode: ["microphone", "system"].includes(options.captureMode) ? options.captureMode : "dual",
         markdownPath, audioPaths: [], tracks: {}, segments: [], error: null, cleanupStatus: "idle" };
-      for (const track of state.captureMode === "dual" ? ["microphone", "system"] : ["microphone"]) {
+      for (const track of state.captureMode === "dual" ? ["microphone", "system"] : [state.captureMode]) {
         const file = path.join(sessionDir, "realtime", `${track}-complete.wav`);
         await ensureWave(file);
         state.audioPaths.push(file);
         state.tracks[track] = { path: file, seq: 0, frames: 0, indexOffset: 0 };
       }
       await persist();
+      if (streaming) createPreview();
       await saveMarkdown({ strict: true });
       try {
         const result = state.captureMode === "dual"
           ? await captureService.startDual(state.sessionId, { deviceId: settings.meetingMicrophoneDeviceId, systemDeviceId: settings.meetingSystemDeviceId })
-          : await captureService.startMicrophone(state.sessionId, { deviceId: settings.meetingMicrophoneDeviceId });
+          : state.captureMode === "system"
+            ? await captureService.startSystem(state.sessionId, { systemDeviceId: settings.meetingSystemDeviceId })
+            : await captureService.startMicrophone(state.sessionId, { deviceId: settings.meetingMicrophoneDeviceId });
         if (result?.ok === false) throw new Error("capture_failed");
         state.recording = true; state.status = "recording";
         await store.updateSession(state.sessionId, { mode: "meeting_realtime" });
@@ -376,15 +441,46 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         }
       }
       state.recording = false;
+      state.paused = false;
       await finalize(); runWorker(); emit(); return status();
     });
   }
 
-  async function finalize() {
+  async function pause() {
+    if (transitionPromise) await transitionPromise;
+    return transition(async () => {
+      if (!state?.recording || state.paused) return status();
+      const result = await captureService.pause(state.sessionId);
+      if (result?.ok === false) throw new Error("live_pause_failed");
+      state.paused = true; state.status = "paused";
+      await pump();
+      if (preview) { await preview.drain(audioFrames(true)); syncPreview(); }
+      await publishRaw(); await saveMarkdown({ strict: true }); emit();
+      return status();
+    });
+  }
+
+  async function resume() {
+    if (transitionPromise) await transitionPromise;
+    return transition(async () => {
+      if (!state?.recording || !state.paused) return status();
+      const result = await captureService.resume(state.sessionId);
+      if (result?.ok === false) throw new Error("live_resume_failed");
+      state.paused = false; state.status = "recording";
+      await persist(); emit(); return status();
+    });
+  }
+
+  async function finalize({ recovery = false } = {}) {
     state.finalizationPending = true;
     await persist();
     try {
       await pump(true);
+      if (isStreaming() && preview) {
+        if (recovery) await preview.recover(audioFrames(true));
+        else await preview.drain(audioFrames(true));
+        syncPreview();
+      }
       await publishRaw();
       if (["live_audio_failed", "live_stop_failed"].includes(state.error?.code)) state.error = null;
       state.finalizationPending = false;
@@ -419,6 +515,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       if (pumpPromise) await pumpPromise;
       await saveTail.catch(() => {});
       await persistTail;
+      await preview?.shutdown(); preview = null; liveProfile = null;
       await refreshHistory();
       const id = sessionId || history[0]?.sessionId;
       if (!id) return status();
@@ -428,8 +525,10 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       state = await readJson(stateFile());
       const interrupted = state.recording || ["starting", "stopping"].includes(state.status);
       state.recording = false;
+      state.paused = false;
       if (interrupted) state.status = "interrupted";
       if (state.cleanupStatus === "running") state.cleanupStatus = "failed";
+      if (state.postprocessStatus === "running") state.postprocessStatus = "failed";
       for (const segment of state.segments) if (segment.status === "running") segment.status = "pending";
       for (const [track, t] of Object.entries(state.tracks)) {
         if (!["microphone", "system"].includes(track)) throw new Error("live_track_invalid");
@@ -439,7 +538,8 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       }
       state.audioPaths = Object.values(state.tracks).map(t => t.path);
       request = null;
-      try { await finalize(); } catch { /* Leave a visible recoverable finalization error. */ }
+      if (isStreaming()) createPreview();
+      try { await finalize({ recovery: true }); } catch { /* Leave a visible recoverable finalization error. */ }
       emit(); return status();
     });
   }
@@ -459,6 +559,14 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     }
     state.error = null; state.status = "stopping"; closing = false;
     await finalize();
+    if (isStreaming()) {
+      workerPromise = (async () => {
+        try { await preview.retry(); syncPreview(); await publishRaw(); }
+        catch (error) { state.error = safeError(error, "live_asr_failed"); }
+        finally { syncPreview(); settleStatus(); await persist(); await saveMarkdown(); emit(); }
+      })().finally(() => { workerPromise = null; });
+      return status();
+    }
     if (state.segments.some(segment => segment.status !== "completed")) {
       try { request = transcribeImpl || transcriber(profileFor(getSettings(), state.modelId)); }
       catch (error) {
@@ -469,7 +577,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     timers(); runWorker(); return status();
   }
 
-  async function cleanup({ sessionId, modelId } = {}) {
+  async function legacyCleanup({ sessionId, modelId } = {}) {
     if (sessionId && sessionId !== state?.sessionId) await recover({ sessionId });
     if (!state || state.recording || state.finalizationPending || workerPromise || cleanupPromise || state.segments.some(s => s.status !== "completed")) throw new Error("live_cleanup_not_ready");
     const settings = structuredClone(getSettings());
@@ -516,6 +624,100 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     return status();
   }
 
+  async function runPostprocess(kind, options = {}) {
+    if (options.sessionId && options.sessionId !== state?.sessionId) await recover(options);
+    if (!state || state.recording || state.finalizationPending || workerPromise || cleanupPromise || transitionPromise) throw new Error("live_cleanup_not_ready");
+    if (state.segments.some(s => ["running", "pending"].includes(s.status))) throw new Error("live_cleanup_not_ready");
+    const current = state;
+    const settings = structuredClone(getSettings());
+    const modelId = options.modelId || settings.meetingAnalysisModel || settings.cleanerModel || "gpt-5.4-mini";
+    const modelProfile = llmImpl ? { provider: "test", modelId } : profileFor(settings, modelId, true);
+    const call = llmImpl || languageModel(modelProfile);
+    const useMimoReview = kind === "reconcile" && options.useMimoReview === true;
+    const reviewModelId = options.reviewModelId || "mimo-v2.5-asr";
+    if (useMimoReview && !/^mimo-.*asr/i.test(reviewModelId)) throw new Error("live_model_unsupported");
+    const reviewProfile = useMimoReview && !reviewImpl ? profileFor(settings, reviewModelId) : null;
+    const review = useMimoReview ? reviewImpl || transcriber(reviewProfile) : null;
+    const { createMeetingPostprocessService } = require("./postprocess");
+    const processor = createMeetingPostprocessService({ sessionDir, getState: () => current,
+      audio: {
+        readMixed: ({ startFrame, endFrame }) => readMixed(current.audioPaths, startFrame, endFrame),
+        findPause: async ({ minFrame, endFrame }) => {
+          const wav = await readMixed(current.audioPaths, minFrame, endFrame);
+          // Select a quiet 300 ms interval near the boundary; never remove its samples.
+          const block = Math.round(RATE * 0.3);
+          let best = null, bestEnergy = 180;
+          for (let frame = 0; frame + block <= endFrame - minFrame; frame += Math.round(RATE * 0.1)) {
+            let sum = 0;
+            for (let i = frame; i < frame + block; i++) sum += Math.abs(wav.readInt16LE(44 + i * 2));
+            const mean = sum / block;
+            if (mean <= bestEnergy) { bestEnergy = mean; best = minFrame + frame + Math.floor(block / 2); }
+          }
+          return best;
+        }
+      },
+      asr: review ? { modelId: reviewModelId, revision: digest(JSON.stringify([reviewProfile?.provider, reviewProfile?.baseUrl])),
+        limits: { maxSeconds: 30, maxBytes: 2 * 1024 * 1024 },
+        transcribe: ({ audio, signal, segmentIndex }) => review({ audioDataUrl: `data:audio/wav;base64,${audio.toString("base64")}`, signal, segmentIndex }) } : null,
+      llm: { modelId, revision: digest(JSON.stringify([modelProfile.provider, modelProfile.baseUrl])),
+        complete: ({ messages, signal }) => call({ messages, signal, maxTokens: 8192 }) },
+      limits: { maxRequestsPerRun: 1000 },
+      onUpdate: (update) => {
+        current.postprocessStatus = update.status;
+        current.postprocessProgress = { ...update.progress, kind };
+        if (kind === "reconcile") { current.cleanupStatus = update.status; current.cleanupProgress = update.progress; }
+        emit();
+      }
+    });
+    cleanupController = new AbortController();
+    const signal = cleanupController.signal;
+    current.cleanupModelId = modelId; current.postprocessStatus = "running";
+    if (kind === "reconcile") current.cleanupStatus = "running";
+    cleanupPromise = Promise.resolve().then(async () => {
+      await persist(); emit();
+      const outcome = kind === "reconcile"
+        ? await processor.reconcile({ reviewAudio: useMimoReview, retryFailed: true, signal })
+        : await processor.summarize({ source: current.cleanupStatus === "completed" ? "reconciled" : "original", retryFailed: true, signal });
+      if (outcome.status !== "completed" || !outcome.result) {
+        current.postprocessStatus = "failed";
+        if (kind === "reconcile") current.cleanupStatus = "failed";
+        current.error = safeError(null, "live_cleanup_failed");
+        return;
+      }
+      const result = outcome.result;
+      const writeResult = async (suffix, text) => {
+        const destination = await reserveMarkdown(`${current.markdownPath.slice(0, -3)}.${suffix}.md`, defaultDirectory, `${current.sessionId}-${now()}`);
+        await atomicWrite(destination, text);
+        return destination;
+      };
+      if (kind === "reconcile") {
+        current.correctedText = result.items.map(item => `${item.text}${item.uncertain ? "\n[待确认：请对照原文与音频]" : ""}`).join("\n\n");
+        current.reviewedText = (result.review || []).map(r => r.text).join("\n\n");
+        current.reviewedMarkdownPath = useMimoReview ? await writeResult("reviewed", result.reviewedMarkdown) : "";
+        current.cleanedMarkdownPath = await writeResult("cleaned", result.markdown);
+        current.cleanupStatus = "completed";
+        current.summary = null; current.summaryMarkdownPath = "";
+      } else {
+        const sections = result.sections.map(section => `## ${section.heading}\n\n${section.items.map(item => `- ${item.text}${item.uncertain ? "（待确认）" : ""}`).join("\n")}\n`).join("\n");
+        current.summary = { mindmap: result.mindmap, sections: result.sections, markdown: sections, title: result.title };
+        current.summaryMarkdownPath = await writeResult("summary", result.markdown);
+      }
+      current.postprocessStatus = "completed"; current.error = null;
+    }).catch(error => {
+      current.postprocessStatus = "failed";
+      if (kind === "reconcile") current.cleanupStatus = "failed";
+      current.error = safeError(error, "live_cleanup_failed");
+    }).finally(async () => {
+      try { await persist(); } finally { cleanupPromise = null; cleanupController = null; emit(); }
+    });
+    return status();
+  }
+
+  function cleanup(options = {}) {
+    return cleanImpl && !isStreaming() ? legacyCleanup(options) : runPostprocess("reconcile", options);
+  }
+  function summarize(options = {}) { return runPostprocess("summary", options); }
+
   async function shutdown() {
     closing = true;
     controller?.abort(); cleanupController?.abort();
@@ -525,14 +727,15 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     if (state?.recording) throw Object.assign(new Error("Capture stop not confirmed"), { code: "live_stop_failed" });
     if (workerPromise) await workerPromise;
     if (cleanupPromise) await cleanupPromise;
+    await preview?.shutdown();
     await persistTail.catch(() => {});
     if (state) await saveMarkdown({ strict: true });
   }
 
-  return { start, stop, retry, cleanup, status, recover, shutdown,
+  return { start, stop, pause, resume, retry, cleanup, summarize, status, recover, shutdown,
     // Deterministic timer-independent regression probes, no IPC exposure.
     flush: async () => { await pump(!state?.recording); await saveMarkdown(); runWorker(); },
-    waitForIdle: async () => { await workerPromise; await cleanupPromise; } };
+    waitForIdle: async () => { await preview?.waitForIdle(); await workerPromise; await cleanupPromise; } };
 }
 
 module.exports = { createRealtimeMeetingService };

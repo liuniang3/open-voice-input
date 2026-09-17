@@ -5,8 +5,20 @@ const {
   HELPER_NAME,
   HELPER_VERSION,
   PROTOCOL_VERSION,
+  CAPTURE_MODE_DUAL,
+  CAPTURE_MODE_MICROPHONE,
+  CAPTURE_MODE_SYSTEM,
   requiredCapabilitiesForPlatform
 } = require("./constants");
+
+function validateCaptureMode(mode) {
+  if (![CAPTURE_MODE_MICROPHONE, CAPTURE_MODE_DUAL, CAPTURE_MODE_SYSTEM].includes(mode)) {
+    throw Object.assign(new Error("captureMode must be microphone, dual or system"), {
+      code: "invalid_capture_mode"
+    });
+  }
+  return mode;
+}
 
 function createCommandId(prefix = "cmd") {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -110,6 +122,7 @@ function validateStartPathInput(outputDir) {
 }
 
 module.exports = {
+  validateCaptureMode,
   createCommandId,
   buildCommand,
   parseHelperLine,

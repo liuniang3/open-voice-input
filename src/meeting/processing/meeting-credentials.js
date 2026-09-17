@@ -74,31 +74,38 @@ function buildWorkspaceTemplateUrl(workspaceId) {
  */
 function resolveMeetingQwenCredentials({ env = process.env, settings = {} } = {}) {
   const s = settings && typeof settings === "object" ? settings : {};
-
-  const apiKey = firstNonEmpty(
-    s.meetingQwenApiKey,
-    env.OVI_MEETING_QWEN_API_KEY,
-    env.QWEN_ASR_API_KEY,
-    env.DASHSCOPE_API_KEY
-  );
+  const activeModel = firstNonEmpty(s.meetingQwenModel, env.OVI_MEETING_QWEN_MODEL, DEFAULT_MODEL);
+  const isBatchModel = model => /^qwen3-asr-flash(?:-\d{4}-\d{2}-\d{2})?$/.test(model);
+  let modelId = activeModel;
+  if (!isBatchModel(modelId)) {
+    // The same settings panel now also configures live streaming. Historical HTTP
+    // processing may use only the stored batch profile, never the active live key.
+    if (!trimStr(s.meetingQwenProfiles?.[DEFAULT_MODEL]?.apiKey)) {
+      throw Object.assign(new Error("历史会议 HTTP 转写需要单独配置 qwen3-asr-flash；当前实时模型不能用于此接口。"), {
+        code: "meeting_model_unsupported"
+      });
+    }
+    modelId = DEFAULT_MODEL;
+  }
+  const profile = s.meetingQwenProfiles?.[modelId];
+  const profileKey = trimStr(profile?.apiKey);
+  const activeKey = activeModel === modelId ? trimStr(s.meetingQwenApiKey) : "";
+  const envMatches = firstNonEmpty(env.OVI_MEETING_QWEN_MODEL, DEFAULT_MODEL) === modelId;
+  const envKey = envMatches ? firstNonEmpty(env.OVI_MEETING_QWEN_API_KEY, env.QWEN_ASR_API_KEY, env.DASHSCOPE_API_KEY) : "";
+  const apiKey = firstNonEmpty(profileKey, activeKey, envKey);
 
   const workspaceUrl = buildWorkspaceTemplateUrl(
     firstNonEmpty(env.OVI_DASHSCOPE_WORKSPACE_ID, s.meetingDashScopeWorkspaceId)
   );
 
-  const baseUrlRaw = firstNonEmpty(
-    s.meetingQwenBaseUrl,
+  const baseUrlRaw = profileKey ? firstNonEmpty(profile.baseUrl, DEFAULT_PUBLIC_COMPAT)
+    : activeKey ? firstNonEmpty(s.meetingQwenBaseUrl, workspaceUrl, DEFAULT_PUBLIC_COMPAT)
+    : firstNonEmpty(
     env.OVI_MEETING_DASHSCOPE_BASE_URL,
     env.OVI_MEETING_QWEN_BASE_URL,
     env.QWEN_ASR_BASE_URL,
     workspaceUrl,
     DEFAULT_PUBLIC_COMPAT
-  );
-
-  const modelId = firstNonEmpty(
-    s.meetingQwenModel,
-    env.OVI_MEETING_QWEN_MODEL,
-    DEFAULT_MODEL
   );
 
   if (!apiKey) {

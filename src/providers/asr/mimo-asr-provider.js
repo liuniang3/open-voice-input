@@ -8,7 +8,8 @@ function normalizeMimoAsrModel(model) {
 }
 
 function createMimoAsrProvider({ client, cleanTranscript, getOptions = () => ({}) }) {
-  async function transcribeRaw({ audioDataUrl, signal = null }) {
+  async function requestAsr({ audioDataUrl, signal = null }) {
+    if (signal?.aborted) throw Object.assign(new Error("aborted"), { code: "aborted" });
     const options = getOptions();
     const response = await client.requestChat(
       [
@@ -38,6 +39,15 @@ function createMimoAsrProvider({ client, cleanTranscript, getOptions = () => ({}
       }
     );
 
+    if (signal?.aborted) throw Object.assign(new Error("aborted"), { code: "aborted" });
+    if (response.finishReason && response.finishReason !== "stop") {
+      throw Object.assign(new Error("ASR response did not complete"), { code: "asr_response_incomplete" });
+    }
+    return response;
+  }
+
+  async function transcribeRaw(payload) {
+    const response = await requestAsr(payload);
     return {
       provider: "mimo",
       text: cleanTranscript(client.responseText(response)),
@@ -54,14 +64,14 @@ function createMimoAsrProvider({ client, cleanTranscript, getOptions = () => ({}
    * no prior transcript or cleanup instruction is sent to MiMo.
    */
   async function transcribeMeetingSegment({ audioDataUrl, signal = null } = {}) {
-    const result = await transcribeRaw({ audioDataUrl, signal });
+    const response = await requestAsr({ audioDataUrl, signal });
     return {
       provider: "mimo",
       transport: "meeting-segment-base64",
       mode: "file",
       diarization: false,
-      text: String(result?.text || "").trim(),
-      raw: result?.raw,
+      text: String(client.responseText(response) || ""),
+      raw: response,
       timestampPrecision: "none",
       speakerIds: null
     };

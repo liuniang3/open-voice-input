@@ -196,10 +196,10 @@ const DEFAULT_SETTINGS = {
   meetingSystemDeviceId: "",
   meetingCaptureMode: "dual",
   meetingRealtimeDestination: "",
-  meetingRealtimeModel: "mimo-v2.5-asr",
+  meetingRealtimeModel: "qwen-audio-3.0-asr-flash-streaming",
   meetingQwenApiKey: "",
   meetingQwenBaseUrl: "",
-  meetingQwenModel: "qwen3-asr-flash",
+  meetingQwenModel: "qwen-audio-3.0-asr-flash-streaming",
   meetingQwenProfiles: {},
   meetingFileAsrProvider: "mimo",
   meetingFileAsrApiKey: "",
@@ -255,6 +255,9 @@ let liveStartPromise = null;
 let liveStopPromise = null;
 let liveRecoveryPromise = null;
 let liveActionPromise = null;
+let liveControlPromise = null;
+let liveWindowFlags = { floating: false, compact: false, alwaysOnTop: false };
+let liveWindowRestore = null;
 let captureOwner = null;
 let legacySessionId = null;
 let legacyCapturePending = false;
@@ -352,6 +355,17 @@ function liveError(code) {
 function liveIpcError(error) {
   const messages = {
     capture_busy: "已有录音正在进行，请先停止当前录音。",
+    live_busy: "当前会议仍在处理，请等待完成后重试。",
+    live_session_invalid: "会议已切换，请刷新当前会议后重试。",
+    live_cleanup_not_ready: "请等待录音和转写完成后再清理。",
+    live_summary_not_ready: "请等待录音和转写完成后再总结。",
+    live_no_text: "当前会议没有可处理的文本。",
+    live_pause_failed: "暂停失败，请检查录音状态后重试。",
+    live_resume_failed: "恢复录音失败，请检查录音状态后重试。",
+    live_review_failed: "音频复核失败，原始文本与音频已保留。",
+    live_summary_failed: "总结失败，已有文本与音频已保留。",
+    live_connection_failed: "实时模型连接测试失败，请检查该模型的凭据、地域地址和网络。",
+    window_mode_unavailable: "请先打开会议工作台。",
     app_quitting: "应用正在退出，请稍后重新打开。",
     microphone_permission: "请在系统设置中允许麦克风访问后重试。",
     screen_permission: "请在系统设置中允许屏幕与系统音频录制，或改用仅麦克风模式。",
@@ -372,17 +386,73 @@ function liveIpcError(error) {
     live_capture_failed: "录音失败，请检查系统权限及音频设备。",
     live_stop_failed: "尚未确认录音停止，请重试停止；应用不会提前退出。"
   };
-  const code = Object.hasOwn(messages, error?.code) ? error.code : "meeting_live_failed";
+  const code = Object.hasOwn(messages, error?.code) ? error.code
+    : Object.hasOwn(messages, error?.message) ? error.message : "meeting_live_failed";
   return { ok: false, error: { code, message: messages[code] || "会议操作失败，请检查模型配置、系统权限和本地文件后重试。" } };
 }
 
+function liveClaimDto(node) {
+  if (!node || typeof node !== "object" || Array.isArray(node) || typeof node.text !== "string") return null;
+  return {
+    text: node.text, uncertain: node.uncertain === true,
+    provenance: Array.isArray(node.provenance) ? node.provenance.slice(0, 256).map(item =>
+      Object.fromEntries(Object.entries(pickMeetingFields(item, ["sourceId", "quote", "source", "startFrame", "endFrame", "charStart", "charEnd"]))
+        .filter(([, field]) => typeof field === "string" || typeof field === "number" && Number.isFinite(field)))) : []
+  };
+}
+
+function liveMindmapDto(root) {
+  let remaining = 1000;
+  const visit = (node, depth = 0) => {
+    if (depth > 32 || remaining-- <= 0) return null;
+    const claim = liveClaimDto(node);
+    if (!claim) return null;
+    return {
+      ...claim,
+      children: Array.isArray(node.children) ? node.children.slice(0, 1000).map(child => visit(child, depth + 1)).filter(Boolean) : []
+    };
+  };
+  return visit(root);
+}
+
 function liveDto(value = {}) {
+  if (value?.ok === false) throw liveError(value.error?.code || "meeting_live_failed");
   const dto = pickMeetingFields(value, [
     "sessionId", "title", "status", "recording", "rawText", "correctedText", "markdownPath",
     "cleanedMarkdownPath", "audioPaths", "pendingSegments", "failedSegments", "lastSavedAt",
     "cleanupStatus", "modelId", "startedAtMs", "durationMs", "captureMode", "cleanupModelId",
-    "cleanupProgress", "recoverableSessions", "finalizationPending"
+    "finalizationPending", "paused", "previewText", "previewStatus", "reviewedText",
+    "reviewedMarkdownPath", "summaryMarkdownPath", "postprocessStatus"
   ]);
+  // Nested service objects also cross the trust boundary; never forward provider bodies.
+  for (const key of Object.keys(dto)) {
+    if (dto[key] !== null && !["string", "number", "boolean"].includes(typeof dto[key]) && key !== "audioPaths") delete dto[key];
+  }
+  const validPath = (file) => typeof file === "string" && path.isAbsolute(file) && /\.(md|wav)$/i.test(file);
+  for (const key of ["markdownPath", "cleanedMarkdownPath", "reviewedMarkdownPath", "summaryMarkdownPath"]) {
+    if (dto[key] && !validPath(dto[key])) delete dto[key];
+  }
+  dto.audioPaths = Array.isArray(value.audioPaths) ? value.audioPaths.filter(validPath)
+    : Object.fromEntries(Object.entries(pickMeetingFields(value.audioPaths, ["microphone", "system", "mixed"])).filter(([, file]) => validPath(file)));
+  for (const key of ["cleanupProgress", "postprocessProgress"]) {
+    dto[key] = Object.fromEntries(Object.entries(pickMeetingFields(value[key], ["completed", "total", "failed", "kind", "stage"]))
+      .filter(([field, item]) => ["kind", "stage"].includes(field) ? typeof item === "string" : typeof item === "number" && Number.isFinite(item)));
+  }
+  dto.summary = value.summary ? {
+    ...Object.fromEntries(Object.entries(pickMeetingFields(value.summary, ["title", "markdown"]))
+      .filter(([, item]) => typeof item === "string")),
+    mindmap: liveMindmapDto(value.summary.mindmap),
+    ...(Array.isArray(value.summary.sections) ? {
+      sections: value.summary.sections.slice(0, 1000)
+        .filter(section => section && typeof section === "object" && !Array.isArray(section) && typeof section.heading === "string")
+        .map(section => ({ heading: section.heading,
+          items: Array.isArray(section.items) ? section.items.slice(0, 1000).map(liveClaimDto).filter(Boolean) : [] }))
+    } : {})
+  } : null;
+  dto.recoverableSessions = Array.isArray(value.recoverableSessions) ? value.recoverableSessions.map((item) =>
+    Object.fromEntries(Object.entries(pickMeetingFields(item, ["sessionId", "title", "status", "startedAtMs"]))
+      .filter(([, field]) => typeof field === "string" || typeof field === "number"))) : [];
+  dto.window = { ...liveWindowFlags };
   dto.error = value.error ? liveIpcError(value.error).error : null;
   const remember = (file) => {
     if (typeof file === "string" && path.isAbsolute(file) && /\.(md|wav)$/i.test(file)) {
@@ -391,13 +461,17 @@ function liveDto(value = {}) {
   };
   remember(dto.markdownPath);
   remember(dto.cleanedMarkdownPath);
+  remember(dto.reviewedMarkdownPath);
+  remember(dto.summaryMarkdownPath);
   for (const file of Object.values(dto.audioPaths || {})) remember(file);
   return dto;
 }
 
 function publishLiveUpdate(value) {
+  const active = realtimeMeeting?.status();
+  if (value?.sessionId && active?.sessionId && value.sessionId !== active.sessionId) return;
   const dto = liveDto(value);
-  if (captureOwner === "live" && !liveStartPromise && !liveStopPromise && !dto.recording
+  if (captureOwner === "live" && !liveStartPromise && !liveStopPromise && !dto.recording && !dto.paused
     && ["completed", "needs_retry", "interrupted", "failed"].includes(dto.status)) {
     captureOwner = null;
   }
@@ -421,7 +495,7 @@ function getRealtimeMeeting() {
 function assertCaptureAvailable(owner) {
   if (meetingQuitCleanupStarted) throw liveError("app_quitting");
   if (captureOwner && captureOwner !== owner) throw liveError("capture_busy");
-  if (owner !== "live" && (liveStartPromise || liveStopPromise || realtimeMeeting?.status().recording)) {
+  if (owner !== "live" && (liveStartPromise || liveStopPromise || liveControlPromise || realtimeMeeting?.status().recording || realtimeMeeting?.status().paused)) {
     throw liveError("capture_busy");
   }
 }
@@ -429,24 +503,30 @@ function assertCaptureAvailable(owner) {
 async function requireCapturePermissions(mode) {
   const mac = getMacUtilities();
   if (!mac) return;
-  if (!await mac.requestMicrophoneAccess()) throw liveError("microphone_permission");
+  if (mode !== "system" && !await mac.requestMicrophoneAccess()) throw liveError("microphone_permission");
   let permissions = mac.getPermissionStatus();
-  if (mode === "dual" && permissions.screen === "not-determined") {
+  if (["dual", "system"].includes(mode) && permissions.screen === "not-determined") {
     await mac.requestScreenAccess();
     permissions = mac.getPermissionStatus();
   }
-  if (mode === "dual" && ["denied", "restricted", "not-determined"].includes(permissions.screen)) {
+  if (["dual", "system"].includes(mode) && ["denied", "restricted", "not-determined"].includes(permissions.screen)) {
     throw liveError("screen_permission");
   }
+}
+
+function livePostprocessBusy(current = realtimeMeeting?.status()) {
+  return [current?.cleanupStatus, current?.postprocessStatus].some(status =>
+    ["running", "reviewing", "cleaning", "summarizing", "pending"].includes(status));
 }
 
 function startLiveMeeting(payload = {}) {
   if (meetingQuitCleanupStarted) return Promise.reject(liveError("app_quitting"));
   if (liveStartPromise) return liveStartPromise;
-  if (liveActionPromise) throw liveError("capture_busy");
+  if (liveActionPromise || liveControlPromise || livePostprocessBusy()) throw liveError("live_busy");
   if (liveStopPromise) return liveStopPromise.then(() => getRealtimeMeeting().status());
   const current = realtimeMeeting?.status();
-  if (current?.recording || current?.status === "stopping") return Promise.resolve(current);
+  if (current?.recording || current?.paused || current?.status === "stopping") return Promise.resolve(current);
+  if (current?.finalizationPending) throw liveError("live_busy");
   assertCaptureAvailable("live");
   captureOwner = "live";
   liveStartPromise = (async () => {
@@ -456,8 +536,8 @@ function startLiveMeeting(payload = {}) {
       if (typeof value !== "string" || value.length > 4096) throw liveError("invalid_payload");
     }
     input.captureMode ||= settings.meetingCaptureMode || "dual";
-    input.modelId ||= settings.meetingRealtimeModel || "mimo-v2.5-asr";
-    if (!["dual", "microphone"].includes(input.captureMode)) throw liveError("invalid_payload");
+    input.modelId ||= settings.meetingRealtimeModel || "qwen-audio-3.0-asr-flash-streaming";
+    if (!["dual", "microphone", "system"].includes(input.captureMode)) throw liveError("invalid_payload");
     if (!Object.hasOwn(input, "destinationPath") && settings.meetingRealtimeDestination) {
       input.destinationPath = settings.meetingRealtimeDestination;
     }
@@ -468,7 +548,7 @@ function startLiveMeeting(payload = {}) {
     if (meetingQuitCleanupStarted) throw liveError("app_quitting");
     return await getRealtimeMeeting().start(input);
   })().catch((error) => {
-    if (!realtimeMeeting?.status().recording) captureOwner = null;
+    if (!realtimeMeeting?.status().recording && !realtimeMeeting?.status().paused) captureOwner = null;
     throw error;
   }).finally(() => { liveStartPromise = null; });
   return liveStartPromise;
@@ -479,9 +559,10 @@ function stopLiveMeeting() {
   liveStopPromise = (async () => {
     if (liveStartPromise) await liveStartPromise.catch(() => {});
     if (liveRecoveryPromise) await liveRecoveryPromise;
-    if (liveActionPromise) await liveActionPromise;
+    if (liveActionPromise) await liveActionPromise.catch(() => {});
+    if (liveControlPromise) await liveControlPromise.catch(() => {});
     const result = await getRealtimeMeeting().stop();
-    if (result.recording) throw liveError("live_stop_failed");
+    if (result.recording || result.paused) throw liveError("live_stop_failed");
     // B returns only once the local capture tail is drained; ASR may still be stopping.
     if (captureOwner === "live") captureOwner = null;
     return result;
@@ -490,7 +571,9 @@ function stopLiveMeeting() {
 }
 
 function recoverLiveMeeting(payload = {}) {
-  if (captureOwner || liveStartPromise || liveStopPromise || liveActionPromise || realtimeMeeting?.status().status === "stopping") {
+  if (livePostprocessBusy()) throw liveError("live_busy");
+  if (captureOwner || liveStartPromise || liveStopPromise || liveActionPromise || liveControlPromise
+    || realtimeMeeting?.status().recording || realtimeMeeting?.status().paused || realtimeMeeting?.status().status === "stopping") {
     throw liveError("capture_busy");
   }
   if (liveRecoveryPromise) return liveRecoveryPromise;
@@ -584,7 +667,9 @@ async function loadSettings() {
   await migrateLegacyUserData();
   try {
     const raw = await fs.readFile(settingsPath(), "utf8");
-    settings = ensureConnectionProfiles({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) });
+    const saved = JSON.parse(raw);
+    if (!saved.meetingQwenModel && saved.meetingQwenApiKey) saved.meetingQwenModel = "qwen3-asr-flash";
+    settings = ensureConnectionProfiles({ ...DEFAULT_SETTINGS, ...saved });
     settings.restoreClipboard = false;
   } catch {
     settings = ensureConnectionProfiles({ ...DEFAULT_SETTINGS });
@@ -853,7 +938,7 @@ function showMeetingWorkspace() {
   prepareWindowForDisplay(mainWindow, "meeting");
   mainWindow.show();
   enforceWindowGeometry(mainWindow, "meeting");
-  focusWindow(mainWindow, "meeting", { topmost: false });
+  focusWindow(mainWindow, "meeting", { topmost: liveWindowFlags.alwaysOnTop });
   sendWhenLoaded(mainWindow, "open-meeting");
 }
 
@@ -861,7 +946,7 @@ function showFileTranscriptionWorkspace() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   targetWindowHandle = "";
   logEvent("file: show workspace");
-  windowMode = "file";
+  setWindowMode("file");
   prepareWindowForDisplay(mainWindow, "file");
   mainWindow.show();
   enforceWindowGeometry(mainWindow, "file");
@@ -870,18 +955,74 @@ function showFileTranscriptionWorkspace() {
 }
 
 function setWindowMode(mode) {
+  const previousMode = windowMode;
+  if (mode !== "meeting") restoreLiveWindow();
   windowMode = mode;
   if (!mainWindow) return;
   logEvent("window: mode", mode);
-  enforceWindowGeometry(mainWindow, mode);
+  enforceWindowGeometry(mainWindow, mode, previousMode !== mode);
   // Meeting workspace is opened via open-meeting only (avoid dual-entry races).
   if (mode !== "meeting") {
     mainWindow.webContents.send("window-mode", mode);
   }
 }
 
-function enforceWindowGeometry(win, mode = windowMode) {
+function restoreLiveWindow() {
+  const saved = liveWindowRestore;
+  liveWindowRestore = null;
+  liveWindowFlags = { floating: false, compact: false, alwaysOnTop: false };
+  if (!saved || !mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMaximized()) mainWindow.unmaximize();
+  mainWindow.setMinimumSize(...saved.minimumSize);
+  mainWindow.setResizable(saved.resizable);
+  mainWindow.setBounds(saved.bounds, false);
+  setWindowAlwaysOnTop(mainWindow, saved.alwaysOnTop);
+  if (saved.maximized) mainWindow.maximize();
+}
+
+function setLiveWindow(payload = {}) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw liveError("invalid_payload");
+  const input = pickMeetingFields(payload, ["floating", "compact", "alwaysOnTop"]);
+  if (Object.values(input).some(value => typeof value !== "boolean")) throw liveError("invalid_payload");
+  // Delayed renderer actions must not resize the settings or short-recording view.
+  if (!mainWindow || mainWindow.isDestroyed() || windowMode !== "meeting") throw liveError("window_mode_unavailable");
+  const next = { ...liveWindowFlags, ...input };
+  if (input.compact === true && input.floating !== false) next.floating = true;
+  if (!next.floating) next.compact = false;
+  if (input.floating === true && !liveWindowFlags.floating && input.alwaysOnTop === undefined) next.alwaysOnTop = true;
+  if (input.floating === false && input.alwaysOnTop === undefined) next.alwaysOnTop = false;
+  if (next.floating || next.compact || next.alwaysOnTop) {
+    if (!liveWindowRestore) {
+      liveWindowRestore = {
+        bounds: mainWindow.getNormalBounds(), minimumSize: mainWindow.getMinimumSize(),
+        resizable: mainWindow.isResizable(), alwaysOnTop: mainWindow.isAlwaysOnTop(), maximized: mainWindow.isMaximized()
+      };
+    }
+    const layoutChanged = next.floating !== liveWindowFlags.floating || next.compact !== liveWindowFlags.compact;
+    liveWindowFlags = next;
+    if (layoutChanged && mainWindow.isMaximized()) mainWindow.unmaximize();
+    mainWindow.setMinimumSize(...(next.floating ? next.compact ? [360, 240] : [520, 420] : liveWindowRestore.minimumSize));
+    mainWindow.setResizable(true);
+    if (layoutChanged) {
+      const size = next.floating ? next.compact ? { width: 420, height: 300 } : { width: 640, height: 560 } : liveWindowRestore.bounds;
+      mainWindow.setBounds({ ...mainWindow.getBounds(), ...size }, false);
+      if (!next.floating && liveWindowRestore.maximized) mainWindow.maximize();
+    }
+    setWindowAlwaysOnTop(mainWindow, next.alwaysOnTop);
+  } else restoreLiveWindow();
+  const window = { ...liveWindowFlags, bounds: mainWindow.getBounds(), minimumSize: mainWindow.getMinimumSize(),
+    resizable: mainWindow.isResizable(), alwaysOnTop: mainWindow.isAlwaysOnTop() };
+  publishLiveUpdate(getRealtimeMeeting().status());
+  return { ...window, window };
+}
+
+function enforceWindowGeometry(win, mode = windowMode, resetSize = false) {
   if (!win || win.isDestroyed()) return;
+  if (win === mainWindow && mode === "meeting" && liveWindowRestore) {
+    win.setResizable(true);
+    setWindowAlwaysOnTop(win, liveWindowFlags.alwaysOnTop);
+    return;
+  }
   const size = WINDOW_SIZES[mode] || WINDOW_SIZES.compact;
   const isSettings = mode === "settings";
   const isMeeting = mode === "meeting";
@@ -896,7 +1037,7 @@ function enforceWindowGeometry(win, mode = windowMode) {
   }
   if (!resizable && win.isMaximized()) win.unmaximize();
   win.setResizable(resizable);
-  if (!win.isMaximized() && (mode !== "recording" || !win.isVisible())) {
+  if (!win.isMaximized() && (resetSize || mode !== "recording" || !win.isVisible())) {
     win.setContentSize(size.width, size.height, false);
     win.setBounds({ ...win.getBounds(), width: size.width, height: size.height }, false);
   }
@@ -927,8 +1068,8 @@ function prepareWindowForDisplay(win = mainWindow, mode = windowMode) {
   }
   enforceWindowGeometry(win, mode);
   win.setFocusable(true);
-  setWindowAlwaysOnTop(win, mode !== "settings");
-  if (!win.isVisible()) win.center();
+  setWindowAlwaysOnTop(win, mode === "meeting" ? liveWindowFlags.alwaysOnTop : !["settings", "file"].includes(mode));
+  if (!win.isVisible() && !(win === mainWindow && mode === "meeting" && liveWindowRestore)) win.center();
   win.moveTop();
 }
 
@@ -973,9 +1114,12 @@ function focusWindow(win, label, { topmost = true } = {}) {
   logEvent("window: focus requested", label);
   win.show();
   raiseWindowToFront(win, label, { focus: true, native: topmost, topmost });
+  const focusMode = windowMode;
+  const focusFlags = liveWindowFlags;
   for (const delay of [80, 180, 360, 720]) {
     setTimeout(() => {
       if (!win || win.isDestroyed() || !win.isVisible()) return;
+      if (win === mainWindow && (windowMode !== focusMode || liveWindowFlags !== focusFlags)) return;
       raiseWindowToFront(win, label, { focus: true, native: topmost && delay >= 180, topmost });
       logEvent("window: focus retry", `${label} delay=${delay} focused=${win.isFocused()} visible=${win.isVisible()}`);
     }, delay);
@@ -1642,16 +1786,63 @@ registerLiveIpc("meeting:live:stop", async () => {
   return liveDto(await stopLiveMeeting());
 });
 registerLiveIpc("meeting:live:recover", async (payload) => liveDto(await recoverLiveMeeting(payload)));
-for (const action of ["retry", "cleanup"]) {
+registerLiveIpc("meeting:live:window", setLiveWindow);
+registerLiveIpc("meeting:live:test-connection", async (payload = {}) => {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw liveError("invalid_payload");
+  const requestedModel = payload.modelId ?? settings.meetingRealtimeModel ?? settings.meetingQwenModel;
+  if (typeof requestedModel !== "string" || requestedModel.length > 256) throw liveError("invalid_payload");
+  const modelId = requestedModel.trim();
+  if (!modelId) throw liveError("invalid_payload");
+  if (captureOwner || liveStartPromise || liveStopPromise || realtimeMeeting?.status().recording) throw liveError("capture_busy");
+  const { previewProfileFor } = require("./meeting/realtime/providers");
+  const { createAliMeetingStream } = require("./providers/asr/ali-meeting-stream");
+  const profile = previewProfileFor(settings, modelId);
+  let stream;
+  try {
+    stream = createAliMeetingStream({ ...profile, readyTimeoutMs: 10000, closeTimeoutMs: 1000 });
+    await stream.ready;
+    return { modelId, scope: "meeting-preview", audioTested: false };
+  } catch {
+    throw liveError("live_connection_failed");
+  } finally {
+    if (stream) await stream.close();
+  }
+});
+for (const action of ["pause", "resume"]) {
+  registerLiveIpc(`meeting:live:${action}`, async () => {
+    if (captureOwner !== "live" || liveStartPromise || liveStopPromise || liveRecoveryPromise || liveActionPromise || liveControlPromise) throw liveError("capture_busy");
+    const current = getRealtimeMeeting().status();
+    if (!current.recording && !current.paused) throw liveError("capture_busy");
+    liveControlPromise = Promise.resolve().then(() => getRealtimeMeeting()[action]());
+    try { return liveDto(await liveControlPromise); }
+    finally { liveControlPromise = null; }
+  });
+}
+for (const action of ["retry", "cleanup", "summarize"]) {
   registerLiveIpc(`meeting:live:${action}`, async (payload) => {
-    if (captureOwner || liveStartPromise || liveStopPromise || liveRecoveryPromise || liveActionPromise) throw liveError("capture_busy");
-    const input = pickMeetingFields(payload, action === "cleanup" ? ["sessionId", "modelId"] : ["sessionId"]);
-    for (const value of Object.values(input)) {
+    if (captureOwner || liveStartPromise || liveStopPromise || liveRecoveryPromise || liveActionPromise || liveControlPromise) throw liveError("capture_busy");
+    const current = getRealtimeMeeting().status();
+    if (livePostprocessBusy(current) || current.recording || current.paused || current.status === "stopping") throw liveError("live_busy");
+    const input = pickMeetingFields(payload, action === "cleanup" ? ["sessionId", "modelId", "useMimoReview", "reviewModelId"]
+      : action === "summarize" ? ["sessionId", "modelId"] : ["sessionId"]);
+    for (const [key, value] of Object.entries(input)) {
+      if (key === "useMimoReview") {
+        if (typeof value !== "boolean") throw liveError("invalid_payload");
+        continue;
+      }
       if (typeof value !== "string" || value.length > 4096) throw liveError("invalid_payload");
     }
+    if (input.sessionId != null && (!input.sessionId || input.sessionId.length > 256)) throw liveError("invalid_payload");
+    if (input.sessionId && input.sessionId !== current.sessionId) throw liveError("live_session_invalid");
+    // Pin even legacy payloads without an id to the session checked above.
+    if (current.sessionId) input.sessionId = current.sessionId;
     liveActionPromise = Promise.resolve().then(() => getRealtimeMeeting()[action](input));
     try {
-      return liveDto(await liveActionPromise);
+      const result = await liveActionPromise;
+      if (input.sessionId && (result.sessionId !== input.sessionId || getRealtimeMeeting().status().sessionId !== input.sessionId)) {
+        throw liveError("live_session_invalid");
+      }
+      return liveDto(result);
     } finally {
       liveActionPromise = null;
     }

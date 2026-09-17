@@ -20,5 +20,6 @@ native/audio-capture-helper/target/
 native/ffmpeg/
 *.pdb
 output/
+.playwright-cli/
 __pycache__/
 *.pyc

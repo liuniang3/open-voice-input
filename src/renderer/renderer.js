@@ -117,7 +117,10 @@ const ASR_REALTIME_MODEL_PRESETS = new Set([
 const CUSTOM_CLEANER_MODEL = "__custom__";
 const CLEANER_MODEL_PRESETS = new Set(["gpt-5.4-mini", "grok-4.5", "mimo-v2.5", "mimo-v2.5-pro"]);
 const MIMO_CLEANER_MODELS = new Set(["mimo-v2.5", "mimo-v2.5-pro"]);
-const MEETING_QWEN_MODEL_PRESETS = new Set(["qwen3-asr-flash", "qwen3-asr-flash-filetrans"]);
+const MEETING_LIVE_MODEL = "qwen-audio-3.0-asr-flash-streaming";
+const isSupportedMeetingLiveModel = (model) => typeof model === "string" && model === model.trim()
+  && /^(?:qwen-audio-3\.0-asr-flash-streaming|fun-asr-realtime)(?:-\d{4}-\d{2}-\d{2})?$/.test(model);
+const MEETING_QWEN_MODEL_PRESETS = new Set([MEETING_LIVE_MODEL, "fun-asr-realtime"]);
 const MEETING_FUN_MODEL_PRESETS = new Set(["fun-asr", "fun-asr-mtl"]);
 const MEETING_FILE_ASR_MODEL_PRESETS = new Set([
   "mimo-v2.5-asr",
@@ -566,31 +569,50 @@ function selectedProfileModel(select, input) {
   return select.value === CUSTOM_ASR_MODEL ? input.value.trim() : select.value;
 }
 
+function meetingPreviewProfileDraft(model) {
+  const profiles = [appSettings.meetingRealtimeProfiles?.[model], appSettings.meetingQwenProfiles?.[model], appSettings.asrProfiles?.[model]].filter(Boolean);
+  return profiles.find(profile => profile.apiKey) || profiles[0] || {};
+}
+
 function cacheMeetingQwenProfileDraft(model) {
   const value = String(model || "").trim();
   if (!value) return;
   appSettings.meetingQwenProfiles = {
     ...(appSettings.meetingQwenProfiles || {}),
     [value]: {
-      provider: "qwen3-asr",
+      ...(appSettings.meetingQwenProfiles?.[value] || {}),
+      provider: /fun-asr/i.test(value) ? "fun-asr" : "qwen3-asr",
       model: value,
       baseUrl: meetingQwenBaseUrlInput.value.trim(),
       apiKey: meetingQwenApiKeyInput.value.trim()
     }
   };
+  if (Object.hasOwn(appSettings.meetingRealtimeProfiles || {}, value)) {
+    appSettings.meetingRealtimeProfiles = {
+      ...appSettings.meetingRealtimeProfiles,
+      [value]: { ...appSettings.meetingRealtimeProfiles[value], ...appSettings.meetingQwenProfiles[value] }
+    };
+  }
 }
 
 function loadMeetingQwenProfileDraft(model) {
+  const supportsLiveModel = value => typeof value === "string" && value === value.trim()
+    && /^(?:qwen-audio-3\.0-asr-flash-streaming|fun-asr-realtime)(?:-\d{4}-\d{2}-\d{2})?$/.test(value);
+  const liveProfiles = Object.fromEntries([
+    ...Object.entries(appSettings.asrProfiles || {}),
+    ...Object.entries(appSettings.meetingQwenProfiles || {}),
+    ...Object.entries(appSettings.meetingRealtimeProfiles || {})
+  ].filter(([id]) => supportsLiveModel(id)));
   const value = fillProfileModelSelector({
     select: meetingQwenModelPresetSelect,
     input: meetingQwenModelInput,
     customField: meetingQwenCustomModelField,
     model,
-    profiles: appSettings.meetingQwenProfiles,
+    profiles: liveProfiles,
     presets: MEETING_QWEN_MODEL_PRESETS,
-    fallback: "qwen3-asr-flash"
+    fallback: MEETING_LIVE_MODEL
   });
-  const profile = appSettings.meetingQwenProfiles?.[value] || {};
+  const profile = meetingPreviewProfileDraft(value);
   meetingQwenBaseUrlInput.value = profile.baseUrl || QWEN_ASR_OPENAI_BASE_URL;
   meetingQwenApiKeyInput.value = profile.apiKey || "";
   activeMeetingQwenModelDraft = value;
@@ -716,7 +738,7 @@ function loadMeetingAnalysisProfileDraft(model) {
   activeMeetingAnalysisModelDraft = value;
 }
 
-function handleMeetingProfileModelChange(kind) {
+function meetingProfileDraftConfig(kind) {
   const configs = {
     qwen: {
       select: meetingQwenModelPresetSelect,
@@ -755,9 +777,29 @@ function handleMeetingProfileModelChange(kind) {
       load: loadMeetingAnalysisProfileDraft
     }
   };
-  const config = configs[kind];
+  return configs[kind];
+}
+
+function handleMeetingCustomProfileInput(kind) {
+  const config = meetingProfileDraftConfig(kind);
+  if (config.select.value !== CUSTOM_ASR_MODEL) return;
+  const model = config.input.value.trim();
+  if (model === config.active()) return;
+  config.cache(config.active());
+  config.load(model || CUSTOM_ASR_MODEL);
+  config.select.value = CUSTOM_ASR_MODEL;
+  config.input.value = model;
+  config.customField.hidden = false;
+  config.setActive(model);
+}
+
+function handleMeetingProfileModelChange(kind) {
+  const config = meetingProfileDraftConfig(kind);
   config.cache(config.active());
   if (config.select.value === CUSTOM_ASR_MODEL) {
+    // A new model starts with empty credentials, including while its id is typed.
+    config.load(CUSTOM_ASR_MODEL);
+    config.select.value = CUSTOM_ASR_MODEL;
     config.input.value = "";
     config.customField.hidden = false;
     config.setActive("");
@@ -1732,7 +1774,12 @@ function fillSettingsForm() {
   hotkeyStatus.textContent = "";
   meetingHotkeyStatus.textContent = "";
   setTranscriptionMode(normalizeTranscriptionMode(appSettings.transcriptionMode), { silent: true });
-  loadMeetingQwenProfileDraft(appSettings.meetingQwenModel || "qwen3-asr-flash");
+  const meetingLiveModel = isSupportedMeetingLiveModel(appSettings.meetingRealtimeModel)
+    ? appSettings.meetingRealtimeModel
+    : isSupportedMeetingLiveModel(appSettings.meetingQwenModel)
+      ? appSettings.meetingQwenModel
+      : MEETING_LIVE_MODEL;
+  loadMeetingQwenProfileDraft(meetingLiveModel);
   loadMeetingFunProfileDraft(appSettings.meetingFunAsrModel || FUN_ASR_MODEL);
   if (meetingOssRegionInput) meetingOssRegionInput.value = appSettings.meetingOssRegion || "";
   if (meetingOssEndpointInput) meetingOssEndpointInput.value = appSettings.meetingOssEndpoint || "";
@@ -1850,6 +1897,9 @@ async function saveAllSettings() {
   if (!meetingQwenModel || !meetingFileAsrModel || !meetingFunModel || !meetingAnalysisModel) {
     throw new Error("请填写所有已选择的自定义模型 ID。");
   }
+  if (!isSupportedMeetingLiveModel(meetingQwenModel)) {
+    throw new Error("会议实时模型仅支持 Qwen Audio Streaming、Fun-ASR Realtime 或其 YYYY-MM-DD 日期版本。");
+  }
   cacheMeetingQwenProfileDraft(meetingQwenModel);
   cacheMeetingFileAsrProfileDraft(meetingFileAsrModel);
   cacheMeetingFunProfileDraft(meetingFunModel);
@@ -1888,9 +1938,11 @@ async function saveAllSettings() {
     meetingCaptureMode:
       document.getElementById("meetingCaptureModeSelect")?.value || appSettings.meetingCaptureMode || "dual",
     meetingQwenModel,
+    meetingRealtimeModel: meetingQwenModel,
     meetingQwenBaseUrl: meetingQwenBaseUrlInput?.value.trim() || "",
     meetingQwenApiKey: meetingQwenApiKeyInput?.value.trim() || "",
     meetingQwenProfiles: appSettings.meetingQwenProfiles || {},
+    meetingRealtimeProfiles: appSettings.meetingRealtimeProfiles || {},
     meetingFileAsrProvider: meetingFileAsrProviderSelect?.value || "mimo",
     meetingFileAsrModel,
     meetingFileAsrBaseUrl: meetingFileAsrBaseUrlInput?.value.trim() || "",
@@ -1958,13 +2010,23 @@ async function runMeetingEnhancedTest(target) {
 
 async function testConnection() {
   normalizeProviderSettingsDraft();
-  setStatus("transcribing", "正在测试", "正在检查当前 API 配置。");
+  const meetingTest = activeSettingsTab === "meeting";
+  const modelId = meetingTest ? selectedProfileModel(meetingQwenModelPresetSelect, meetingQwenModelInput) : null;
+  setStatus("transcribing", "正在测试", meetingTest ? "正在检查所选会议实时模型。" : "正在检查短语音 API 配置。");
   testConnectionBtn.disabled = true;
   try {
     await saveAllSettings();
-    const checks = await window.mimoInput.testConnection();
-    const detail = checks.map((check) => `${check.name}：${check.detail}`).join("；");
-    setStatus("ready", "连接可用", detail);
+    if (meetingTest) {
+      if (!window.mimoInput.meetingLiveTestConnection) throw new Error("当前版本不支持会议实时模型连接测试。");
+      const result = await window.mimoInput.meetingLiveTestConnection({ modelId });
+      if (!result?.ok) throw new Error(result?.error?.message || "会议实时模型连接测试失败。");
+      if (result.modelId !== modelId || result.scope !== "meeting-preview") throw new Error("会议模型测试结果不匹配。");
+      setStatus("ready", "会议实时连接可用", `${modelId}：鉴权与任务建立成功，未测试音频识别。`);
+    } else {
+      const checks = await window.mimoInput.testConnection();
+      const detail = checks.map((check) => `${check.name}：${check.detail}`).join("；");
+      setStatus("ready", "短语音连接可用", detail);
+    }
   } catch (error) {
     setStatus("error", "连接测试失败", error.message || String(error));
   } finally {
@@ -2020,32 +2082,16 @@ meetingQwenModelPresetSelect.addEventListener("change", () => handleMeetingProfi
 meetingFileAsrModelPresetSelect?.addEventListener("change", () => handleMeetingProfileModelChange("file-asr"));
 meetingFunAsrModelPresetSelect.addEventListener("change", () => handleMeetingProfileModelChange("fun"));
 meetingAnalysisModelPresetSelect.addEventListener("change", () => handleMeetingProfileModelChange("analysis"));
-meetingQwenModelInput.addEventListener("input", () => {
-  if (meetingQwenModelPresetSelect.value === CUSTOM_ASR_MODEL) {
-    activeMeetingQwenModelDraft = meetingQwenModelInput.value.trim();
-  }
-});
-meetingFileAsrModelInput?.addEventListener("input", () => {
-  if (meetingFileAsrModelPresetSelect.value === CUSTOM_ASR_MODEL) {
-    activeMeetingFileAsrModelDraft = meetingFileAsrModelInput.value.trim();
-  }
-});
+meetingQwenModelInput.addEventListener("input", () => handleMeetingCustomProfileInput("qwen"));
+meetingFileAsrModelInput?.addEventListener("input", () => handleMeetingCustomProfileInput("file-asr"));
 meetingFileAsrProviderSelect?.addEventListener("change", () => {
   const provider = meetingFileAsrProviderSelect.value;
   if (meetingFileAsrBaseUrlInput && !meetingFileAsrBaseUrlInput.value.trim()) {
     meetingFileAsrBaseUrlInput.value = defaultMeetingFileAsrBaseUrl(provider);
   }
 });
-meetingFunAsrModelInput.addEventListener("input", () => {
-  if (meetingFunAsrModelPresetSelect.value === CUSTOM_ASR_MODEL) {
-    activeMeetingFunModelDraft = meetingFunAsrModelInput.value.trim();
-  }
-});
-meetingAnalysisModelInput.addEventListener("input", () => {
-  if (meetingAnalysisModelPresetSelect.value === CUSTOM_ASR_MODEL) {
-    activeMeetingAnalysisModelDraft = meetingAnalysisModelInput.value.trim();
-  }
-});
+meetingFunAsrModelInput.addEventListener("input", () => handleMeetingCustomProfileInput("fun"));
+meetingAnalysisModelInput.addEventListener("input", () => handleMeetingCustomProfileInput("analysis"));
 for (const button of settingsTabButtons) {
   button.addEventListener("click", () => setSettingsTab(button.dataset.settingsTab));
 }

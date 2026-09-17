@@ -10,11 +10,11 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use windows::core::PCWSTR;
+use windows::core::{Interface, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Media::Audio::{
     eCapture, eMultimedia, eRender, IAudioCaptureClient, IAudioClient, IAudioClock, IMMDevice,
-    IMMDeviceEnumerator, MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY,
+    IMMDeviceEnumerator, IMMEndpoint, MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY,
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
     AUDCLNT_STREAMFLAGS_LOOPBACK, DEVICE_STATE_ACTIVE, WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
 };
@@ -35,6 +35,10 @@ use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 
 const PHASE_TIMEOUT: Duration = Duration::from_secs(15);
 const JOIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[cfg(test)]
+#[path = "system_capture_tests.rs"]
+mod system_capture_tests;
 
 pub type ProgressFn = Arc<dyn Fn(String, String, String, serde_json::Value) + Send + Sync>;
 
@@ -95,7 +99,9 @@ unsafe fn enum_flow(
     let collection = enumerator
         .EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE)
         .map_err(|e| format!("EnumAudioEndpoints({flow_name}): {e}"))?;
-    let count = collection.GetCount().map_err(|e| format!("GetCount: {e}"))?;
+    let count = collection
+        .GetCount()
+        .map_err(|e| format!("GetCount: {e}"))?;
     let mut out = Vec::new();
     for i in 0..count {
         let device = collection.Item(i).map_err(|e| format!("Item({i}): {e}"))?;
@@ -159,7 +165,8 @@ pub struct DualStartParams {
 }
 
 #[derive(Clone)]
-pub struct MicOnlyStartParams {
+pub struct SingleStartParams {
+    pub system_only: bool,
     pub session_id: String,
     pub device_id: Option<String>,
     pub output_dir: PathBuf,
@@ -169,23 +176,27 @@ pub struct MicOnlyStartParams {
 
 enum SessionKind {
     Dual(DualInner),
-    MicOnly(MicOnlyInner),
+    Single(SingleInner),
 }
 
 struct DualInner {
     stop_flag: Arc<AtomicBool>,
     pause_flag: Arc<AtomicBool>,
     pause_gen: Arc<AtomicU64>,
+    pause_qpc: Arc<AtomicU64>,
+    pause_seen: Vec<Arc<AtomicBool>>,
     session_fault: Arc<AtomicBool>,
     abort: AbortFlag,
     mic_join: Option<JoinHandle<Result<serde_json::Value, String>>>,
     sys_join: Option<JoinHandle<Result<serde_json::Value, String>>>,
 }
 
-struct MicOnlyInner {
+struct SingleInner {
     stop_flag: Arc<AtomicBool>,
     pause_flag: Arc<AtomicBool>,
     pause_gen: Arc<AtomicU64>,
+    pause_qpc: Arc<AtomicU64>,
+    pause_seen: Arc<AtomicBool>,
     join: Option<JoinHandle<Result<serde_json::Value, String>>>,
 }
 
@@ -207,6 +218,9 @@ impl CaptureSession {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let pause_flag = Arc::new(AtomicBool::new(false));
         let pause_gen = Arc::new(AtomicU64::new(0));
+        let pause_qpc = Arc::new(AtomicU64::new(0));
+        let mic_pause_seen = Arc::new(AtomicBool::new(false));
+        let sys_pause_seen = Arc::new(AtomicBool::new(false));
         let session_fault = Arc::new(AtomicBool::new(false));
         let abort = AbortFlag::new();
 
@@ -227,6 +241,8 @@ impl CaptureSession {
         let mic_ctx = WorkerCtx {
             session_id: session_id.clone(),
             track: "microphone".to_string(),
+            pause_qpc: Arc::clone(&pause_qpc),
+            pause_seen: Arc::clone(&mic_pause_seen),
             role: "self".to_string(),
             flow: TrackFlow::Capture,
             device_id: params.microphone.device_id.clone(),
@@ -249,6 +265,8 @@ impl CaptureSession {
         let sys_ctx = WorkerCtx {
             session_id: session_id.clone(),
             track: "system".to_string(),
+            pause_qpc: Arc::clone(&pause_qpc),
+            pause_seen: Arc::clone(&sys_pause_seen),
             role: "remote_mix_for_diarization".to_string(),
             flow: TrackFlow::RenderLoopback,
             device_id: params.system.device_id.clone(),
@@ -412,6 +430,8 @@ impl CaptureSession {
 
         Ok(Self {
             kind: SessionKind::Dual(DualInner {
+                pause_qpc,
+                pause_seen: vec![mic_pause_seen, sys_pause_seen],
                 stop_flag,
                 pause_flag,
                 pause_gen,
@@ -428,10 +448,20 @@ impl CaptureSession {
         })
     }
 
-    pub fn start_mic_only(params: MicOnlyStartParams) -> Result<Self, String> {
+    pub fn start_single(params: SingleStartParams) -> Result<Self, String> {
+        let flow = if params.system_only {
+            TrackFlow::RenderLoopback
+        } else {
+            TrackFlow::Capture
+        };
+        let track = flow.track();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let pause_flag = Arc::new(AtomicBool::new(false));
         let pause_gen = Arc::new(AtomicU64::new(0));
+        let pause_qpc = Arc::new(AtomicU64::new(0));
+        let pause_seen = Arc::new(AtomicBool::new(false));
+        let pause_qpc_t = Arc::clone(&pause_qpc);
+        let pause_seen_t = Arc::clone(&pause_seen);
         let session_id = params.session_id.clone();
         let output_dir = params.output_dir.clone();
         let (ready_tx, ready_rx) = mpsc::channel();
@@ -445,9 +475,22 @@ impl CaptureSession {
         let dev = params.device_id.clone();
 
         let join = thread::Builder::new()
-            .name("wasapi-mic-capture".into())
+            .name(format!("wasapi-{track}-capture"))
             .spawn(move || {
-                run_mic_only_loop(sid, dev, out, sub, stop_t, pause_t, pause_g, ready_tx, progress)
+                run_single_loop(
+                    flow,
+                    sid,
+                    dev,
+                    out,
+                    sub,
+                    stop_t,
+                    pause_t,
+                    pause_g,
+                    pause_qpc_t,
+                    pause_seen_t,
+                    ready_tx,
+                    progress,
+                )
             })
             .map_err(|e| format!("spawn capture thread: {e}"))?;
 
@@ -457,9 +500,11 @@ impl CaptureSession {
                 let info = serde_json::json!({
                     "started": true,
                     "sessionId": session_id,
-                    "captureMode": "microphone",
-                    "track": "microphone",
-                    "role": "self",
+                    "captureMode": track,
+                    "track": track,
+                    "role": flow.role(),
+                    "captureScope": if params.system_only { "endpoint_mix" } else { "microphone" },
+                    "loopback": params.system_only,
                     "deviceId": info_track.device_id,
                     "deviceName": info_track.device_name,
                     "outputDir": output_dir.display().to_string(),
@@ -468,7 +513,9 @@ impl CaptureSession {
                     "archivePending": true
                 });
                 Ok(Self {
-                    kind: SessionKind::MicOnly(MicOnlyInner {
+                    kind: SessionKind::Single(SingleInner {
+                        pause_qpc,
+                        pause_seen,
                         stop_flag,
                         pause_flag,
                         pause_gen,
@@ -476,9 +523,13 @@ impl CaptureSession {
                     }),
                     info,
                     session_id,
+                    system_output_dir: if params.system_only {
+                        Some(output_dir.clone())
+                    } else {
+                        None
+                    },
                     output_dir,
-                    system_output_dir: None,
-                    capture_mode: "microphone".to_string(),
+                    capture_mode: track.to_string(),
                 })
             }
             Ok(Err(e)) | Err(e) => {
@@ -505,51 +556,73 @@ impl CaptureSession {
             && self.system_output_dir.as_deref() == Some(sys)
     }
 
-    pub fn matches_mic(&self, session_id: &str, output_dir: &std::path::Path) -> bool {
+    pub fn matches_single(
+        &self,
+        session_id: &str,
+        output_dir: &std::path::Path,
+        mode: &str,
+    ) -> bool {
         self.session_id == session_id
-            && self.capture_mode == "microphone"
+            && self.capture_mode == mode
+            && mode != "dual"
             && self.output_dir == output_dir
     }
 
     pub fn is_faulted(&self) -> bool {
         match &self.kind {
             SessionKind::Dual(d) => d.session_fault.load(Ordering::SeqCst),
-            SessionKind::MicOnly(_) => false,
+            SessionKind::Single(m) => m.join.as_ref().map(|h| h.is_finished()).unwrap_or(true),
         }
     }
 
     pub fn pause(&mut self) -> Result<serde_json::Value, String> {
-        let hole_qpc = qpc_now().unwrap_or(0);
-        match &mut self.kind {
-            SessionKind::Dual(d) => {
-                d.pause_flag.store(true, Ordering::SeqCst);
-                d.pause_gen.fetch_add(1, Ordering::SeqCst);
-            }
-            SessionKind::MicOnly(m) => {
-                m.pause_flag.store(true, Ordering::SeqCst);
-                m.pause_gen.fetch_add(1, Ordering::SeqCst);
-            }
-        }
-        Ok(serde_json::json!({
-            "paused": true,
-            "policy": "keep_audioclient_running_discard_buffers_record_hole",
-            "holeQpc": hole_qpc,
-            "broadcast": true
-        }))
+        self.set_paused(true)
     }
 
     pub fn resume(&mut self) -> Result<serde_json::Value, String> {
-        match &mut self.kind {
-            SessionKind::Dual(d) => {
-                d.pause_flag.store(false, Ordering::SeqCst);
-                d.pause_gen.fetch_add(1, Ordering::SeqCst);
-            }
-            SessionKind::MicOnly(m) => {
-                m.pause_flag.store(false, Ordering::SeqCst);
-                m.pause_gen.fetch_add(1, Ordering::SeqCst);
-            }
+        self.set_paused(false)
+    }
+
+    fn set_paused(&self, paused: bool) -> Result<serde_json::Value, String> {
+        if self.is_faulted() {
+            return Err("capture session faulted".into());
         }
-        Ok(serde_json::json!({ "paused": false }))
+        let (flag, generation, tick, seen) = match &self.kind {
+            SessionKind::Dual(d) => (
+                &d.pause_flag,
+                &d.pause_gen,
+                &d.pause_qpc,
+                d.pause_seen.as_slice(),
+            ),
+            SessionKind::Single(s) => (
+                &s.pause_flag,
+                &s.pause_gen,
+                &s.pause_qpc,
+                std::slice::from_ref(&s.pause_seen),
+            ),
+        };
+        let idempotent = flag.load(Ordering::SeqCst) == paused;
+        if !idempotent {
+            tick.store(qpc_now()?, Ordering::SeqCst);
+            generation.fetch_add(1, Ordering::SeqCst);
+            flag.store(paused, Ordering::SeqCst);
+        }
+        // The command result follows durable journal/partial-chunk writes on every track.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while seen.iter().any(|ack| ack.load(Ordering::SeqCst) != paused) {
+            if self.is_faulted() {
+                return Err("capture session faulted during pause/resume".into());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("pause/resume writer acknowledgement timed out".into());
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        Ok(
+            serde_json::json!({ "paused": paused, "idempotent": idempotent,
+            "holeQpc": tick.load(Ordering::SeqCst), "broadcast": true,
+            "policy": "keep_audioclient_running_discard_buffers_record_hole" }),
+        )
     }
 
     pub fn stop(mut self) -> Result<serde_json::Value, String> {
@@ -581,7 +654,7 @@ impl CaptureSession {
                     "system": sys_val
                 }))
             }
-            SessionKind::MicOnly(m) => {
+            SessionKind::Single(m) => {
                 m.stop_flag.store(true, Ordering::SeqCst);
                 match m.join.take() {
                     Some(handle) => join_timeout(handle, JOIN_TIMEOUT)?,
@@ -619,6 +692,22 @@ enum TrackFlow {
     RenderLoopback,
 }
 
+impl TrackFlow {
+    fn track(self) -> &'static str {
+        match self {
+            Self::Capture => "microphone",
+            Self::RenderLoopback => "system",
+        }
+    }
+
+    fn role(self) -> &'static str {
+        match self {
+            Self::Capture => "self",
+            Self::RenderLoopback => "remote_mix_for_diarization",
+        }
+    }
+}
+
 struct WorkerCtx {
     session_id: String,
     track: String,
@@ -630,6 +719,8 @@ struct WorkerCtx {
     stop_flag: Arc<AtomicBool>,
     pause_flag: Arc<AtomicBool>,
     pause_gen: Arc<AtomicU64>,
+    pause_qpc: Arc<AtomicU64>,
+    pause_seen: Arc<AtomicBool>,
     session_fault: Arc<AtomicBool>,
     abort: AbortFlag,
     shared_origin: Arc<Mutex<Option<SharedClock>>>,
@@ -787,6 +878,8 @@ fn run_track_worker(ctx: WorkerCtx) -> Result<serde_json::Value, String> {
         &ctx.stop_flag,
         &ctx.pause_flag,
         &ctx.pause_gen,
+        &ctx.pause_qpc,
+        &ctx.pause_seen,
         &ctx.session_fault,
         &ctx.abort,
         &track,
@@ -831,6 +924,8 @@ fn capture_loop(
     stop_flag: &AtomicBool,
     pause_flag: &AtomicBool,
     pause_gen: &AtomicU64,
+    pause_qpc: &AtomicU64,
+    pause_seen: &AtomicBool,
     session_fault: &AtomicBool,
     abort: &AbortFlag,
     track: &str,
@@ -873,37 +968,45 @@ fn capture_loop(
                 discard_first_qpc = None;
                 discard_last_qpc = None;
                 pause_gen_at_begin = gen;
-                let hole_qpc = qpc_now().unwrap_or(0);
-                let _ = writer.record_hole(
-                    "pause_begin",
-                    serde_json::json!({
-                        "holeQpc": hole_qpc,
-                        "sessionOriginQpc": clock_shared.session_origin_qpc,
-                        "qpcFrequency": clock_shared.qpc_frequency,
-                        "pauseGen": gen,
-                        "track": track
-                    }),
-                );
+                writer
+                    .commit_part_if_any()
+                    .map_err(|e| format!("seal before pause: {e}"))?;
+                let hole_qpc = pause_qpc.load(Ordering::SeqCst);
+                writer
+                    .record_hole(
+                        "pause_begin",
+                        serde_json::json!({
+                            "holeQpc": hole_qpc,
+                            "sessionOriginQpc": clock_shared.session_origin_qpc,
+                            "qpcFrequency": clock_shared.qpc_frequency,
+                            "pauseGen": gen,
+                            "track": track
+                        }),
+                    )
+                    .map_err(|e| format!("pause_begin: {e}"))?;
                 pause_begin_count += 1;
             } else if !paused && was_paused {
                 was_paused = false;
-                let hole_qpc = qpc_now().unwrap_or(0);
-                let _ = writer.record_hole(
-                    "pause_end",
-                    serde_json::json!({
-                        "holeQpc": hole_qpc,
-                        "sessionOriginQpc": clock_shared.session_origin_qpc,
-                        "qpcFrequency": clock_shared.qpc_frequency,
-                        "pauseGen": pause_gen_at_begin,
-                        "discardedFrames": discarded_frames,
-                        "firstQpc": discard_first_qpc,
-                        "lastQpc": discard_last_qpc,
-                        "track": track
-                    }),
-                );
+                let hole_qpc = pause_qpc.load(Ordering::SeqCst);
+                writer
+                    .record_hole(
+                        "pause_end",
+                        serde_json::json!({
+                            "holeQpc": hole_qpc,
+                            "sessionOriginQpc": clock_shared.session_origin_qpc,
+                            "qpcFrequency": clock_shared.qpc_frequency,
+                            "pauseGen": pause_gen_at_begin,
+                            "discardedFrames": discarded_frames,
+                            "firstQpc": discard_first_qpc,
+                            "lastQpc": discard_last_qpc,
+                            "track": track
+                        }),
+                    )
+                    .map_err(|e| format!("pause_end: {e}"))?;
                 pause_end_count += 1;
                 discarded_frames = 0;
             }
+            pause_seen.store(paused, Ordering::SeqCst);
 
             loop {
                 let packet_length = match capture.GetNextPacketSize() {
@@ -967,20 +1070,15 @@ fn capture_loop(
                     let block = opened.format.block_align.max(1) as usize;
                     let nbytes = num_frames as usize * block;
 
-                    if pause_flag.load(Ordering::SeqCst) {
+                    if paused {
                         // In-memory only — no per-packet journal
-                        discarded_frames =
-                            discarded_frames.saturating_add(u64::from(num_frames));
+                        discarded_frames = discarded_frames.saturating_add(u64::from(num_frames));
                         if discard_first_qpc.is_none() {
                             discard_first_qpc = Some(qpc_position);
                         }
                         discard_last_qpc = Some(qpc_position);
                     } else if num_frames > 0 {
-                        let silent_f = if is_silent {
-                            u64::from(num_frames)
-                        } else {
-                            0
-                        };
+                        let silent_f = if is_silent { u64::from(num_frames) } else { 0 };
                         if is_silent {
                             silent_frames += silent_f;
                         }
@@ -1070,7 +1168,8 @@ fn capture_loop(
     }
 }
 
-fn run_mic_only_loop(
+fn run_single_loop(
+    flow: TrackFlow,
     session_id: String,
     device_id: Option<String>,
     output_dir: PathBuf,
@@ -1078,11 +1177,13 @@ fn run_mic_only_loop(
     stop_flag: Arc<AtomicBool>,
     pause_flag: Arc<AtomicBool>,
     pause_gen: Arc<AtomicU64>,
+    pause_qpc: Arc<AtomicU64>,
+    pause_seen: Arc<AtomicBool>,
     ready_tx: Sender<Result<TrackReadyInfo, String>>,
     progress: Option<ProgressFn>,
 ) -> Result<serde_json::Value, String> {
     let _com = ComGuard::new()?;
-    let opened = match open_device(TrackFlow::Capture, device_id.as_deref()) {
+    let opened = match open_device(flow, device_id.as_deref()) {
         Ok(o) => o,
         Err(e) => {
             let _ = ready_tx.send(Err(e.clone()));
@@ -1092,8 +1193,8 @@ fn run_mic_only_loop(
     let mut writer = match TrackWriter::create(
         &output_dir,
         &session_id,
-        "microphone",
-        "self",
+        flow.track(),
+        flow.role(),
         opened.format.clone(),
         subchunk_ms,
     ) {
@@ -1145,11 +1246,13 @@ fn run_mic_only_loop(
         &stop_flag,
         &pause_flag,
         &pause_gen,
+        &pause_qpc,
+        &pause_seen,
         &fault,
         &abort,
-        "microphone",
+        flow.track(),
         &session_id,
-        progress,
+        progress.clone(),
     );
     unsafe {
         let _ = opened.client.Stop();
@@ -1159,8 +1262,9 @@ fn run_mic_only_loop(
             let finish = writer.finish().map_err(|e| e.to_string())?;
             Ok(serde_json::json!({
                 "stopped": true,
-                "track": "microphone",
-                "role": "self",
+                "captureMode": flow.track(),
+                "track": flow.track(),
+                "role": flow.role(),
                 "deviceId": opened.device_id,
                 "deviceName": opened.device_name,
                 "actualL0Format": opened.format.to_json(),
@@ -1172,6 +1276,14 @@ fn run_mic_only_loop(
         }
         Err(e) => {
             let _ = writer.mark_faulted(&e);
+            if let Some(p) = &progress {
+                p(
+                    session_id.clone(),
+                    flow.track().into(),
+                    "session_fault".into(),
+                    serde_json::json!({ "code": "capture_fault", "message": e }),
+                );
+            }
             let finish = writer.finish().unwrap_or(serde_json::json!({}));
             Err(format!("{e}; finish={finish}"))
         }
@@ -1228,6 +1340,15 @@ fn open_device(flow: TrackFlow, device_id: Option<&str>) -> Result<OpenedDevice,
                 .map_err(|e| format!("GetDefaultAudioEndpoint: {e}"))?,
         };
 
+        // Validate before activating an audio client, including explicitly selected IDs.
+        let endpoint: IMMEndpoint = device.cast().map_err(|e| format!("IMMEndpoint: {e}"))?;
+        if endpoint
+            .GetDataFlow()
+            .map_err(|e| format!("GetDataFlow: {e}"))?
+            != data_flow
+        {
+            return Err("selected endpoint does not match capture mode".into());
+        }
         let resolved_id = device_id_str(&device)?;
         let device_name =
             device_friendly_name(&device).unwrap_or_else(|_| "Audio Device".to_string());

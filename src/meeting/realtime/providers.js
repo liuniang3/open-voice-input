@@ -4,7 +4,37 @@ const { createMimoClient } = require("../../providers/mimo-client");
 const { createMimoAsrProvider } = require("../../providers/asr/mimo-asr-provider");
 const { createOpenAiCompatibleClient } = require("../../providers/openai-compatible-client");
 const { createQwen3AsrProvider } = require("../../providers/asr/qwen3-asr-provider");
+const { isSupportedAliMeetingModel } = require("../../providers/asr/ali-meeting-stream");
 const { buildTextCleanupMessages, parseAndValidateCleanupResponse } = require("../../providers/cleaner/text-cleanup-method");
+const DEFAULT_LIVE_MODEL = "qwen-audio-3.0-asr-flash-streaming";
+
+function previewProfileFor(settings, modelId = DEFAULT_LIVE_MODEL) {
+  if (!isSupportedAliMeetingModel(modelId)) {
+    throw Object.assign(new Error("请选择阿里 Streaming 或 Fun-ASR 实时模型；MiMo 可在停止后用于音频核对。"), { code: "live_model_unsupported" });
+  }
+  const profiles = [settings.meetingRealtimeProfiles, settings.meetingQwenProfiles, settings.asrProfiles]
+    .map(map => map?.[modelId]).filter(Boolean);
+  let p = profiles.find(value => value.apiKey) || profiles[0];
+  for (const prefix of ["meetingQwen", "asr"]) {
+    if (!p?.apiKey && settings[`${prefix}Model`] === modelId && settings[`${prefix}ApiKey`]) {
+      p = { apiKey: settings[`${prefix}ApiKey`], baseUrl: settings[`${prefix}BaseUrl`] };
+    }
+  }
+  if (!p?.apiKey) throw Object.assign(new Error("请在会议模型设置中为所选实时模型配置 API Key。"), { code: "live_credentials_missing" });
+  if (!p.baseUrl) throw Object.assign(new Error("请为所选实时模型填写所在地域的 API 地址。"), { code: "live_credentials_missing" });
+  return { apiKey: p.apiKey, baseUrl: p.baseUrl, model: modelId, provider: "aliyun-streaming" };
+}
+
+function languageModel(profile) {
+  const client = profile.provider === "mimo"
+    ? createMimoClient({ getSettings: () => ({ ...profile, model: profile.modelId }), useEnvironmentFallback: false })
+    : createOpenAiCompatibleClient({ ...profile, model: profile.modelId });
+  return async ({ messages, signal, maxTokens = 8192 }) => {
+    const response = await client.requestChat(messages, { signal, maxTokens });
+    if (response.finishReason && response.finishReason !== "stop") throw Object.assign(new Error("Incomplete model response"), { code: "analysis_response_incomplete" });
+    return response.content;
+  };
+}
 
 function profileFor(settings, modelId, cleanup = false, env = process.env) {
   const maps = cleanup ? [settings.meetingAnalysisProfiles, settings.cleanerProfiles] : [settings.meetingFileAsrProfiles, settings.asrProfiles];
@@ -59,4 +89,12 @@ function cleaner(profile) {
   };
 }
 
-module.exports = { profileFor, transcriber, cleaner };
+module.exports = {
+  profileFor,
+  transcriber,
+  cleaner,
+  previewProfileFor,
+  DEFAULT_LIVE_MODEL,
+  languageModel,
+  isSupportedAliMeetingModel
+};

@@ -25,11 +25,11 @@ pub enum Command {
     Start {
         id: String,
         session_id: String,
-        /// "dual" (Stage 0B) or omitted/"microphone" for mic-only (0A compat).
+        /// "dual", "system", or omitted/"microphone" for mic-only (0A compat).
         #[serde(default)]
         capture_mode: Option<String>,
-        #[serde(default = "default_track")]
-        track: String,
+        #[serde(default)]
+        track: Option<String>,
         #[serde(default)]
         device_id: Option<String>,
         #[serde(default)]
@@ -60,10 +60,6 @@ pub struct TrackStartSpec {
     #[serde(default)]
     pub device_id: Option<String>,
     pub output_dir: String,
-}
-
-fn default_track() -> String {
-    "microphone".to_string()
 }
 
 #[derive(Debug, Serialize)]
@@ -118,6 +114,7 @@ pub fn error_result(code: &str, message: &str) -> serde_json::Value {
 pub fn stage0b_capabilities() -> Vec<String> {
     vec![
         "dual_track".to_string(),
+        "system_only".to_string(),
         "system_loopback_shared".to_string(),
         "dual_start_single_rpc".to_string(),
         "query_devices_capture_and_render".to_string(),

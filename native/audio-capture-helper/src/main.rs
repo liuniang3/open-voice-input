@@ -138,9 +138,7 @@ fn handle_command(state: &Arc<AppState>, cmd: Command) {
                         "devices": lists.devices
                     })),
                 ),
-                Err(err) => {
-                    emit_result(&id, error_result("device_enum_failed", &err.to_string()))
-                }
+                Err(err) => emit_result(&id, error_result("device_enum_failed", &err.to_string())),
             }
         }
         Command::Configure {
@@ -218,10 +216,34 @@ fn handle_command(state: &Arc<AppState>, cmd: Command) {
                 .unwrap_or_else(|| {
                     if microphone.is_some() && system.is_some() {
                         "dual".to_string()
+                    } else if system.is_some() && microphone.is_none() {
+                        "system".to_string()
                     } else {
-                        "microphone".to_string()
+                        track.clone().unwrap_or_else(|| "microphone".to_string())
                     }
                 });
+
+            if !["microphone", "system", "dual"].contains(&mode.as_str()) {
+                emit_result(
+                    &id,
+                    error_result(
+                        "invalid_capture_mode",
+                        "use capture_mode=dual, microphone or system",
+                    ),
+                );
+                return;
+            }
+            if track
+                .as_deref()
+                .map(|selected| selected != mode)
+                .unwrap_or(false)
+            {
+                emit_result(
+                    &id,
+                    error_result("invalid_track", "track must match capture_mode"),
+                );
+                return;
+            }
 
             let sub_ms = subchunk_ms.unwrap_or(1000);
 
@@ -267,6 +289,13 @@ fn handle_command(state: &Arc<AppState>, cmd: Command) {
                         return;
                     }
                 };
+                if mic_out == sys_out {
+                    emit_result(
+                        &id,
+                        error_result("path_denied", "Track directories must differ"),
+                    );
+                    return;
+                }
                 drop(root_guard);
 
                 // Short lock: check busy / idempotent only
@@ -340,30 +369,26 @@ fn handle_command(state: &Arc<AppState>, cmd: Command) {
                 return;
             }
 
-            // microphone-only (0A compat)
-            if track != "microphone" && mode != "microphone" {
-                emit_result(
-                    &id,
-                    error_result(
-                        "unsupported_track",
-                        "use capture_mode=dual with microphone+system, or track=microphone",
-                    ),
-                );
-                return;
-            }
-
-            let out_str = if let Some(m) = &microphone {
+            let spec = if mode == "system" {
+                &system
+            } else {
+                &microphone
+            };
+            let out_str = if let Some(m) = spec {
                 m.output_dir.clone()
             } else if let Some(o) = output_dir {
                 o
             } else {
                 emit_result(
                     &id,
-                    error_result("invalid_start", "output_dir or microphone.output_dir required"),
+                    error_result(
+                        "invalid_start",
+                        "output_dir or selected track output_dir required",
+                    ),
                 );
                 return;
             };
-            let mic_device = microphone
+            let selected_device = spec
                 .as_ref()
                 .and_then(|m| m.device_id.clone())
                 .or(device_id);
@@ -386,13 +411,14 @@ fn handle_command(state: &Arc<AppState>, cmd: Command) {
                     }
                 };
                 if let Some(existing) = slot.as_ref() {
-                    if existing.matches_mic(&session_id, &out) {
+                    if existing.matches_single(&session_id, &out, &mode) {
                         emit_result(
                             &id,
                             ok_result(serde_json::json!({
                                 "started": true,
                                 "idempotent": true,
-                                "sessionId": session_id
+                                "sessionId": session_id,
+                                "captureMode": mode
                             })),
                         );
                         return;
@@ -401,18 +427,16 @@ fn handle_command(state: &Arc<AppState>, cmd: Command) {
                         &id,
                         error_result(
                             "already_capturing",
-                            &format!(
-                                "capture already active for session {}",
-                                existing.session_id
-                            ),
+                            &format!("capture already active for session {}", existing.session_id),
                         ),
                     );
                     return;
                 }
             }
-            match capture::CaptureSession::start_mic_only(capture::MicOnlyStartParams {
+            match capture::CaptureSession::start_single(capture::SingleStartParams {
+                system_only: mode == "system",
                 session_id: session_id.clone(),
-                device_id: mic_device,
+                device_id: selected_device,
                 output_dir: out,
                 subchunk_ms: sub_ms,
                 progress: Some(make_progress_fn()),

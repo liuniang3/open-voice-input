@@ -181,6 +181,54 @@ async function run() {
     assert.equal(assertValidSessionId("mtg-ok_1.2"), "mtg-ok_1.2");
   });
 
+  await test("legacy batch credentials never borrow streaming models or keys", () => {
+    const batchProfile = {
+      apiKey: "batch-profile-value",
+      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    };
+    const isolated = resolveMeetingQwenCredentials({
+      env: {},
+      settings: {
+        meetingQwenModel: "qwen-audio-3.0-asr-flash-streaming",
+        meetingQwenApiKey: "streaming-top-level-value",
+        meetingQwenBaseUrl: "https://dashscope.aliyuncs.com/api-ws/v1/inference",
+        meetingQwenProfiles: { "qwen3-asr-flash": batchProfile },
+        asrProfiles: { "qwen3-asr-flash": { apiKey: "short-voice-value" } }
+      }
+    });
+    assert.equal(isolated.modelId, "qwen3-asr-flash");
+    assert.equal(isolated.apiKey, batchProfile.apiKey);
+    assert.equal(isolated.baseUrl, batchProfile.baseUrl);
+
+    for (const modelId of [
+      "qwen-audio-3.0-asr-flash-streaming",
+      "qwen-audio-3.0-asr-flash-streaming-2026-09-18",
+      "fun-asr-realtime",
+      "fun-asr-realtime-2026-09-18"
+    ]) {
+      assert.throws(() => resolveMeetingQwenCredentials({
+        env: {},
+        settings: {
+          meetingQwenModel: modelId,
+          meetingQwenApiKey: "streaming-only-value",
+          meetingQwenProfiles: {},
+          asrProfiles: { "qwen3-asr-flash": { apiKey: "short-voice-value" } }
+        }
+      }), error => error.code === "meeting_model_unsupported");
+    }
+
+    const dated = resolveMeetingQwenCredentials({
+      env: {},
+      settings: {
+        meetingQwenModel: "qwen3-asr-flash-2026-09-18",
+        meetingQwenApiKey: "dated-batch-value",
+        meetingQwenBaseUrl: batchProfile.baseUrl
+      }
+    });
+    assert.equal(dated.modelId, "qwen3-asr-flash-2026-09-18");
+    assert.equal(dated.apiKey, "dated-batch-value");
+  });
+
   await test("helper ready error scrubbed (no path)", () => {
     const err = new Error("helper missing at D:\\app\\native\\audio-capture-helper.exe");
     err.code = "helper_missing";

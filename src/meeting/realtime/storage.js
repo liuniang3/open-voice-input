@@ -55,6 +55,14 @@ function markdown(state) {
         segment.status === "failed" ? "（转写失败，音频已保留，可重试）" : "（音频已保留，等待转写）", "");
   }
   if (!state.segments.length) lines.push("（正在录音，等待第一个转写片段）", "");
+  if (state.previewText) lines.push("## 尚未确认的实时文字", "", state.previewText, "");
+  if (state.previewFailed) lines.push("实时识别有缺口，完整音频仍保留。可重试实时识别或停止后勾选 MiMo 音频核对。", "");
+  if (state.preview?.windows) {
+    for (const window of state.preview.windows.filter(item => item.status === "failed")) {
+      lines.push(`- 待补转写：${timestamp(window.startFrame)}–${timestamp(window.endFrame)}`);
+    }
+    lines.push("");
+  }
   lines.push("## 完整音频", "");
   for (const file of state.audioPaths) {
     const relative = path.relative(path.dirname(state.markdownPath), file).split(path.sep).join("/");

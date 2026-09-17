@@ -7,8 +7,10 @@ const vm = require("node:vm");
 const { pathToFileURL } = require("node:url");
 const {
   ensureConnectionProfiles,
-  migrateConnectionProfiles
+  migrateConnectionProfiles,
+  MEETING_QWEN_PRESETS
 } = require("../src/settings/connection-profiles");
+const { isSupportedAliMeetingModel } = require("../src/meeting/realtime/providers");
 const { validateHotkey, normalizeAccelerator } = require("../src/hotkeys/validate-hotkey");
 
 const root = path.join(__dirname, "..");
@@ -121,13 +123,40 @@ test("live meeting defaults and destinations do not borrow active provider crede
   const saved = { _connectionProfilesMigrated: true, asrModel: "qwen3-asr-flash",
     asrProfiles: { "qwen3-asr-flash": { apiKey: "test-only-qwen", provider: "qwen3-asr" } } };
   const next = ensureConnectionProfiles(saved);
-  assert.equal(next.meetingRealtimeModel, "mimo-v2.5-asr");
+  assert.equal(next.meetingRealtimeModel, "qwen-audio-3.0-asr-flash-streaming");
   assert.equal(next.meetingRealtimeDestination, "");
   assert.equal(next.meetingFileAsrProfiles["mimo-v2.5-asr"].apiKey, "");
   const restored = ensureConnectionProfiles({ ...next, meetingRealtimeModel: "custom-model", meetingRealtimeDestination: "/chosen/session.md" });
-  assert.equal(restored.meetingRealtimeModel, "custom-model");
+  assert.equal(restored.meetingRealtimeModel, "qwen-audio-3.0-asr-flash-streaming");
   assert.equal(restored.meetingRealtimeDestination, "/chosen/session.md");
   assert.equal(saved.meetingRealtimeModel, undefined);
+});
+
+test("meeting live model contract matches transport and excludes batch presets", () => {
+  const supported = [
+    "qwen-audio-3.0-asr-flash-streaming",
+    "fun-asr-realtime",
+    "qwen-audio-3.0-asr-flash-streaming-2026-09-18",
+    "fun-asr-realtime-2026-09-18"
+  ];
+  const rejected = [
+    "mimo-v2.5-asr",
+    "qwen3-asr-flash",
+    "qwen3-asr-flash-filetrans",
+    "fun-asr-realtime-latest",
+    "fun-asr-realtime-2026-9-18",
+    " fun-asr-realtime"
+  ];
+  supported.forEach(model => assert.equal(isSupportedAliMeetingModel(model), true, model));
+  rejected.forEach(model => assert.equal(isSupportedAliMeetingModel(model), false, model));
+  assert.deepEqual([...MEETING_QWEN_PRESETS], supported.slice(0, 2));
+  for (const model of supported) {
+    assert.equal(ensureConnectionProfiles({ _connectionProfilesMigrated: true, meetingRealtimeModel: model }).meetingRealtimeModel, model);
+  }
+  for (const model of rejected) {
+    assert.equal(ensureConnectionProfiles({ _connectionProfilesMigrated: true, meetingRealtimeModel: model }).meetingRealtimeModel,
+      "qwen-audio-3.0-asr-flash-streaming");
+  }
 });
 
 test("settings UI has per-model controls and no general credentials tab", () => {
@@ -143,6 +172,10 @@ test("settings UI has per-model controls and no general credentials tab", () => 
   assert.match(html, /value="fun-asr-realtime"/);
   assert.match(html, /id="asrCustomRealtimeModelField"[^>]*hidden/);
   assert.match(html, /id="meetingQwenModelPresetSelect"/);
+  const meetingPreviewPresets = html.match(/<select id="meetingQwenModelPresetSelect">([\s\S]*?)<\/select>/)?.[1] || "";
+  assert.match(meetingPreviewPresets, /value="qwen-audio-3\.0-asr-flash-streaming"/);
+  assert.match(meetingPreviewPresets, /value="fun-asr-realtime"/);
+  assert.doesNotMatch(meetingPreviewPresets, /value="qwen3-asr-flash-realtime/);
   assert.match(html, /id="meetingFunAsrModelPresetSelect"/);
   assert.match(html, /id="meetingAnalysisModelPresetSelect"/);
 });
@@ -261,15 +294,18 @@ async function integrationTests() {
   assert.equal((await start).recording, true);
   assert.equal((await duplicate).ok, true);
   assert.equal(c.startCount, 1);
-  assert.equal(c.startInput.modelId, "mimo-v2.5-asr");
+  assert.equal(c.startInput.modelId, "qwen-audio-3.0-asr-flash-streaming");
   assert.equal((await stop).status, "stopping");
   assert.equal(c.options.analyzer, undefined);
   assert.equal(c.options.defaultDirectory, path.join(root, "mock", "documents", "Open Voice Input", "Meetings"));
   const snapshot = c.options.getSettings();
   snapshot.meetingRealtimeModel = "mutated";
-  assert.equal(c.options.getSettings().meetingRealtimeModel, "mimo-v2.5-asr");
+  assert.equal(c.options.getSettings().meetingRealtimeModel, "qwen-audio-3.0-asr-flash-streaming");
   assert.equal(c.writes.length, 0);
   const selected = h.run("settings.meetingAnalysisModel");
+  assert.equal((await h.invoke("meeting:live:cleanup", { modelId: "independent" })).error.code, "live_busy");
+  assert.equal(c.cleanupInput, undefined);
+  Object.assign(c.state, { status: "completed", pendingSegments: 0 });
   assert.equal((await h.invoke("meeting:live:cleanup", { modelId: "independent", apiKey: "ignore" })).ok, true);
   assert.equal(c.cleanupInput.modelId, "independent");
   assert.equal(c.cleanupInput.apiKey, undefined);
@@ -380,7 +416,7 @@ async function integrationTests() {
       ipcRenderer: { invoke: (...args) => calls.push(args), on: (name, fn) => listeners.set(name, fn),
         removeListener: (name, fn) => { if (listeners.get(name) === fn) listeners.delete(name); } } })
   });
-  for (const action of ["Start", "Stop", "Retry", "Cleanup", "Status", "Recover", "ChooseDestination", "OpenPath"]) {
+  for (const action of ["Start", "Stop", "Pause", "Resume", "Retry", "Cleanup", "Summarize", "Window", "Status", "Recover", "ChooseDestination", "OpenPath"]) {
     assert.equal(typeof api[`meetingLive${action}`], "function");
   }
   let received;

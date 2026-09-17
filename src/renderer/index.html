@@ -277,14 +277,14 @@
               <label class="field">
                 <span>会议 Qwen 模型</span>
                 <select id="meetingQwenModelPresetSelect">
-                  <option value="qwen3-asr-flash">Qwen3-ASR Flash</option>
-                  <option value="qwen3-asr-flash-filetrans">Qwen3-ASR 文件转写</option>
-                  <option value="__custom__">自定义模型</option>
+                  <option value="qwen-audio-3.0-asr-flash-streaming">Qwen Audio 3.0 实时语音</option>
+                  <option value="fun-asr-realtime">Fun-ASR 实时语音</option>
+                  <option value="__custom__">日期版本模型</option>
                 </select>
               </label>
               <label id="meetingQwenCustomModelField" class="field" hidden>
-                <span>自定义 Qwen 模型 ID</span>
-                <input id="meetingQwenModelInput" type="text" placeholder="输入模型 ID" autocomplete="off" />
+                <span>日期版本模型 ID</span>
+                <input id="meetingQwenModelInput" type="text" placeholder="例如 fun-asr-realtime-2026-09-18" autocomplete="off" />
               </label>
               <label class="field">
                 <span>会议 Qwen Base URL</span>
@@ -613,6 +613,15 @@
           <button id="liveHistoryTab" type="button" role="tab" aria-selected="false" aria-controls="meetingHistoryPanel" tabindex="-1">会议历史</button>
         </nav>
         <section id="liveMeetingPanel" class="live-meeting" role="tabpanel" aria-labelledby="liveMeetingTab">
+          <header class="live-heading">
+            <div><span class="live-eyebrow">会议工作台</span><h2 id="liveSessionTitle">实时会议</h2></div>
+            <div class="live-window-tools" role="group" aria-label="窗口控制">
+              <button id="liveFloat" type="button" title="切换到悬浮窗" hidden>悬浮窗</button>
+              <label id="livePinField" class="live-check" hidden><input id="liveAlwaysOnTop" type="checkbox" />置顶</label>
+              <button id="liveCompact" type="button" aria-pressed="false" hidden>精简</button>
+              <button id="liveDetail" type="button" title="返回详细视图" hidden>返回详细</button>
+            </div>
+          </header>
           <div class="live-setup">
             <label class="field live-title-field">
               <span>会议标题</span>
@@ -620,15 +629,15 @@
             </label>
             <label class="field">
               <span>识别模型</span>
-              <select id="liveModel" aria-label="实时识别模型"><option value="mimo-v2.5-asr">MiMo V2.5 ASR</option></select>
+              <select id="liveModel" aria-label="实时识别模型"><option value="qwen-audio-3.0-asr-flash-streaming">阿里云 Qwen 实时语音</option><option value="fun-asr-realtime">阿里云 Fun-ASR 实时语音</option><option value="__custom__">日期版本模型 ID</option></select>
             </label>
             <label id="liveCustomModelField" class="field" hidden>
-              <span>自定义批量识别模型 ID</span>
+              <span>日期版本模型 ID</span>
               <input id="liveCustomModel" type="text" maxlength="160" autocomplete="off" />
             </label>
             <label class="field">
               <span>音源</span>
-              <select id="liveCaptureMode"><option value="dual">麦克风 + 系统声音</option><option value="microphone">仅麦克风</option></select>
+              <select id="liveCaptureMode"><option value="dual">麦克风 + 系统声音</option><option value="system">仅系统声音</option><option value="microphone">仅麦克风</option></select>
             </label>
           </div>
           <div class="live-destination">
@@ -638,6 +647,7 @@
           </div>
           <div class="live-transport">
             <button id="liveStart" type="button" class="primary" disabled>开始实时转录</button>
+            <button id="livePause" type="button" disabled hidden>暂停</button>
             <button id="liveStop" type="button" class="live-stop" disabled>停止并保存</button>
             <span id="liveStatus" class="meeting-pill" role="status" data-kind="idle">等待连接</span>
             <span class="live-clock"><span id="liveElapsedLabel">本页计时</span><strong id="liveElapsed">00:00</strong></span>
@@ -661,19 +671,40 @@
             <section class="live-text-section" aria-labelledby="liveRawHeading">
               <h2 id="liveRawHeading">原始转写</h2>
               <pre id="liveRaw" class="live-transcript" tabindex="0">尚无转写内容</pre>
+              <div id="livePreviewSection" class="live-preview" hidden>
+                <span id="livePreviewStatus" role="status">实时草稿</span>
+                <pre id="livePreview" tabindex="0"></pre>
+              </div>
             </section>
             <section id="liveCorrectedSection" class="live-text-section" aria-labelledby="liveCorrectedHeading" hidden>
               <h2 id="liveCorrectedHeading">校订文本</h2>
               <pre id="liveCorrected" class="live-transcript" tabindex="0"></pre>
             </section>
+            <section id="liveReviewedSection" class="live-text-section" aria-labelledby="liveReviewedHeading" hidden>
+              <h2 id="liveReviewedHeading">音频复核文本</h2>
+              <pre id="liveReviewed" class="live-transcript" tabindex="0"></pre>
+            </section>
           </div>
           <div id="liveCleanupSection" class="live-cleanup" hidden>
-            <label class="field"><span>停止后校订（可选）</span><select id="liveCleanerModel" aria-label="校订模型"></select></label>
+            <label class="field"><span>校订 / 摘要模型</span><select id="liveCleanerModel" aria-label="校订和摘要模型"></select></label>
+            <label class="live-check"><input id="liveUseMimoReview" type="checkbox" />MiMo 音频复核</label>
+            <label id="liveReviewModelField" class="field" hidden><span>音频复核模型</span><select id="liveReviewModel" aria-label="音频复核模型"></select></label>
             <button id="liveCleanup" type="button" disabled>校订原文</button>
+            <button id="liveSummarize" type="button" disabled>生成摘要</button>
             <span id="liveCleanupStatus" role="status">未校订</span>
+            <span id="livePostprocessStatus" role="status"></span>
             <button id="liveOpenCleaned" type="button" disabled>打开校订 Markdown</button>
+            <button id="liveOpenReviewed" type="button" disabled>打开复核稿</button>
+            <button id="liveOpenSummary" type="button" disabled>打开摘要</button>
             <output id="liveCleanedPath" class="live-cleaned-path"></output>
           </div>
+          <section id="liveSummarySection" class="live-summary" aria-labelledby="liveSummaryHeading" hidden>
+            <h2 id="liveSummaryHeading">会议摘要</h2>
+            <div class="live-summary-layout">
+              <section aria-labelledby="liveMindmapHeading"><h3 id="liveMindmapHeading">会议脉络</h3><div id="liveMindmap" class="live-mindmap"></div></section>
+              <section aria-labelledby="liveDetailHeading"><h3 id="liveDetailHeading">详细纪要</h3><div id="liveSummaryDetail" class="live-summary-detail"></div></section>
+            </div>
+          </section>
         </section>
         <div id="meetingHistoryPanel" class="meeting-history" role="tabpanel" aria-labelledby="liveHistoryTab" hidden>
         <aside class="meeting-sidebar">

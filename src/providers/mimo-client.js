@@ -1,6 +1,6 @@
 const { parseChatCompletionBody } = require("./openai-compatible-client");
 
-function createMimoClient({ getSettings, useEnvironmentFallback = true }) {
+function createMimoClient({ getSettings, useEnvironmentFallback = true, fetchImpl = null }) {
   function resolveApiKey() {
     const settings = getSettings();
     return settings.apiKey || (useEnvironmentFallback ? process.env.MIMO_API_KEY : "") || "";
@@ -30,6 +30,7 @@ function createMimoClient({ getSettings, useEnvironmentFallback = true }) {
     stream = false,
     signal = null
   } = {}) {
+    if (signal?.aborted) throw Object.assign(new Error("aborted"), { code: "aborted" });
     const settings = getSettings();
     const apiKey = resolveApiKey();
     if (!apiKey) {
@@ -51,15 +52,20 @@ function createMimoClient({ getSettings, useEnvironmentFallback = true }) {
     const controller = new AbortController();
     let timedOut = false;
     const onCallerAbort = () => controller.abort();
-    if (signal) signal.addEventListener("abort", onCallerAbort, { once: true });
+    if (signal) {
+      signal.addEventListener("abort", onCallerAbort, { once: true });
+      if (signal.aborted) onCallerAbort();
+    }
     const timeoutMs = Number(settings.requestTimeoutMs) > 0 ? Number(settings.requestTimeoutMs) : 60000;
     const timer = setTimeout(() => {
+      if (controller.signal.aborted) return;
       timedOut = true;
       controller.abort();
     }, timeoutMs);
 
     try {
-      const response = await fetch(`${baseUrl}/chat/completions`, {
+      controller.signal.throwIfAborted();
+      const response = await (fetchImpl || globalThis.fetch)(`${baseUrl}/chat/completions`, {
         method: "POST",
         signal: controller.signal,
         headers: {
@@ -69,31 +75,30 @@ function createMimoClient({ getSettings, useEnvironmentFallback = true }) {
         body: JSON.stringify(body)
       });
 
+      controller.signal.throwIfAborted();
       const bodyText = await response.text();
+      controller.signal.throwIfAborted();
       if (!response.ok) {
         throw new Error(`MiMo API ${response.status} at ${baseUrl}: ${bodyText}`);
       }
 
-      const { message } = parseChatCompletionBody(bodyText);
+      const parsed = parseChatCompletionBody(bodyText);
+      const { message } = parsed;
       return {
         content: String(message.content || "").trim(),
+        finishReason: parsed.finishReason,
         reasoningContent: String(message.reasoning_content || "").trim()
       };
     } catch (error) {
-      if (signal?.aborted && !timedOut) {
-        const aborted = new Error("aborted");
-        aborted.code = "aborted";
-        throw aborted;
-      }
-      if (error?.name === "AbortError") {
-        if (!timedOut) {
-          const aborted = new Error("aborted");
-          aborted.code = "aborted";
-          throw aborted;
-        }
+      if (timedOut) {
         const timeout = new Error(`MiMo request timed out after ${timeoutMs} ms.`);
         timeout.code = "request_timeout";
         throw timeout;
+      }
+      if (signal?.aborted || error?.name === "AbortError" || error?.code === "ABORT_ERR") {
+        const aborted = new Error("aborted");
+        aborted.code = "aborted";
+        throw aborted;
       }
       if (error instanceof TypeError) {
         throw new Error(`MiMo network request failed: ${error.cause?.message || error.message}`, { cause: error });

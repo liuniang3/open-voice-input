@@ -6,6 +6,8 @@ const {
   HELPER_VERSION,
   DEFAULT_SUBCHUNK_MS,
   TRACK_MICROPHONE,
+  TRACK_SYSTEM,
+  SYSTEM_ONLY_CAPABILITY,
   CAPTURE_MODE_DUAL,
   requiredCapabilitiesForPlatform
 } = require("./constants");
@@ -23,6 +25,7 @@ const {
   parseHelperLine,
   resultError,
   resultOk,
+  validateCaptureMode,
   validateStartPathInput
 } = require("./protocol");
 
@@ -387,7 +390,7 @@ function createAudioCaptureSupervisor(options = {}) {
     return response;
   }
 
-  /** Mic-only start (Stage 0A compat). */
+  /** Single native track; system capture never supplies a microphone spec. */
   async function startCapture({
     sessionId,
     outputDir,
@@ -395,10 +398,20 @@ function createAudioCaptureSupervisor(options = {}) {
     subchunkMs = DEFAULT_SUBCHUNK_MS,
     track = TRACK_MICROPHONE
   }) {
+    validateCaptureMode(track);
+    if (![TRACK_MICROPHONE, TRACK_SYSTEM].includes(track)) {
+      throw Object.assign(new Error("Single capture requires microphone or system"), { code: "invalid_track" });
+    }
     if (!configured) {
       const error = new Error("configure session root before start");
       error.code = "not_configured";
       throw error;
+    }
+    // Older Windows helpers can silently fall back to microphone for unknown modes.
+    if (track === TRACK_SYSTEM && !hello?.capabilities?.includes(SYSTEM_ONLY_CAPABILITY)) {
+      throw Object.assign(new Error("Rebuild the native helper for system-only capture"), {
+        code: "helper_capability_missing", missing: [SYSTEM_ONLY_CAPABILITY]
+      });
     }
     const pathCheck = validateStartPathInput(outputDir);
     if (!pathCheck.ok) {
@@ -411,7 +424,7 @@ function createAudioCaptureSupervisor(options = {}) {
     if (
       activeSessionId &&
       activeSessionId === sessionId &&
-      activeCaptureMode !== CAPTURE_MODE_DUAL &&
+      activeCaptureMode === track &&
       activeOutputDir === safeOutputDir
     ) {
       return {
@@ -424,7 +437,7 @@ function createAudioCaptureSupervisor(options = {}) {
         ack: { type: "ack", command: "start" }
       };
     }
-    if (activeSessionId && (activeSessionId !== sessionId || activeOutputDir !== safeOutputDir)) {
+    if (activeSessionId) {
       const error = new Error(`capture already active for session ${activeSessionId}`);
       error.code = "already_capturing";
       throw error;
@@ -434,6 +447,7 @@ function createAudioCaptureSupervisor(options = {}) {
     try {
       response = await sendCommand("start", {
         session_id: sessionId,
+        capture_mode: track,
         track,
         device_id: deviceId || undefined,
         output_dir: safeOutputDir,
@@ -452,8 +466,8 @@ function createAudioCaptureSupervisor(options = {}) {
     }
     activeSessionId = sessionId;
     activeOutputDir = safeOutputDir;
-    activeSystemOutputDir = null;
-    activeCaptureMode = "microphone";
+    activeSystemOutputDir = track === TRACK_SYSTEM ? safeOutputDir : null;
+    activeCaptureMode = track;
     sessionFaulted = false;
     dirty = false;
     return response;
@@ -540,6 +554,7 @@ function createAudioCaptureSupervisor(options = {}) {
     configure,
     queryDevices,
     startCapture,
+    startSystemCapture: (fields) => startCapture({ ...fields, track: TRACK_SYSTEM }),
     startDualCapture,
     pause,
     resume,

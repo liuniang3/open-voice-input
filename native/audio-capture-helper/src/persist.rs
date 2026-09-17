@@ -112,6 +112,18 @@ impl TrackWriter {
     ) -> io::Result<Self> {
         let track_dir = output_dir.to_path_buf();
         fs::create_dir_all(&track_dir)?;
+        if fs::read_dir(&track_dir)?.next().is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "archive_exists: create a new session to preserve recordings",
+            ));
+        }
+        let mut owner = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(track_dir.join(".capture-owner"))?;
+        owner.write_all(session_id.as_bytes())?;
+        owner.sync_all()?;
         let block = format.block_align.max(1) as u64;
         // frames = floor(sampleRate * ms / 1000); bytes = frames * blockAlign — no half frames
         let frames = ((format.sample_rate as u64) * subchunk_ms.max(100) / 1000).max(1);
