@@ -1,5 +1,7 @@
 "use strict";
 
+const { resolveProviderConnection } = require("../../settings/provider-connections");
+
 /**
  * Runtime-only meeting Qwen credentials. Never persist resolved values.
  * Isolated from short-voice provider/profile selection.
@@ -80,7 +82,8 @@ function resolveMeetingQwenCredentials({ env = process.env, settings = {} } = {}
   if (!isBatchModel(modelId)) {
     // The same settings panel now also configures live streaming. Historical HTTP
     // processing may use only the stored batch profile, never the active live key.
-    if (!trimStr(s.meetingQwenProfiles?.[DEFAULT_MODEL]?.apiKey)) {
+    if (!trimStr(s.meetingQwenProfiles?.[DEFAULT_MODEL]?.apiKey)
+        && !trimStr(s.providerConnections?.aliyun?.apiKey)) {
       throw Object.assign(new Error("历史会议 HTTP 转写需要单独配置 qwen3-asr-flash；当前实时模型不能用于此接口。"), {
         code: "meeting_model_unsupported"
       });
@@ -92,21 +95,30 @@ function resolveMeetingQwenCredentials({ env = process.env, settings = {} } = {}
   const activeKey = activeModel === modelId ? trimStr(s.meetingQwenApiKey) : "";
   const envMatches = firstNonEmpty(env.OVI_MEETING_QWEN_MODEL, DEFAULT_MODEL) === modelId;
   const envKey = envMatches ? firstNonEmpty(env.OVI_MEETING_QWEN_API_KEY, env.QWEN_ASR_API_KEY, env.DASHSCOPE_API_KEY) : "";
-  const apiKey = firstNonEmpty(profileKey, activeKey, envKey);
-
   const workspaceUrl = buildWorkspaceTemplateUrl(
     firstNonEmpty(env.OVI_DASHSCOPE_WORKSPACE_ID, s.meetingDashScopeWorkspaceId)
   );
-
-  const baseUrlRaw = profileKey ? firstNonEmpty(profile.baseUrl, DEFAULT_PUBLIC_COMPAT)
+  const fallbackBaseUrl = profileKey ? firstNonEmpty(profile?.baseUrl, DEFAULT_PUBLIC_COMPAT)
     : activeKey ? firstNonEmpty(s.meetingQwenBaseUrl, workspaceUrl, DEFAULT_PUBLIC_COMPAT)
     : firstNonEmpty(
-    env.OVI_MEETING_DASHSCOPE_BASE_URL,
-    env.OVI_MEETING_QWEN_BASE_URL,
-    env.QWEN_ASR_BASE_URL,
-    workspaceUrl,
-    DEFAULT_PUBLIC_COMPAT
-  );
+      env.OVI_MEETING_DASHSCOPE_BASE_URL,
+      env.OVI_MEETING_QWEN_BASE_URL,
+      env.QWEN_ASR_BASE_URL,
+      workspaceUrl,
+      DEFAULT_PUBLIC_COMPAT
+    );
+  const connection = resolveProviderConnection(s, {
+    modelId,
+    provider: "qwen3-asr",
+    operation: "compatible",
+    fallback: {
+      apiKey: firstNonEmpty(profileKey, activeKey, envKey),
+      baseUrl: fallbackBaseUrl
+    }
+  });
+  const apiKey = connection.apiKey;
+
+  const baseUrlRaw = connection.baseUrl || fallbackBaseUrl;
 
   if (!apiKey) {
     const error = new Error(

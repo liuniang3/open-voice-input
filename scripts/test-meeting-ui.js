@@ -482,10 +482,12 @@ test("meeting layout HTML structure (no outer scroll surfaces)", () => {
   );
   assert.doesNotMatch(html, /meeting-speaker-row/);
   assert.match(html, /id="meetingResultPane" class="meeting-result-pane"/);
-  // settings 4C fields
+  // settings 4C fields use the shared Aliyun connection
   assert.match(html, /id="meetingFunAsrModelInput"/);
-  assert.match(html, /id="meetingFunAsrBaseUrlInput"/);
-  assert.match(html, /id="meetingFunAsrApiKeyInput"/);
+  assert.doesNotMatch(html, /id="meetingFunAsrBaseUrlInput"/);
+  assert.doesNotMatch(html, /id="meetingFunAsrApiKeyInput"/);
+  assert.match(html, /id="aliyunBaseUrlInput"/);
+  assert.match(html, /id="aliyunApiKeyInput"/);
   assert.match(html, /id="meetingOssRegionInput"/);
   assert.match(html, /id="meetingOssEndpointInput"/);
   assert.match(html, /id="meetingOssBucketInput"/);
@@ -497,10 +499,10 @@ test("meeting layout HTML structure (no outer scroll surfaces)", () => {
   assert.match(html, /id="meetingOssTestBtn"/);
   assert.match(html, /id="meetingFunTestResult"[^>]*aria-live="polite"/);
   assert.match(html, /id="meetingOssTestResult"[^>]*aria-live="polite"/);
-  assert.match(html, /data-secret-toggle="meetingFunAsrApiKeyInput"/);
+  assert.match(html, /data-secret-toggle="aliyunApiKeyInput"/);
   assert.match(html, /data-secret-toggle="meetingOssAccessKeyIdInput"/);
   assert.match(html, /data-secret-toggle="meetingOssAccessKeySecretInput"/);
-  assert.match(html, /data-secret-copy="meetingFunAsrApiKeyInput"/);
+  assert.match(html, /data-secret-copy="aliyunApiKeyInput"/);
   assert.match(html, /基础：本地|零上传|不上传/);
   assert.match(html, /增强|上传/);
 });

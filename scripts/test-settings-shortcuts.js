@@ -7,10 +7,11 @@ const vm = require("node:vm");
 const { pathToFileURL } = require("node:url");
 const {
   ensureConnectionProfiles,
+  mergeProviderConnections,
   migrateConnectionProfiles,
   MEETING_QWEN_PRESETS
 } = require("../src/settings/connection-profiles");
-const { isSupportedAliMeetingModel } = require("../src/meeting/realtime/providers");
+const { isSupportedAliMeetingModel, profileFor } = require("../src/meeting/realtime/providers");
 const { validateHotkey, normalizeAccelerator } = require("../src/hotkeys/validate-hotkey");
 
 const root = path.join(__dirname, "..");
@@ -39,7 +40,7 @@ test("legacy global credentials migrate once into active ASR and cleaner profile
   assert.equal(migrated._legacyGlobalCredentialsMigrated, true);
 });
 
-test("ASR and cleaner model profiles remain isolated when active models change", () => {
+test("recognized provider models share family credentials while custom models remain isolated", () => {
   const settings = ensureConnectionProfiles({
     _connectionProfilesMigrated: true,
     asrModel: "custom-asr-b",
@@ -58,7 +59,8 @@ test("ASR and cleaner model profiles remain isolated when active models change",
   assert.equal(settings.cleanerApiKey, "clean-b");
   assert.equal(settings.cleanerBaseUrl, "https://clean-b.example/v1");
   assert.equal(settings.asrProfiles["custom-asr-a"].apiKey, "key-a");
-  assert.equal(settings.cleanerProfiles["cleaner-a"].apiKey, "clean-a");
+  assert.equal(settings.cleanerProfiles["cleaner-a"].apiKey, "key-a");
+  assert.equal(settings.cleanerProfiles["cleaner-b"].apiKey, "clean-b");
 });
 
 test("meeting transcription and analysis profiles restore only the selected model", () => {
@@ -87,10 +89,110 @@ test("meeting transcription and analysis profiles restore only the selected mode
     }
   });
   assert.equal(settings.meetingQwenApiKey, "qwen-b");
-  assert.equal(settings.meetingFunAsrApiKey, "fun-b");
+  assert.equal(settings.meetingFunAsrApiKey, "qwen-b");
   assert.equal(settings.meetingAnalysisApiKey, "analysis-b");
   assert.equal(settings.meetingAnalysisContextWindow, 500000);
   assert.equal(settings.meetingAnalysisProfiles["gpt-5.4-mini"].apiKey, "analysis-a");
+});
+
+test("meeting summary profile preserves its configured timeout and output budget", () => {
+  const profile = profileFor({
+    meetingAnalysisModel: "gpt-test",
+    meetingAnalysisTimeoutMs: 120000,
+    meetingAnalysisMaxOutput: 8192,
+    meetingAnalysisProfiles: {
+      "gpt-test": {
+        provider: "openai",
+        timeoutMs: 180000,
+        maxOutput: 12000
+      }
+    },
+    providerConnections: {
+      openai: {
+        apiKey: "fixture-openai",
+        baseUrl: "https://gateway.example/v1",
+        apiStyle: "responses"
+      }
+    }
+  }, "gpt-test", true, {});
+  assert.equal(profile.requestTimeoutMs, 180000);
+  assert.equal(profile.maxOutputTokens, 12000);
+  assert.equal(profile.apiStyle, "responses");
+});
+
+test("recognized vendor models share one family connection without crossing vendors", () => {
+  const settings = migrateConnectionProfiles({
+    cleanerModel: "gpt-5.4-mini",
+    cleanerProfiles: {
+      "gpt-5.4-mini": {
+        provider: "openai-compatible",
+        apiKey: "fixture-openai",
+        baseUrl: "https://gateway.example/v1",
+        wire_api: "responses"
+      },
+      "mimo-v2.5": { provider: "mimo", apiKey: "fixture-mimo", baseUrl: "https://mimo.example/v1" }
+    },
+    meetingAnalysisModel: "gpt-5.5",
+    meetingAnalysisProfiles: {
+      "gpt-5.5": {
+        provider: "openai-compatible",
+        apiKey: "fixture-openai",
+        baseUrl: "https://api.openai.com/v1"
+      },
+      "grok-4.5": { provider: "openai-compatible", apiKey: "fixture-grok", baseUrl: "https://grok.example/v1" }
+    }
+  });
+  assert.deepEqual(settings.providerConnections.openai, {
+    apiKey: "fixture-openai",
+    baseUrl: "https://gateway.example/v1",
+    apiStyle: "responses"
+  });
+  assert.equal(settings.meetingAnalysisProfiles["gpt-5.5"].baseUrl, "https://gateway.example/v1");
+  assert.equal(settings.meetingAnalysisProfiles["gpt-5.5"].apiStyle, "responses");
+  assert.equal(settings.providerConnections.mimo.apiKey, "fixture-mimo");
+  assert.equal(settings.meetingAnalysisProfiles["grok-4.5"].apiKey, "fixture-grok");
+});
+
+test("Ali family stores a root and mirrors operation-specific endpoints", () => {
+  const settings = migrateConnectionProfiles({
+    asrModel: "qwen3-asr-flash",
+    asrProfiles: {
+      "qwen3-asr-flash": {
+        provider: "qwen3-asr",
+        apiKey: "fixture-ali",
+        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      }
+    },
+    meetingFunAsrModel: "fun-asr",
+    meetingFunAsrProfiles: { "fun-asr": { provider: "fun-asr" } },
+    meetingQwenModel: "qwen-audio-3.0-asr-flash-streaming",
+    meetingQwenProfiles: { "qwen-audio-3.0-asr-flash-streaming": { provider: "qwen3-asr" } }
+  });
+  assert.equal(settings.providerConnections.aliyun.baseUrl, "https://dashscope.aliyuncs.com");
+  assert.equal(settings.asrProfiles["qwen3-asr-flash"].baseUrl, "https://dashscope.aliyuncs.com/compatible-mode/v1");
+  assert.equal(settings.meetingFunAsrProfiles["fun-asr"].baseUrl, "https://dashscope.aliyuncs.com/api/v1");
+  assert.equal(
+    settings.meetingQwenProfiles["qwen-audio-3.0-asr-flash-streaming"].baseUrl,
+    "https://dashscope.aliyuncs.com/api-ws/v1/inference"
+  );
+});
+
+test("a partial family connection update remains canonical on the next save", () => {
+  const first = migrateConnectionProfiles({
+    meetingAnalysisModel: "gpt-5.5",
+    meetingAnalysisProfiles: {
+      "gpt-5.5": { apiKey: "fixture-old", baseUrl: "https://old.example/v1", apiStyle: "chat-completions" }
+    }
+  });
+  first.providerConnections = mergeProviderConnections(first.providerConnections, {
+    openai: { apiKey: "fixture-new", baseUrl: "https://new.example/v1", apiStyle: "responses" }
+  });
+  const saved = ensureConnectionProfiles(first);
+  assert.deepEqual(saved.providerConnections.openai, {
+    apiKey: "fixture-new",
+    baseUrl: "https://new.example/v1",
+    apiStyle: "responses"
+  });
 });
 
 test("shortcut validation rejects app conflicts, reserved keys and malformed values", () => {
@@ -159,10 +261,29 @@ test("meeting live model contract matches transport and excludes batch presets",
   }
 });
 
-test("settings UI has per-model controls and no general credentials tab", () => {
+test("settings UI has unified provider connections and model-only vendor controls", () => {
   const html = fs.readFileSync(path.join(root, "src", "renderer", "index.html"), "utf8");
-  assert.doesNotMatch(html, /data-settings-tab="credentials"/);
-  assert.doesNotMatch(html, /id="apiKeyInput"|id="baseUrlInput"/);
+  const js = fs.readFileSync(path.join(root, "src", "renderer", "renderer.js"), "utf8");
+  const saveJs = js.slice(js.indexOf("async function saveAllSettings"), js.indexOf("async function runMeetingEnhancedTest"));
+  assert.match(html, /data-settings-tab="connections"/);
+  for (const family of ["mimo", "aliyun", "openai"]) {
+    assert.match(html, new RegExp(`id="${family}BaseUrlInput"`));
+    assert.match(html, new RegExp(`id="${family}ApiKeyInput"`));
+    assert.match(html, new RegExp(`data-secret-toggle="${family}ApiKeyInput"`));
+    assert.match(html, new RegExp(`data-secret-copy="${family}ApiKeyInput"`));
+    assert.match(html, new RegExp(`data-provider-connection-test="${family}"`));
+  }
+  assert.match(html, /id="openaiApiStyleSelect"[\s\S]*value="responses"[\s\S]*value="chat-completions"/);
+  assert.match(html, /适用于所有 MiMo/);
+  assert.match(html, /适用于所有 Qwen、Fun-ASR 与会议实时模型/);
+  assert.match(html, /适用于所有 GPT/);
+  assert.doesNotMatch(html, /id="asrBaseUrlInput"|id="asrApiKeyInput"/);
+  assert.doesNotMatch(html, /id="meeting(?:Qwen|FileAsr|FunAsr)(?:BaseUrl|ApiKey)Input"/);
+  assert.match(html, /id="cleanerCustomConnectionFields"[^>]*hidden/);
+  assert.match(html, /id="meetingAnalysisCustomConnectionFields"[^>]*hidden/);
+  assert.match(saveJs, /providerConnections:\s*collectProviderConnections\(\)/);
+  assert.match(js, /testProviderConnection\(\{ provider \}\)/);
+  assert.doesNotMatch(saveJs, /asrBaseUrl:\s*|asrApiKey:\s*|meetingQwenBaseUrl:\s*|meetingQwenApiKey:\s*/);
   assert.match(html, /id="meetingHotkeyInput"/);
   assert.match(html, /id="meetingBtn"[\s\S]*会议工作台/);
   assert.match(html, /id="asrRealtimeModelPresetSelect"/);

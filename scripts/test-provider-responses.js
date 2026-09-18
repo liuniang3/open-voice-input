@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { getEventListeners } = require("node:events");
-const { createOpenAiCompatibleClient, parseChatCompletionBody,
+const { createOpenAiCompatibleClient, parseChatCompletionBody, parseResponsesBody,
   parseServerSentEventChunks } = require("../src/providers/openai-compatible-client");
 const { createMimoClient } = require("../src/providers/mimo-client");
 const { createMimoAsrProvider } = require("../src/providers/asr/mimo-asr-provider");
@@ -41,6 +41,47 @@ async function main() {
         assert.equal(parsed.message.content, "same same.");
       }
     }
+  });
+
+  await test("Responses API parses completed JSON and requires a completed terminal state", () => {
+    const parsed = parseResponsesBody(JSON.stringify({
+      status: "completed",
+      output: [{ type: "message", content: [{ type: "output_text", text: "complete text" }] }]
+    }));
+    assert.equal(parsed.message.content, "complete text");
+    assert.equal(parsed.finishReason, "stop");
+    assert.throws(
+      () => parseResponsesBody(JSON.stringify({ status: "incomplete", output_text: "partial" })),
+      hasCode("response_incomplete")
+    );
+  });
+
+  await test("Responses API uses /responses, maps request fields, and accepts completed SSE", async () => {
+    let call;
+    const client = createOpenAiCompatibleClient({
+      apiKey: "fixture",
+      baseUrl: "https://gateway.example/v1",
+      model: "gpt-fixture",
+      apiStyle: "responses",
+      fetchImpl: async (url, options) => {
+        call = { url, body: JSON.parse(options.body) };
+        return response([
+          "data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}",
+          "",
+          "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}",
+          ""
+        ].join("\n"));
+      }
+    });
+    const result = await client.requestChat([{ role: "user", content: "hello" }], {
+      maxTokens: 77,
+      extraBody: { reasoning_effort: "high" }
+    });
+    assert.equal(call.url, "https://gateway.example/v1/responses");
+    assert.equal(call.body.max_output_tokens, 77);
+    assert.deepEqual(call.body.reasoning, { effort: "high" });
+    assert.equal(call.body.messages, undefined);
+    assert.equal(result.content, "done");
   });
 
   await test("SSE EOF without a terminal event cannot silently succeed", () => {

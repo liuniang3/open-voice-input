@@ -6,6 +6,7 @@ const {
   DEFAULT_TIMEOUT_MS,
   BUDGET_RATIO
 } = require("./constants");
+const { resolveProviderConnection } = require("../../settings/provider-connections");
 
 function trimStr(v) {
   return String(v || "").trim();
@@ -29,16 +30,25 @@ function positiveInt(v, fallback) {
  */
 function resolveMeetingAnalysisCredentials({ env = process.env, settings = {} } = {}) {
   const s = settings && typeof settings === "object" ? settings : {};
-  const apiKey = firstNonEmpty(s.meetingAnalysisApiKey, env.OVI_MEETING_ANALYSIS_API_KEY);
-  const baseUrl = firstNonEmpty(
-    s.meetingAnalysisBaseUrl,
-    env.OVI_MEETING_ANALYSIS_BASE_URL
-  );
   const modelId = firstNonEmpty(
     s.meetingAnalysisModel,
     env.OVI_MEETING_ANALYSIS_MODEL,
     "gpt-5.4-mini"
   );
+  const profile = s.meetingAnalysisProfiles?.[modelId] || {};
+  const provider = firstNonEmpty(profile.provider, /^mimo-/i.test(modelId) ? "mimo" : "openai-compatible");
+  const connection = resolveProviderConnection(s, {
+    modelId,
+    provider,
+    operation: "compatible",
+    fallback: {
+      apiKey: firstNonEmpty(profile.apiKey, s.meetingAnalysisApiKey, env.OVI_MEETING_ANALYSIS_API_KEY),
+      baseUrl: firstNonEmpty(profile.baseUrl, s.meetingAnalysisBaseUrl, env.OVI_MEETING_ANALYSIS_BASE_URL),
+      apiStyle: profile.apiStyle ?? profile.wire_api ?? s.meetingAnalysisApiStyle ?? s.wire_api
+    }
+  });
+  const apiKey = connection.apiKey;
+  const baseUrl = connection.baseUrl;
 
   if (!apiKey) {
     const error = new Error(
@@ -72,6 +82,7 @@ function resolveMeetingAnalysisCredentials({ env = process.env, settings = {} } 
   return {
     apiKey,
     baseUrl: baseUrl.replace(/\/+$/, ""),
+    apiStyle: connection.apiStyle,
     modelId,
     contextWindowTokens: positiveInt(
       s.meetingAnalysisContextWindow || env.OVI_MEETING_ANALYSIS_CONTEXT_WINDOW,

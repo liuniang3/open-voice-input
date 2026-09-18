@@ -196,12 +196,50 @@ async function main() {
     assert.ok(f.calls.llm.every(call => JSON.stringify(call.messages).length <= 24000));
     assert.ok(result.result.sections[0].items[0].provenance.every(p => p.sourceId.startsWith("live:")));
   });
-  await test("summary validates quote substrings, unknown keys, prototype keys and depth", async () => {
-    for (const mode of ["quote", "unknown", "prototype", "depth", "oversize"]) {
+  await test("summary accepts validated echoed source metadata but discards it from results", async () => {
+    const f = await fixture();
+    f.llm.complete = async request => ({
+      ...summary(request.input),
+      sourceIncomplete: Boolean(request.input.sourceIncomplete),
+      missingRangeCount: Number(request.input.missingRangeCount) || 0
+    });
+    const result = await f.service.summarize();
+    assert.equal(result.status, "completed");
+    assert.equal(Object.hasOwn(result.result, "sourceIncomplete"), false);
+    assert.equal(Object.hasOwn(result.result, "missingRangeCount"), false);
+  });
+  await test("summary aligns a near-exact model quote back to immutable source text", async () => {
+    const f = await fixture();
+    f.llm.complete = async request => {
+      const result = summary(request.input);
+      result.sections[0].items[0].evidence[0].quote = result.sections[0].items[0].evidence[0].quote.replace("120", "121");
+      return result;
+    };
+    const result = await f.service.summarize();
+    assert.equal(result.status, "completed");
+    const quote = result.result.sections[0].items[0].provenance[0].quote;
+    assert.equal(quote.includes("120"), true);
+    assert.equal(f.state.segments[0].text.includes(quote), true);
+  });
+  await test("summary falls back to exact source evidence and marks unmatched quotes uncertain", async () => {
+    const f = await fixture();
+    f.llm.complete = async request => {
+      const result = summary(request.input);
+      result.sections[0].items[0].evidence[0].quote = "not in source";
+      return result;
+    };
+    const result = await f.service.summarize();
+    assert.equal(result.status, "completed");
+    const item = result.result.sections[0].items[0];
+    assert.equal(item.uncertain, true);
+    assert.equal(item.provenance[0].quote, f.state.segments[0].text);
+  });
+  await test("summary validates source IDs, unknown keys, prototype keys and depth", async () => {
+    for (const mode of ["source", "unknown", "prototype", "depth", "oversize"]) {
       const f = await fixture();
       f.llm.complete = async request => {
         const result = summary(request.input);
-        if (mode === "quote") result.sections[0].items[0].evidence[0].quote = "not in source";
+        if (mode === "source") result.sections[0].items[0].evidence[0].sourceId = "invented";
         if (mode === "unknown") result.script = "bad";
         if (mode === "prototype") return '{"__proto__":{"polluted":true}}';
         if (mode === "depth") {

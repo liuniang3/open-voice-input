@@ -46,7 +46,7 @@
         </div>
       </section>
 
-      <label class="field advanced-field">
+      <label id="contextField" class="field advanced-field">
         <span>短上下文</span>
         <input id="contextInput" type="text" placeholder="可选：应用、窗口上下文或自定义词表" />
       </label>
@@ -55,7 +55,7 @@
         <div class="settings-head">
           <div>
             <strong>设置</strong>
-            <span>配置录音、识别、清理和快捷键。每个模型独立保存接口与 Key。</span>
+            <span>按供应商统一配置连接；模型只保存自身参数。</span>
           </div>
           <div class="settings-head-actions">
             <button id="testConnectionBtn">测试连接</button>
@@ -65,6 +65,7 @@
 
         <nav class="settings-tabs" role="tablist" aria-label="设置分类">
           <button type="button" class="settings-tab is-active" role="tab" aria-selected="true" data-settings-tab="general">常规</button>
+          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="connections">供应商连接</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="asr">语音识别</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="cleaner">文本清理</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="meeting">会议</button>
@@ -120,11 +121,91 @@
             </section>
           </div>
 
+          <div class="settings-tab-panel" role="tabpanel" data-settings-panel="connections" hidden>
+            <section class="settings-group provider-connection-group" aria-labelledby="mimoConnectionTitle">
+              <div class="section-title">
+                <strong id="mimoConnectionTitle">MiMo</strong>
+                <span id="mimoConnectionDescription">此 URL 和 API Key 适用于所有 MiMo 语音与文本模型。</span>
+              </div>
+              <label class="field">
+                <span>MiMo Base URL</span>
+                <input id="mimoBaseUrlInput" type="url" placeholder="https://api.xiaomimimo.com/v1" autocomplete="off" aria-describedby="mimoConnectionDescription" />
+              </label>
+              <div class="field">
+                <label for="mimoApiKeyInput">MiMo API Key</label>
+                <div class="secret-control">
+                  <input id="mimoApiKeyInput" type="password" placeholder="所有 MiMo 模型共用" autocomplete="off" aria-describedby="mimoConnectionDescription" />
+                  <button type="button" class="secret-action" data-secret-toggle="mimoApiKeyInput" title="显示或隐藏 MiMo API Key">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="mimoApiKeyInput" title="复制 MiMo API Key">复制</button>
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button type="button" data-provider-connection-test="mimo">测试 MiMo</button>
+                <span class="provider-test-result" data-provider-test-result="mimo" aria-live="polite"></span>
+              </div>
+            </section>
+
+            <section class="settings-group provider-connection-group" aria-labelledby="aliyunConnectionTitle">
+              <div class="section-title">
+                <strong id="aliyunConnectionTitle">阿里云百炼</strong>
+                <span id="aliyunConnectionDescription">此 URL 和 API Key 适用于所有 Qwen、Fun-ASR 与会议实时模型。</span>
+              </div>
+              <label class="field">
+                <span>阿里云 Base URL</span>
+                <input id="aliyunBaseUrlInput" type="url" placeholder="https://dashscope.aliyuncs.com" autocomplete="off" aria-describedby="aliyunConnectionDescription" />
+              </label>
+              <div class="field">
+                <label for="aliyunApiKeyInput">阿里云 API Key</label>
+                <div class="secret-control">
+                  <input id="aliyunApiKeyInput" type="password" placeholder="Qwen、Fun-ASR 与实时模型共用" autocomplete="off" aria-describedby="aliyunConnectionDescription" />
+                  <button type="button" class="secret-action" data-secret-toggle="aliyunApiKeyInput" title="显示或隐藏阿里云 API Key">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="aliyunApiKeyInput" title="复制阿里云 API Key">复制</button>
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button type="button" data-provider-connection-test="aliyun">测试阿里云</button>
+                <span class="provider-test-result" data-provider-test-result="aliyun" aria-live="polite"></span>
+              </div>
+            </section>
+
+            <section class="settings-group provider-connection-group" aria-labelledby="openaiConnectionTitle">
+              <div class="section-title">
+                <strong id="openaiConnectionTitle">OpenAI</strong>
+                <span id="openaiConnectionDescription">此 URL、API Key 和协议适用于所有 GPT 文本模型。</span>
+              </div>
+              <label class="field">
+                <span>OpenAI Base URL</span>
+                <input id="openaiBaseUrlInput" type="url" placeholder="https://api.openai.com/v1" autocomplete="off" aria-describedby="openaiConnectionDescription" />
+              </label>
+              <div class="field">
+                <label for="openaiApiKeyInput">OpenAI API Key</label>
+                <div class="secret-control">
+                  <input id="openaiApiKeyInput" type="password" placeholder="所有 GPT 模型共用" autocomplete="off" aria-describedby="openaiConnectionDescription" />
+                  <button type="button" class="secret-action" data-secret-toggle="openaiApiKeyInput" title="显示或隐藏 OpenAI API Key">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="openaiApiKeyInput" title="复制 OpenAI API Key">复制</button>
+                </div>
+              </div>
+              <label class="field">
+                <span>OpenAI API 协议</span>
+                <select id="openaiApiStyleSelect" aria-describedby="openaiConnectionDescription">
+                  <option value="responses">Responses API</option>
+                  <option value="chat-completions">Chat Completions API</option>
+                </select>
+              </label>
+              <div class="settings-actions">
+                <button type="button" data-provider-connection-test="openai">测试 OpenAI</button>
+                <span class="provider-test-result" data-provider-test-result="openai" aria-live="polite"></span>
+                <button type="button" data-provider-model-refresh="openai">获取模型列表</button>
+                <span class="provider-test-result" data-provider-model-status="openai" aria-live="polite"></span>
+              </div>
+            </section>
+          </div>
+
           <div class="settings-tab-panel" role="tabpanel" data-settings-panel="asr" hidden>
             <section class="settings-group">
               <div class="section-title">
                 <strong>第一步：语音识别</strong>
-                <span>每个模型独立保存接口与 Key，切换模型时自动恢复。</span>
+                <span>模型选项独立保存；连接统一使用 MiMo 或阿里云配置。</span>
               </div>
               <div class="provider-grid">
                 <label class="field">
@@ -178,18 +259,6 @@
                 <span>自定义实时预览模型</span>
                 <input id="asrRealtimeModelInput" type="text" placeholder="输入实时模型 ID" />
               </label>
-              <label class="field">
-                <span>语音识别 Base URL</span>
-                <input id="asrBaseUrlInput" type="text" placeholder="留空使用供应商默认地址" />
-              </label>
-              <div class="field">
-                <label for="asrApiKeyInput">语音识别 API Key</label>
-                <div class="secret-control">
-                  <input id="asrApiKeyInput" type="password" placeholder="当前 ASR 模型的独立 API Key" />
-                  <button type="button" class="secret-action" data-secret-toggle="asrApiKeyInput" title="显示或隐藏语音识别 API Key">显示</button>
-                  <button type="button" class="secret-action" data-secret-copy="asrApiKeyInput" title="复制语音识别 API Key">复制</button>
-                </div>
-              </div>
               <label class="check-field">
                 <input id="asrEnableItnInput" type="checkbox" />
                 <span>启用数字、日期等文本规范化</span>
@@ -201,24 +270,29 @@
             <section class="settings-group">
               <div class="section-title">
                 <strong>第二步：文本清理</strong>
-                <span>使用保守的删除跨度方法；每个模型独立保存连接配置。</span>
+                <span>GPT 与 MiMo 使用供应商连接；其他模型可使用自定义兼容接口。</span>
               </div>
               <div class="provider-grid">
+                <div class="field">
+                  <label for="cleanerModelPresetSelect">文本清理模型</label>
+                  <div class="model-select-control">
+                    <select id="cleanerModelPresetSelect">
+                      <option value="gpt-5.4-mini">GPT-5.4 mini（推荐）</option>
+                      <option value="grok-4.5">Grok 4.5</option>
+                      <option value="mimo-v2.5">MiMo V2.5</option>
+                      <option value="mimo-v2.5-pro">MiMo V2.5 Pro</option>
+                      <option value="__custom__">自定义模型</option>
+                    </select>
+                    <button type="button" class="model-refresh-btn" data-provider-model-refresh="openai" title="从 OpenAI 接口获取模型列表">获取模型</button>
+                  </div>
+                  <small class="model-catalog-status" data-provider-model-status="openai" aria-live="polite"></small>
+                </div>
                 <label class="field">
-                  <span>文本清理模型</span>
-                  <select id="cleanerModelPresetSelect">
-                    <option value="gpt-5.4-mini">GPT-5.4 mini（推荐）</option>
-                    <option value="grok-4.5">Grok 4.5</option>
-                    <option value="mimo-v2.5">MiMo V2.5</option>
-                    <option value="mimo-v2.5-pro">MiMo V2.5 Pro</option>
-                    <option value="__custom__">自定义模型</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>文本清理供应商</span>
+                  <span>连接类型</span>
                   <select id="cleanerProviderSelect">
-                    <option value="mimo">MiMo 聊天清理</option>
-                    <option value="openai-compatible">OpenAI 兼容接口清理</option>
+                    <option value="openai-compatible">OpenAI</option>
+                    <option value="mimo">MiMo</option>
+                    <option value="custom">自定义兼容接口</option>
                   </select>
                 </label>
               </div>
@@ -226,16 +300,19 @@
                 <span>自定义模型名称</span>
                 <input id="cleanerModelInput" type="text" placeholder="输入接口支持的模型 ID" />
               </label>
-              <label class="field">
-                <span>文本清理 Base URL</span>
-                <input id="cleanerBaseUrlInput" type="text" placeholder="https://api.openai.com/v1 或兼容接口地址" />
-              </label>
-              <div class="field">
-                <label for="cleanerApiKeyInput">文本清理 API Key</label>
-                <div class="secret-control">
-                  <input id="cleanerApiKeyInput" type="password" placeholder="当前清理模型的独立 API Key" />
-                  <button type="button" class="secret-action" data-secret-toggle="cleanerApiKeyInput" title="显示或隐藏文本清理 API Key">显示</button>
-                  <button type="button" class="secret-action" data-secret-copy="cleanerApiKeyInput" title="复制文本清理 API Key">复制</button>
+              <div id="cleanerCustomConnectionFields" class="custom-connection-fields" hidden>
+                <p class="settings-note">仅此模型使用以下自定义连接，不会修改 OpenAI 或 MiMo 配置。</p>
+                <label class="field">
+                  <span>自定义 Base URL</span>
+                  <input id="cleanerBaseUrlInput" type="url" placeholder="https://example.com/v1" autocomplete="off" />
+                </label>
+                <div class="field">
+                  <label for="cleanerApiKeyInput">自定义 API Key</label>
+                  <div class="secret-control">
+                    <input id="cleanerApiKeyInput" type="password" placeholder="仅当前自定义模型使用" autocomplete="off" />
+                    <button type="button" class="secret-action" data-secret-toggle="cleanerApiKeyInput" title="显示或隐藏自定义 API Key">显示</button>
+                    <button type="button" class="secret-action" data-secret-copy="cleanerApiKeyInput" title="复制自定义 API Key">复制</button>
+                  </div>
                 </div>
               </div>
             </section>
@@ -272,7 +349,7 @@
             <section class="settings-group">
               <div class="section-title">
                 <strong>会议原文（Qwen）</strong>
-                <span>麦克风与基础模式；与短语音 ASR Key 分离。</span>
+                <span>麦克风与基础模式；统一使用阿里云连接。</span>
               </div>
               <label class="field">
                 <span>会议 Qwen 模型</span>
@@ -286,23 +363,11 @@
                 <span>日期版本模型 ID</span>
                 <input id="meetingQwenModelInput" type="text" placeholder="例如 fun-asr-realtime-2026-09-18" autocomplete="off" />
               </label>
-              <label class="field">
-                <span>会议 Qwen Base URL</span>
-                <input id="meetingQwenBaseUrlInput" type="text" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" autocomplete="off" />
-              </label>
-              <div class="field">
-                <label for="meetingQwenApiKeyInput">会议 Qwen API Key</label>
-                <div class="secret-control">
-                  <input id="meetingQwenApiKeyInput" type="password" placeholder="或使用 OVI_MEETING_QWEN_API_KEY / DASHSCOPE_API_KEY" autocomplete="off" />
-                  <button type="button" class="secret-action" data-secret-toggle="meetingQwenApiKeyInput" title="显示或隐藏">显示</button>
-                  <button type="button" class="secret-action" data-secret-copy="meetingQwenApiKeyInput" title="复制">复制</button>
-                </div>
-              </div>
             </section>
             <section class="settings-group">
               <div class="section-title">
                 <strong>文件转写 ASR</strong>
-                <span>MiMo 独立配置也用于会议实时转录；不进入会议增强/OSS 流程。</span>
+                <span>按供应商使用 MiMo 或阿里云连接；不进入会议增强/OSS 流程。</span>
               </div>
               <div class="provider-grid">
                 <label class="field">
@@ -328,24 +393,12 @@
                 <span>自定义文件 ASR 模型 ID</span>
                 <input id="meetingFileAsrModelInput" type="text" placeholder="输入模型 ID" autocomplete="off" />
               </label>
-              <label class="field">
-                <span>文件 ASR Base URL</span>
-                <input id="meetingFileAsrBaseUrlInput" type="text" placeholder="根据供应商自动填充" autocomplete="off" />
-              </label>
-              <div class="field">
-                <label for="meetingFileAsrApiKeyInput">文件 ASR API Key</label>
-                <div class="secret-control">
-                  <input id="meetingFileAsrApiKeyInput" type="password" placeholder="当前文件 ASR 模型的独立 Key" autocomplete="off" />
-                  <button type="button" class="secret-action" data-secret-toggle="meetingFileAsrApiKeyInput" title="显示或隐藏">显示</button>
-                  <button type="button" class="secret-action" data-secret-copy="meetingFileAsrApiKeyInput" title="复制">复制</button>
-                </div>
-              </div>
               <p class="settings-note">导入完成后点击“生成原文”，会使用这里选择的模型；完成后可继续“校订并总结”。</p>
             </section>
             <section class="settings-group">
               <div class="section-title">
                 <strong>增强 · Fun-ASR</strong>
-                <span>仅增强模式系统轨；不回退短语音 Key。</span>
+                <span>仅增强模式系统轨；统一使用阿里云连接。</span>
               </div>
               <label class="field">
                 <span>Fun-ASR 模型</span>
@@ -359,18 +412,6 @@
                 <span>自定义 Fun-ASR 模型 ID</span>
                 <input id="meetingFunAsrModelInput" type="text" placeholder="输入模型 ID" autocomplete="off" />
               </label>
-              <label class="field">
-                <span>Fun-ASR Base URL</span>
-                <input id="meetingFunAsrBaseUrlInput" type="text" placeholder="https://dashscope.aliyuncs.com/api/v1" autocomplete="off" />
-              </label>
-              <div class="field">
-                <label for="meetingFunAsrApiKeyInput">Fun-ASR API Key</label>
-                <div class="secret-control">
-                  <input id="meetingFunAsrApiKeyInput" type="password" placeholder="或 OVI_MEETING_FUN_ASR_API_KEY / DASHSCOPE_API_KEY" autocomplete="off" />
-                  <button type="button" class="secret-action" data-secret-toggle="meetingFunAsrApiKeyInput" title="显示或隐藏">显示</button>
-                  <button type="button" class="secret-action" data-secret-copy="meetingFunAsrApiKeyInput" title="复制">复制</button>
-                </div>
-              </div>
               <div class="settings-actions">
                 <button type="button" id="meetingFunTestBtn">测试 Fun-ASR</button>
                 <span id="meetingFunTestResult" class="meeting-test-result" aria-live="polite"></span>
@@ -425,33 +466,48 @@
             <section class="settings-group">
               <div class="section-title">
                 <strong>会议校订与总结</strong>
-                <span>独立长内容模型，不复用短语音清理 Key。无需 OSS。</span>
+                <span>模型参数独立保存；GPT 与 MiMo 使用供应商连接。无需 OSS。</span>
+              </div>
+              <div class="field">
+                <label for="meetingAnalysisModelPresetSelect">分析模型</label>
+                <div class="model-select-control">
+                  <select id="meetingAnalysisModelPresetSelect">
+                    <option value="gpt-5.4-mini">GPT-5.4 mini</option>
+                    <option value="gpt-5.5">GPT-5.5</option>
+                    <option value="grok-4.5">Grok 4.5</option>
+                    <option value="glm-5.2">GLM 5.2</option>
+                    <option value="mimo-v2.5-pro">MiMo V2.5 Pro</option>
+                    <option value="__custom__">自定义模型</option>
+                  </select>
+                  <button type="button" class="model-refresh-btn" data-provider-model-refresh="openai" title="从 OpenAI 接口获取模型列表">获取模型</button>
+                </div>
+                <small class="model-catalog-status" data-provider-model-status="openai" aria-live="polite"></small>
               </div>
               <label class="field">
-                <span>分析模型</span>
-                <select id="meetingAnalysisModelPresetSelect">
-                  <option value="gpt-5.4-mini">GPT-5.4 mini</option>
-                  <option value="gpt-5.5">GPT-5.5</option>
-                  <option value="grok-4.5">Grok 4.5</option>
-                  <option value="glm-5.2">GLM 5.2</option>
-                  <option value="mimo-v2.5-pro">MiMo V2.5 Pro</option>
-                  <option value="__custom__">自定义模型</option>
+                <span>连接类型</span>
+                <select id="meetingAnalysisProviderSelect">
+                  <option value="openai-compatible">OpenAI</option>
+                  <option value="mimo">MiMo</option>
+                  <option value="custom">自定义兼容接口</option>
                 </select>
               </label>
               <label id="meetingAnalysisCustomModelField" class="field" hidden>
                 <span>自定义分析模型 ID</span>
                 <input id="meetingAnalysisModelInput" type="text" placeholder="输入模型 ID" autocomplete="off" />
               </label>
-              <label class="field">
-                <span>分析 Base URL</span>
-                <input id="meetingAnalysisBaseUrlInput" type="text" placeholder="https://api.openai.com/v1" autocomplete="off" />
-              </label>
-              <div class="field">
-                <label for="meetingAnalysisApiKeyInput">分析 API Key</label>
-                <div class="secret-control">
-                  <input id="meetingAnalysisApiKeyInput" type="password" placeholder="或使用 OVI_MEETING_ANALYSIS_API_KEY" autocomplete="off" />
-                  <button type="button" class="secret-action" data-secret-toggle="meetingAnalysisApiKeyInput" title="显示或隐藏">显示</button>
-                  <button type="button" class="secret-action" data-secret-copy="meetingAnalysisApiKeyInput" title="复制">复制</button>
+              <div id="meetingAnalysisCustomConnectionFields" class="custom-connection-fields" hidden>
+                <p class="settings-note">仅此模型使用以下自定义连接，不会修改 OpenAI 或 MiMo 配置。</p>
+                <label class="field">
+                  <span>自定义 Base URL</span>
+                  <input id="meetingAnalysisBaseUrlInput" type="url" placeholder="https://example.com/v1" autocomplete="off" />
+                </label>
+                <div class="field">
+                  <label for="meetingAnalysisApiKeyInput">自定义 API Key</label>
+                  <div class="secret-control">
+                    <input id="meetingAnalysisApiKeyInput" type="password" placeholder="仅当前自定义模型使用" autocomplete="off" />
+                    <button type="button" class="secret-action" data-secret-toggle="meetingAnalysisApiKeyInput" title="显示或隐藏自定义 API Key">显示</button>
+                    <button type="button" class="secret-action" data-secret-copy="meetingAnalysisApiKeyInput" title="复制自定义 API Key">复制</button>
+                  </div>
                 </div>
               </div>
               <div class="provider-grid">

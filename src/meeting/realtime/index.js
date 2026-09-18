@@ -81,6 +81,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         live_save_failed: "Markdown 保存失败，请检查目标目录权限或磁盘空间；本机会话记录仍保留。",
         live_asr_failed: "转写请求失败，音频已保留；请检查模型配置或网络并重试。",
         live_cleanup_failed: "清理失败，原始文本和音频未改变。可检查模型配置后重试。",
+        live_summary_failed: "摘要生成失败，已有文本和音频未改变。可检查模型配置后重试。",
         live_capture_failed: "录音启动或采集失败，请检查麦克风、系统音频权限及音频设备。",
         live_stop_failed: "录音停止尚未确认，请再次停止；已保存的音频仍保留。"
       }[fallback] || "操作失败，已有录音与文本保留在本机会话目录。" };
@@ -633,6 +634,16 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     const modelId = options.modelId || settings.meetingAnalysisModel || settings.cleanerModel || "gpt-5.4-mini";
     const modelProfile = llmImpl ? { provider: "test", modelId } : profileFor(settings, modelId, true);
     const call = llmImpl || languageModel(modelProfile);
+    const providerRequestTimeoutMs = Number.isFinite(Number(modelProfile.requestTimeoutMs))
+      && Number(modelProfile.requestTimeoutMs) > 0
+      ? Math.floor(Number(modelProfile.requestTimeoutMs))
+      : 90000;
+    const taskRequestTimeoutMs = providerRequestTimeoutMs + Math.max(5000, Math.ceil(providerRequestTimeoutMs * 0.05));
+    const maxOutputTokens = Number.isFinite(Number(modelProfile.maxOutputTokens))
+      && Number(modelProfile.maxOutputTokens) > 0
+      ? Math.floor(Number(modelProfile.maxOutputTokens))
+      : 8192;
+    const failureCode = kind === "summary" ? "live_summary_failed" : "live_cleanup_failed";
     const useMimoReview = kind === "reconcile" && options.useMimoReview === true;
     const reviewModelId = options.reviewModelId || "mimo-v2.5-asr";
     if (useMimoReview && !/^mimo-.*asr/i.test(reviewModelId)) throw new Error("live_model_unsupported");
@@ -660,8 +671,8 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         limits: { maxSeconds: 30, maxBytes: 2 * 1024 * 1024 },
         transcribe: ({ audio, signal, segmentIndex }) => review({ audioDataUrl: `data:audio/wav;base64,${audio.toString("base64")}`, signal, segmentIndex }) } : null,
       llm: { modelId, revision: digest(JSON.stringify([modelProfile.provider, modelProfile.baseUrl])),
-        complete: ({ messages, signal }) => call({ messages, signal, maxTokens: 8192 }) },
-      limits: { maxRequestsPerRun: 1000 },
+        complete: ({ messages, signal }) => call({ messages, signal, maxTokens: maxOutputTokens }) },
+      limits: { maxRequestsPerRun: 1000, requestTimeoutMs: taskRequestTimeoutMs },
       onUpdate: (update) => {
         current.postprocessStatus = update.status;
         current.postprocessProgress = { ...update.progress, kind };
@@ -681,7 +692,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       if (outcome.status !== "completed" || !outcome.result) {
         current.postprocessStatus = "failed";
         if (kind === "reconcile") current.cleanupStatus = "failed";
-        current.error = safeError(null, "live_cleanup_failed");
+        current.error = safeError(null, failureCode);
         return;
       }
       const result = outcome.result;
@@ -706,7 +717,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     }).catch(error => {
       current.postprocessStatus = "failed";
       if (kind === "reconcile") current.cleanupStatus = "failed";
-      current.error = safeError(error, "live_cleanup_failed");
+      current.error = safeError(error, failureCode);
     }).finally(async () => {
       try { await persist(); } finally { cleanupPromise = null; cleanupController = null; emit(); }
     });

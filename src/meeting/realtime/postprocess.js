@@ -96,15 +96,85 @@ const CLAIM_SCHEMA = { text: "supported text", evidence: [{ sourceId: "input id"
 const SUMMARY_SCHEMA = { title: "meeting topic", mindmap: { ...CLAIM_SCHEMA, children: [] },
   sections: [{ heading: "Decisions / Details / Actions / Open questions", items: [CLAIM_SCHEMA] }] };
 
+function comparableEvidenceText(value) {
+  const chars = [];
+  const ranges = [];
+  let offset = 0;
+  for (const original of String(value || "")) {
+    const start = offset;
+    offset += original.length;
+    for (const char of original.normalize("NFKC").toLowerCase()) {
+      if (!/[\p{L}\p{N}]/u.test(char)) continue;
+      chars.push(char);
+      ranges.push([start, offset]);
+    }
+  }
+  return { chars, ranges };
+}
+
+function alignEvidenceQuote(sourceText, quoteText) {
+  const source = comparableEvidenceText(sourceText);
+  const quote = comparableEvidenceText(quoteText);
+  const sourceLength = source.chars.length;
+  const quoteLength = quote.chars.length;
+  if (quoteLength < 4 || sourceLength < 1) return "";
+
+  // Semi-global edit distance: consume the whole model quote while allowing a
+  // free prefix/suffix in the known source. Track the exact source span so the
+  // stored citation remains a literal substring of the immutable transcript.
+  let previousCost = new Uint16Array(sourceLength + 1);
+  let previousStart = new Uint16Array(sourceLength + 1);
+  for (let j = 0; j <= sourceLength; j++) previousStart[j] = j;
+  for (let i = 1; i <= quoteLength; i++) {
+    const currentCost = new Uint16Array(sourceLength + 1);
+    const currentStart = new Uint16Array(sourceLength + 1);
+    currentCost[0] = i;
+    for (let j = 1; j <= sourceLength; j++) {
+      let cost = previousCost[j - 1] + (quote.chars[i - 1] === source.chars[j - 1] ? 0 : 1);
+      let start = previousStart[j - 1];
+      if (previousCost[j] + 1 < cost) {
+        cost = previousCost[j] + 1;
+        start = previousStart[j];
+      }
+      if (currentCost[j - 1] + 1 < cost) {
+        cost = currentCost[j - 1] + 1;
+        start = currentStart[j - 1];
+      }
+      currentCost[j] = cost;
+      currentStart[j] = start;
+    }
+    previousCost = currentCost;
+    previousStart = currentStart;
+  }
+
+  let end = 0;
+  for (let j = 1; j <= sourceLength; j++) {
+    if (previousCost[j] < previousCost[end]) end = j;
+  }
+  const start = previousStart[end];
+  const spanLength = end - start;
+  const maxEdits = Math.max(1, Math.floor(quoteLength * 0.15));
+  if (spanLength < 1 || previousCost[end] > maxEdits) return "";
+  const exact = String(sourceText).slice(source.ranges[start][0], source.ranges[end - 1][1]);
+  return exact && String(sourceText).includes(exact) ? exact : "";
+}
+
 function validateEvidence(value, sources, limits) {
   requireValue(Array.isArray(value) && value.length > 0 && value.length <= limits.maxEvidence);
   const result = [];
+  let repaired = false;
   for (const entry of value) {
     keys(entry, ["sourceId", "quote"]);
     const sourceId = textValue(entry.sourceId, 200);
     const source = sources.get(sourceId);
-    const quote = textValue(entry.quote, limits.fragmentChars);
-    requireValue(source && source.text.includes(quote), "postprocess_evidence_invalid");
+    let quote = textValue(entry.quote, limits.fragmentChars);
+    requireValue(source, "postprocess_evidence_invalid");
+    if (!source.text.includes(quote)) {
+      const aligned = alignEvidenceQuote(source.text, quote);
+      quote = aligned || textValue(source.text, limits.fragmentChars);
+      repaired = true;
+    }
+    requireValue(quote && source.text.includes(quote), "postprocess_evidence_invalid");
     const origins = source.provenance || [{ sourceId, quote, source: source.source,
       startFrame: source.startFrame, endFrame: source.endFrame,
       charStart: source.charStart, charEnd: source.charEnd }];
@@ -116,7 +186,7 @@ function validateEvidence(value, sources, limits) {
   }
   // Each level has a bounded provenance fanout as well as bounded visible text.
   requireValue(result.length <= limits.maxEvidence * limits.maxEvidence, "postprocess_evidence_limit");
-  return result;
+  return { items: result, repaired };
 }
 
 function protectedTokens(text) {
@@ -153,7 +223,8 @@ function validateReconciliation(response, target, sources, limits, modelId) {
   keys(value, ["text", "evidence", "uncertain"]);
   const corrected = textValue(value.text, limits.maxOutputChars, substantiveCoverage(target.text, "") === 1);
   requireValue(typeof value.uncertain === "boolean");
-  const provenance = validateEvidence(value.evidence, sources, limits);
+  const evidence = validateEvidence(value.evidence, sources, limits);
+  const provenance = evidence.items;
   requireValue(value.evidence.some(entry => (target.ownedIds || [target.id]).includes(entry.sourceId)), "postprocess_evidence_invalid");
   if (target.source === "live") requireValue(target.ownedIds.every(id => value.evidence.some(entry => entry.sourceId === id)),
     "postprocess_evidence_invalid");
@@ -164,13 +235,20 @@ function validateReconciliation(response, target, sources, limits, modelId) {
       : !target.text.trim() || corrected.trim().length >= target.text.trim().length * 0.5)
     && corrected.length <= Math.max(200, (target.text.length + (target.ownedOriginals || []).reduce((n, item) => n + item.text.length, 0)) * 1.5);
   return { ...target, text: retained ? corrected : target.text, provenance,
-    uncertain: value.uncertain || !retained || target.uncertain || false,
+    uncertain: value.uncertain || evidence.repaired || !retained || target.uncertain || false,
     reviewModelId: modelId, validation: retained ? "validated" : "original_preserved" };
 }
 
 function validateSummary(response, items, limits) {
   const value = boundedJson(response, limits.maxOutputChars);
-  keys(value, ["title", "mindmap", "sections"]);
+  // Some compatible reasoning models echo these two input metadata fields even
+  // when instructed to follow outputSchema. They are validated and discarded;
+  // every content-bearing field remains strict.
+  keys(value, ["title", "mindmap", "sections", "sourceIncomplete", "missingRangeCount"]);
+  if (Object.hasOwn(value, "sourceIncomplete")) requireValue(typeof value.sourceIncomplete === "boolean");
+  if (Object.hasOwn(value, "missingRangeCount")) {
+    requireValue(Number.isSafeInteger(value.missingRangeCount) && value.missingRangeCount >= 0);
+  }
   const sources = new Map(items.map(item => [item.id, item]));
   let count = 0;
   function claim(input, depth, tree) {
@@ -178,9 +256,10 @@ function validateSummary(response, items, limits) {
     keys(input, tree ? ["text", "evidence", "uncertain", "children"] : ["text", "evidence", "uncertain"]);
     const text = textValue(input.text, limits.fragmentChars);
     requireValue(typeof input.uncertain === "boolean");
-    const provenance = validateEvidence(input.evidence, sources, limits);
+    const evidence = validateEvidence(input.evidence, sources, limits);
+    const provenance = evidence.items;
     const uncertain = input.uncertain || input.evidence.some(entry => sources.get(entry.sourceId).uncertain);
-    const result = { text, provenance, uncertain: Boolean(uncertain) };
+    const result = { text, provenance, uncertain: Boolean(uncertain || evidence.repaired) };
     if (tree) {
       requireValue(Array.isArray(input.children) && input.children.length <= limits.maxNodes);
       result.children = input.children.map(child => claim(child, depth + 1, true));
@@ -392,9 +471,10 @@ function createMeetingPostprocessService({ sessionDir, getState, audio, asr, llm
     try { result = await request(env, signal => run(signal)); }
     catch (error) {
       entry.status = "failed";
+      const errorCode = error?.code === "request_timeout" ? "postprocess_timeout" : error?.code;
       entry.error = { code: env.signal.aborted ? "postprocess_cancelled" :
-        ["postprocess_invalid_json", "postprocess_evidence_invalid", "postprocess_evidence_limit", "postprocess_timeout", "postprocess_audio_limit"].includes(error?.code)
-          ? error.code : "postprocess_request_failed" };
+        ["postprocess_invalid_json", "postprocess_evidence_invalid", "postprocess_evidence_limit", "postprocess_timeout", "postprocess_audio_limit"].includes(errorCode)
+          ? errorCode : "postprocess_request_failed" };
       await saveManifest(env);
       return null;
     }

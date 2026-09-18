@@ -17,8 +17,8 @@ Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 - The first stage is now a pluggable ASR layer, tuned most heavily for the dedicated `mimo-v2.5-asr` model and also supporting Qwen3-ASR and Fun-ASR.
 - Qwen3-ASR and Fun-ASR provide WebSocket realtime preview. MiMo uses periodic partial-audio preview, while the final transcript is always regenerated from the complete recording.
 - `Stable` mode sends raw ASR text to a MiMo or OpenAI-compatible small model for filler removal, repetition cleanup, and punctuation. `Fast` mode performs ASR only.
-- Settings now live in the frameless main UI, organized into General, Speech Recognition, Text Cleanup, and Shared Credentials tabs instead of a separate native Windows settings window.
-- Every ASR and cleanup model keeps its own Base URL and API key profile. Switching models restores that profile, including saved custom model IDs.
+- Settings now live in the frameless main UI, with a dedicated Provider Connections tab instead of a separate native Windows settings window.
+- MiMo models share one MiMo connection, Qwen/Fun-ASR models share one Alibaba connection, and GPT models share one OpenAI connection. The OpenAI URL may be a custom gateway such as NowCoding and supports either Responses or Chat Completions. Unrelated providers such as Grok or GLM retain independent model connections.
 - API key fields include local show/hide and copy controls. Keys remain in `%APPDATA%\\open-voice-input\\settings.json` and are excluded from builds and Git.
 - Recordings are normalized to 16 kHz mono 16-bit PCM WAV. Long recordings are segmented according to the active ASR provider, transcribed and cached early, then joined in order when recording stops.
 - An independent file transcription workspace can import audio or video, select its ASR model, generate corrected text and a structured summary, and export Markdown, TXT, or Word.
@@ -28,7 +28,7 @@ Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 
 ## Recommended Setup
 
-For **live meetings**, configure the exact model `qwen-audio-3.0-asr-flash-streaming` or `fun-asr-realtime` with its own regional API address and key. These use the DashScope `/api-ws/v1/inference` WebSocket protocol; `qwen3-asr-flash-realtime` is a different protocol and is not a substitute in this workspace. Optional post-recording review uses ordinary MiMo ASR API credentials, not Token Plan. Select the reconciliation/summary LLM independently; its URL and key are not borrowed from ASR.
+For **live meetings**, select `qwen-audio-3.0-asr-flash-streaming` or `fun-asr-realtime` and configure the shared Alibaba root URL and key once. The app derives the required compatible, REST and `/api-ws/v1/inference` endpoints from that connection. Optional post-recording review uses the shared regular MiMo connection. The reconciliation/summary model uses its own provider family connection.
 
 For **short dictation**, the project is tuned most heavily around the dedicated `mimo-v2.5-asr` model and the regular MiMo API endpoint. Qwen3-ASR and Fun-ASR are also supported. This short-dictation recommendation does not change the live-meeting streaming default.
 
@@ -39,7 +39,7 @@ For the second-stage text cleanup step, a small chat model is usually enough. GP
 - Global hotkey recording
 - Small floating realtime transcript window
 - Tray menu for settings
-- Configurable microphone, two independent global hotkeys, and per-model API profiles
+- Configurable microphone, two independent global hotkeys, shared vendor connections, and independent custom-model profiles
 - ASR providers: MiMo-V2.5-ASR, Qwen3-ASR, and Fun-ASR
 - Cleanup providers: MiMo chat cleanup and OpenAI-compatible chat cleanup
 - `Fast` mode: ASR only, lower latency
@@ -189,7 +189,7 @@ Cleanup providers:
 - `MiMo`: text cleanup through MiMo chat, with MiMo V2.5 and MiMo V2.5 Pro presets.
 - `OpenAI-compatible`: text cleanup through any compatible chat endpoint, with GPT-5.4 mini and Grok 4.5 presets plus a custom model ID option.
 
-GPT-5.4 mini is the current overall recommendation. Selecting a GPT or Grok preset switches to the OpenAI-compatible cleaner; selecting a MiMo preset switches to the MiMo cleaner. Short ASR, cleanup, meeting Qwen, meeting Fun-ASR, and meeting analysis each keep separate profiles per model ID, including custom models, so switching models does not reuse another model's URL or key.
+GPT-5.4 mini is the current overall recommendation. MiMo ASR/cleanup/review models use the single MiMo connection; Qwen and Fun-ASR use the single Alibaba connection; GPT cleanup and analysis models use the single OpenAI connection. The OpenAI connection can point at the official service or a compatible gateway and can use Responses or Chat Completions. Grok, GLM and other unrelated compatible models keep independent URL/key profiles so credentials never cross provider families.
 
 ## Short Dictation Modes
 

@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld("mimoInput", {
   finishRealtimeAsr: (payload) => ipcRenderer.invoke("voice:realtime:finish", payload),
   cancelRealtimeAsr: () => ipcRenderer.invoke("voice:realtime:cancel"),
   testConnection: () => ipcRenderer.invoke("connection:test"),
+  testProviderConnection: (payload) => ipcRenderer.invoke("provider:test-connection", payload),
+  listProviderModels: (payload) => ipcRenderer.invoke("provider:list-models", payload),
   injectText: (text) => ipcRenderer.invoke("input:inject", text),
   copyText: (text) => ipcRenderer.invoke("clipboard:write-text", text),
   hide: () => ipcRenderer.invoke("window:hide"),

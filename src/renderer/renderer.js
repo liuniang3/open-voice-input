@@ -25,6 +25,16 @@ const microphoneSelect = document.getElementById("microphoneSelect");
 const microphoneHint = document.getElementById("microphoneHint");
 const refreshDevicesBtn = document.getElementById("refreshDevicesBtn");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
+const mimoBaseUrlInput = document.getElementById("mimoBaseUrlInput");
+const mimoApiKeyInput = document.getElementById("mimoApiKeyInput");
+const aliyunBaseUrlInput = document.getElementById("aliyunBaseUrlInput");
+const aliyunApiKeyInput = document.getElementById("aliyunApiKeyInput");
+const openaiBaseUrlInput = document.getElementById("openaiBaseUrlInput");
+const openaiApiKeyInput = document.getElementById("openaiApiKeyInput");
+const openaiApiStyleSelect = document.getElementById("openaiApiStyleSelect");
+const providerConnectionTestButtons = [...document.querySelectorAll("[data-provider-connection-test]")];
+const providerModelRefreshButtons = [...document.querySelectorAll("[data-provider-model-refresh]")];
+const providerModelStatusElements = [...document.querySelectorAll("[data-provider-model-status]")];
 const asrProviderSelect = document.getElementById("asrProviderSelect");
 const asrModeSelect = document.getElementById("asrModeSelect");
 const asrModelPresetSelect = document.getElementById("asrModelPresetSelect");
@@ -33,8 +43,6 @@ const asrModelInput = document.getElementById("asrModelInput");
 const asrRealtimeModelPresetSelect = document.getElementById("asrRealtimeModelPresetSelect");
 const asrCustomRealtimeModelField = document.getElementById("asrCustomRealtimeModelField");
 const asrRealtimeModelInput = document.getElementById("asrRealtimeModelInput");
-const asrBaseUrlInput = document.getElementById("asrBaseUrlInput");
-const asrApiKeyInput = document.getElementById("asrApiKeyInput");
 const asrLanguageInput = document.getElementById("asrLanguageInput");
 const asrEnableItnInput = document.getElementById("asrEnableItnInput");
 const cleanerProviderSelect = document.getElementById("cleanerProviderSelect");
@@ -43,22 +51,17 @@ const cleanerCustomModelField = document.getElementById("cleanerCustomModelField
 const cleanerModelInput = document.getElementById("cleanerModelInput");
 const cleanerBaseUrlInput = document.getElementById("cleanerBaseUrlInput");
 const cleanerApiKeyInput = document.getElementById("cleanerApiKeyInput");
+const cleanerCustomConnectionFields = document.getElementById("cleanerCustomConnectionFields");
 const meetingQwenModelPresetSelect = document.getElementById("meetingQwenModelPresetSelect");
 const meetingQwenCustomModelField = document.getElementById("meetingQwenCustomModelField");
 const meetingQwenModelInput = document.getElementById("meetingQwenModelInput");
-const meetingQwenBaseUrlInput = document.getElementById("meetingQwenBaseUrlInput");
-const meetingQwenApiKeyInput = document.getElementById("meetingQwenApiKeyInput");
 const meetingFileAsrProviderSelect = document.getElementById("meetingFileAsrProviderSelect");
 const meetingFileAsrModelPresetSelect = document.getElementById("meetingFileAsrModelPresetSelect");
 const meetingFileAsrCustomModelField = document.getElementById("meetingFileAsrCustomModelField");
 const meetingFileAsrModelInput = document.getElementById("meetingFileAsrModelInput");
-const meetingFileAsrBaseUrlInput = document.getElementById("meetingFileAsrBaseUrlInput");
-const meetingFileAsrApiKeyInput = document.getElementById("meetingFileAsrApiKeyInput");
 const meetingFunAsrModelPresetSelect = document.getElementById("meetingFunAsrModelPresetSelect");
 const meetingFunAsrCustomModelField = document.getElementById("meetingFunAsrCustomModelField");
 const meetingFunAsrModelInput = document.getElementById("meetingFunAsrModelInput");
-const meetingFunAsrBaseUrlInput = document.getElementById("meetingFunAsrBaseUrlInput");
-const meetingFunAsrApiKeyInput = document.getElementById("meetingFunAsrApiKeyInput");
 const meetingOssRegionInput = document.getElementById("meetingOssRegionInput");
 const meetingOssEndpointInput = document.getElementById("meetingOssEndpointInput");
 const meetingOssBucketInput = document.getElementById("meetingOssBucketInput");
@@ -75,8 +78,10 @@ const meetingOssTestResult = document.getElementById("meetingOssTestResult");
 const meetingAnalysisModelPresetSelect = document.getElementById("meetingAnalysisModelPresetSelect");
 const meetingAnalysisCustomModelField = document.getElementById("meetingAnalysisCustomModelField");
 const meetingAnalysisModelInput = document.getElementById("meetingAnalysisModelInput");
+const meetingAnalysisProviderSelect = document.getElementById("meetingAnalysisProviderSelect");
 const meetingAnalysisBaseUrlInput = document.getElementById("meetingAnalysisBaseUrlInput");
 const meetingAnalysisApiKeyInput = document.getElementById("meetingAnalysisApiKeyInput");
+const meetingAnalysisCustomConnectionFields = document.getElementById("meetingAnalysisCustomConnectionFields");
 const meetingAnalysisContextInput = document.getElementById("meetingAnalysisContextInput");
 const meetingAnalysisMaxOutputInput = document.getElementById("meetingAnalysisMaxOutputInput");
 const meetingAnalysisReasoningInput = document.getElementById("meetingAnalysisReasoningInput");
@@ -96,14 +101,19 @@ const secretToggleButtons = [...document.querySelectorAll("[data-secret-toggle]"
 const secretCopyButtons = [...document.querySelectorAll("[data-secret-copy]")];
 const audioTools = window.OpenVoiceAudio;
 
+const desktopPlatform = /Mac/i.test(navigator.userAgentData?.platform || navigator.platform || "")
+  ? "darwin"
+  : /Win/i.test(navigator.userAgentData?.platform || navigator.platform || "")
+    ? "win32"
+    : "other";
+document.documentElement.dataset.platform = desktopPlatform;
+
 const TRANSCRIPTION_MODES = new Set(["stable", "fast"]);
 const ASR_MODES = new Set(["batch", "realtime"]);
 const QWEN_ASR_OPENAI_MODEL = "qwen3-asr-flash";
-const QWEN_ASR_OPENAI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const QWEN_ASR_REALTIME_MODEL = "qwen3-asr-flash-realtime";
 const MIMO_ASR_MODEL = "mimo-v2.5-asr";
 const FUN_ASR_MODEL = "fun-asr";
-const FUN_ASR_REST_BASE_URL = "https://dashscope.aliyuncs.com/api/v1";
 const FUN_ASR_REALTIME_MODEL = "fun-asr-realtime";
 const CUSTOM_ASR_MODEL = "__custom__";
 const CUSTOM_ASR_REALTIME_MODEL = "__custom_realtime__";
@@ -116,7 +126,6 @@ const ASR_REALTIME_MODEL_PRESETS = new Set([
 ]);
 const CUSTOM_CLEANER_MODEL = "__custom__";
 const CLEANER_MODEL_PRESETS = new Set(["gpt-5.4-mini", "grok-4.5", "mimo-v2.5", "mimo-v2.5-pro"]);
-const MIMO_CLEANER_MODELS = new Set(["mimo-v2.5", "mimo-v2.5-pro"]);
 const MEETING_LIVE_MODEL = "qwen-audio-3.0-asr-flash-streaming";
 const isSupportedMeetingLiveModel = (model) => typeof model === "string" && model === model.trim()
   && /^(?:qwen-audio-3\.0-asr-flash-streaming|fun-asr-realtime)(?:-\d{4}-\d{2}-\d{2})?$/.test(model);
@@ -135,6 +144,184 @@ const MEETING_ANALYSIS_MODEL_PRESETS = new Set([
   "glm-5.2",
   "mimo-v2.5-pro"
 ]);
+const OPENAI_API_STYLES = new Set(["responses", "chat-completions"]);
+const TEXT_PROVIDER_FAMILIES = new Set(["mimo", "openai-compatible", "custom"]);
+const DEFAULT_PROVIDER_CONNECTIONS = Object.freeze({
+  mimo: Object.freeze({ baseUrl: "https://api.xiaomimimo.com/v1", apiKey: "", apiStyle: "chat-completions" }),
+  aliyun: Object.freeze({ baseUrl: "https://dashscope.aliyuncs.com", apiKey: "" }),
+  openai: Object.freeze({ baseUrl: "https://api.openai.com/v1", apiKey: "", apiStyle: "responses" })
+});
+
+function normalizedConnection(value, fallback) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    baseUrl: String(Object.hasOwn(source, "baseUrl") ? source.baseUrl || "" : fallback.baseUrl || "").trim(),
+    apiKey: String(Object.hasOwn(source, "apiKey") ? source.apiKey || "" : "").trim(),
+    ...(fallback.apiStyle ? {
+      apiStyle: OPENAI_API_STYLES.has(source.apiStyle) ? source.apiStyle : fallback.apiStyle
+    } : {})
+  };
+}
+
+function profileEntries(settings) {
+  return [
+    ...Object.entries(settings.asrProfiles || {}),
+    ...Object.entries(settings.cleanerProfiles || {}),
+    ...Object.entries(settings.meetingQwenProfiles || {}),
+    ...Object.entries(settings.meetingRealtimeProfiles || {}),
+    ...Object.entries(settings.meetingFileAsrProfiles || {}),
+    ...Object.entries(settings.meetingFunAsrProfiles || {}),
+    ...Object.entries(settings.meetingAnalysisProfiles || {})
+  ];
+}
+
+function legacyProviderConnection(settings, family) {
+  const matches = profileEntries(settings).filter(([model, profile]) => {
+    const id = model.toLowerCase();
+    const provider = String(profile?.provider || "").toLowerCase();
+    if (family === "mimo") return provider === "mimo" || id.startsWith("mimo-");
+    if (family === "aliyun") return /qwen|fun-asr/.test(id) || /qwen|fun-asr|aliyun/.test(provider);
+    return id.startsWith("gpt-");
+  });
+  const activeModels = family === "aliyun"
+    ? [
+      settings.meetingRealtimeModel,
+      settings.meetingQwenModel,
+      settings.asrModel,
+      settings.meetingFileAsrModel,
+      settings.meetingFunAsrModel
+    ].filter(Boolean)
+    : [];
+  const active = activeModels
+    .map(model => matches.find(([id, profile]) => id === model && (profile?.apiKey || profile?.baseUrl)))
+    .find(Boolean);
+  const realtimeAli = family === "aliyun"
+    ? Object.entries(settings.meetingRealtimeProfiles || {})
+      .find(([, profile]) => profile?.apiKey || profile?.baseUrl)
+    : null;
+  const selected = family === "openai"
+    ? matches.find(([, profile]) => profile?.apiKey && profile?.baseUrl && !/^https:\/\/api\.openai\.com\/?(?:v1)?\/?$/i.test(profile.baseUrl))
+      || matches.find(([, profile]) => profile?.apiKey)
+      || matches.find(([, profile]) => profile?.baseUrl)
+    : realtimeAli || active || matches.find(([, profile]) => profile?.apiKey) || matches.find(([, profile]) => profile?.baseUrl);
+  if (selected) return selected[1];
+  if (family === "mimo" && /^mimo-/i.test(settings.cleanerModel || settings.asrModel || "")) {
+    return { baseUrl: settings.cleanerBaseUrl || settings.asrBaseUrl, apiKey: settings.cleanerApiKey || settings.asrApiKey };
+  }
+  if (family === "aliyun") {
+    return {
+      baseUrl: settings.meetingQwenBaseUrl || settings.meetingFunAsrBaseUrl || settings.asrBaseUrl,
+      apiKey: settings.meetingQwenApiKey || settings.meetingFunAsrApiKey || settings.asrApiKey
+    };
+  }
+  if (family === "openai" && /^gpt-/i.test(settings.meetingAnalysisModel || settings.cleanerModel || "")) {
+    return {
+      baseUrl: settings.meetingAnalysisBaseUrl || settings.cleanerBaseUrl,
+      apiKey: settings.meetingAnalysisApiKey || settings.cleanerApiKey
+    };
+  }
+  return {};
+}
+
+function providerConnectionsForSettings(settings) {
+  const saved = settings.providerConnections && typeof settings.providerConnections === "object"
+    ? settings.providerConnections
+    : {};
+  return {
+    mimo: normalizedConnection(
+      Object.hasOwn(saved, "mimo") ? saved.mimo : legacyProviderConnection(settings, "mimo"),
+      DEFAULT_PROVIDER_CONNECTIONS.mimo
+    ),
+    aliyun: normalizedConnection(
+      Object.hasOwn(saved, "aliyun") ? saved.aliyun : legacyProviderConnection(settings, "aliyun"),
+      DEFAULT_PROVIDER_CONNECTIONS.aliyun
+    ),
+    openai: normalizedConnection(
+      Object.hasOwn(saved, "openai") ? saved.openai : legacyProviderConnection(settings, "openai"),
+      DEFAULT_PROVIDER_CONNECTIONS.openai
+    )
+  };
+}
+
+function fillProviderConnections() {
+  const connections = providerConnectionsForSettings(appSettings);
+  mimoBaseUrlInput.value = connections.mimo.baseUrl;
+  mimoApiKeyInput.value = connections.mimo.apiKey;
+  aliyunBaseUrlInput.value = connections.aliyun.baseUrl;
+  aliyunApiKeyInput.value = connections.aliyun.apiKey;
+  openaiBaseUrlInput.value = connections.openai.baseUrl;
+  openaiApiKeyInput.value = connections.openai.apiKey;
+  openaiApiStyleSelect.value = connections.openai.apiStyle;
+}
+
+function collectProviderConnections() {
+  return {
+    mimo: {
+      baseUrl: mimoBaseUrlInput.value.trim(),
+      apiKey: mimoApiKeyInput.value.trim(),
+      apiStyle: "chat-completions"
+    },
+    aliyun: {
+      baseUrl: aliyunBaseUrlInput.value.trim(),
+      apiKey: aliyunApiKeyInput.value.trim()
+    },
+    openai: {
+      baseUrl: openaiBaseUrlInput.value.trim(),
+      apiKey: openaiApiKeyInput.value.trim(),
+      apiStyle: OPENAI_API_STYLES.has(openaiApiStyleSelect.value)
+        ? openaiApiStyleSelect.value
+        : "responses"
+    }
+  };
+}
+
+function normalizeModelCatalog(value) {
+  const models = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  const normalized = [];
+  for (const raw of models) {
+    const model = String(raw || "").trim();
+    if (!model || model.length > 256 || seen.has(model)) continue;
+    seen.add(model);
+    normalized.push(model);
+    if (normalized.length >= 1000) break;
+  }
+  return normalized;
+}
+
+function openAiCatalogModels() {
+  return normalizeModelCatalog(appSettings.openaiModelCatalog);
+}
+
+function isOpenAiCatalogModel(model) {
+  return openAiCatalogModels().includes(String(model || "").trim());
+}
+
+function setOpenAiCatalogStatus(text) {
+  for (const element of providerModelStatusElements) element.textContent = text;
+}
+
+function renderOpenAiCatalogStatus() {
+  const count = openAiCatalogModels().length;
+  const updated = String(appSettings.openaiModelCatalogUpdatedAt || "").trim();
+  const updatedAt = updated ? new Date(updated) : null;
+  const suffix = updatedAt && Number.isFinite(updatedAt.getTime())
+    ? ` · ${updatedAt.toLocaleDateString("zh-CN")}`
+    : "";
+  setOpenAiCatalogStatus(count ? `已缓存 ${count} 个模型${suffix}` : "尚未获取模型列表");
+}
+
+function defaultTextProviderFamily(model) {
+  const value = String(model || "").trim();
+  if (/^mimo-/i.test(value)) return "mimo";
+  if (isOpenAiCatalogModel(value) || /^(?:gpt-|chatgpt-|o[134](?:-|$))/i.test(value)) return "openai-compatible";
+  return "custom";
+}
+
+function savedTextProviderFamily(model, profile) {
+  if (TEXT_PROVIDER_FAMILIES.has(profile?.providerFamily)) return profile.providerFamily;
+  return defaultTextProviderFamily(model);
+}
 
 let audioContext;
 let sourceNode;
@@ -173,7 +360,6 @@ let mimoPreviewRunId = 0;
 let activeAsrModelDraft = "";
 let activeAsrProviderDraft = "mimo";
 let activeCleanerModelDraft = "";
-let activeCleanerProviderDraft = "mimo";
 let activeMeetingQwenModelDraft = "";
 let activeMeetingFileAsrModelDraft = "";
 let activeMeetingFunModelDraft = "";
@@ -283,15 +469,9 @@ function normalizeProviderSettingsDraft() {
   if (asrProviderSelect.value === "qwen3-asr") {
     asrModelInput.value = normalizeQwenAsrModel(asrModelInput.value);
     realtimeModel = normalizeQwenRealtimeModel(realtimeModel);
-    if (!asrBaseUrlInput.value.trim()) {
-      asrBaseUrlInput.value = QWEN_ASR_OPENAI_BASE_URL;
-    }
   } else if (asrProviderSelect.value === "fun-asr") {
     asrModelInput.value = normalizeFunAsrModel(asrModelInput.value);
     realtimeModel = normalizeFunAsrRealtimeModel(realtimeModel);
-    if (!asrBaseUrlInput.value.trim() || asrBaseUrlInput.value.trim() === QWEN_ASR_OPENAI_BASE_URL) {
-      asrBaseUrlInput.value = FUN_ASR_REST_BASE_URL;
-    }
   } else if (asrProviderSelect.value === "mimo") {
     asrModelInput.value = normalizeMimoAsrModel(asrModelInput.value);
     realtimeModel = normalizeMimoAsrModel(realtimeModel);
@@ -366,6 +546,7 @@ function handleAsrRealtimeModelPresetChange() {
 }
 
 function syncSavedModelOptions(select, profiles, presetModels) {
+  const previousValue = select.value;
   for (const option of [...select.querySelectorAll("option[data-saved-model]")]) {
     option.remove();
   }
@@ -381,6 +562,24 @@ function syncSavedModelOptions(select, profiles, presetModels) {
     option.dataset.savedModel = "true";
     select.insertBefore(option, customOption || null);
   }
+  syncOpenAiCatalogOptions(select);
+  if ([...select.options].some((option) => option.value === previousValue)) select.value = previousValue;
+}
+
+function syncOpenAiCatalogOptions(select) {
+  for (const option of [...select.querySelectorAll("option[data-provider-model]")]) option.remove();
+  if (![cleanerModelPresetSelect, meetingAnalysisModelPresetSelect].includes(select)) return;
+  const existing = new Set([...select.options].map((option) => option.value));
+  const customOption = [...select.options].find((option) => option.value === CUSTOM_CLEANER_MODEL);
+  for (const model of openAiCatalogModels()) {
+    if (existing.has(model)) continue;
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = `${model}（接口）`;
+    option.dataset.providerModel = "openai";
+    select.insertBefore(option, customOption || null);
+    existing.add(model);
+  }
 }
 
 function defaultAsrProfile(model) {
@@ -389,8 +588,6 @@ function defaultAsrProfile(model) {
       provider: "qwen3-asr",
       mode: "realtime",
       realtimeModel: QWEN_ASR_REALTIME_MODEL,
-      baseUrl: QWEN_ASR_OPENAI_BASE_URL,
-      apiKey: "",
       language: "",
       enableItn: true
     };
@@ -400,8 +597,6 @@ function defaultAsrProfile(model) {
       provider: "fun-asr",
       mode: "realtime",
       realtimeModel: FUN_ASR_REALTIME_MODEL,
-      baseUrl: FUN_ASR_REST_BASE_URL,
-      apiKey: "",
       language: "",
       enableItn: true
     };
@@ -410,8 +605,6 @@ function defaultAsrProfile(model) {
     provider: "mimo",
     mode: "realtime",
     realtimeModel: MIMO_ASR_MODEL,
-    baseUrl: "",
-    apiKey: "",
     language: "",
     enableItn: false
   };
@@ -426,8 +619,6 @@ function cacheAsrProfileDraft(model, { provider = asrProviderSelect.value } = {}
       provider,
       mode: normalizeAsrMode(asrModeSelect.value),
       realtimeModel: selectedAsrRealtimeModel(),
-      baseUrl: asrBaseUrlInput.value.trim(),
-      apiKey: asrApiKeyInput.value.trim(),
       language: asrLanguageInput.value.trim(),
       enableItn: asrEnableItnInput.checked
     }
@@ -441,8 +632,6 @@ function loadAsrProfileDraft(model) {
   syncAsrRealtimeModelOptions(profile.provider);
   asrModeSelect.value = normalizeAsrMode(profile.mode);
   fillAsrRealtimeModel(profile.realtimeModel || defaultRealtimeModelForProvider(profile.provider));
-  asrBaseUrlInput.value = profile.baseUrl || "";
-  asrApiKeyInput.value = profile.apiKey || "";
   asrLanguageInput.value = profile.language || "";
   asrEnableItnInput.checked = Boolean(profile.enableItn);
   normalizeProviderSettingsDraft();
@@ -485,7 +674,7 @@ function handleAsrProviderChange() {
 function fillCleanerModel(model) {
   const value = String(model || "").trim() || "mimo-v2.5";
   syncSavedModelOptions(cleanerModelPresetSelect, appSettings.cleanerProfiles, CLEANER_MODEL_PRESETS);
-  if (CLEANER_MODEL_PRESETS.has(value) || appSettings.cleanerProfiles?.[value]) {
+  if (CLEANER_MODEL_PRESETS.has(value) || appSettings.cleanerProfiles?.[value] || isOpenAiCatalogModel(value)) {
     cleanerModelPresetSelect.value = value;
     cleanerModelInput.value = "";
   } else {
@@ -506,12 +695,21 @@ function renderCustomCleanerModelField() {
   cleanerCustomModelField.hidden = cleanerModelPresetSelect.value !== CUSTOM_CLEANER_MODEL;
 }
 
+function renderCleanerConnectionFields() {
+  cleanerCustomConnectionFields.hidden = cleanerProviderSelect.value !== "custom";
+}
+
 function handleCleanerModelPresetChange() {
   cacheCleanerProfileDraft(activeCleanerModelDraft);
   renderCustomCleanerModelField();
   const model = cleanerModelPresetSelect.value;
   if (model === CUSTOM_CLEANER_MODEL) {
-    activeCleanerModelDraft = cleanerModelInput.value.trim();
+    cleanerModelInput.value = "";
+    cleanerProviderSelect.value = "custom";
+    cleanerBaseUrlInput.value = "";
+    cleanerApiKeyInput.value = "";
+    activeCleanerModelDraft = "";
+    renderCleanerConnectionFields();
     cleanerModelInput.focus();
     return;
   }
@@ -521,12 +719,16 @@ function handleCleanerModelPresetChange() {
 function cacheCleanerProfileDraft(model, { provider = cleanerProviderSelect.value } = {}) {
   const value = String(model || "").trim();
   if (!value) return;
+  const providerFamily = TEXT_PROVIDER_FAMILIES.has(provider) ? provider : defaultTextProviderFamily(value);
   appSettings.cleanerProfiles = {
     ...(appSettings.cleanerProfiles || {}),
     [value]: {
-      provider,
-      baseUrl: cleanerBaseUrlInput.value.trim(),
-      apiKey: cleanerApiKeyInput.value.trim()
+      provider: providerFamily === "mimo" ? "mimo" : providerFamily === "openai-compatible" ? "openai" : "openai-compatible",
+      providerFamily,
+      ...(providerFamily === "custom" ? {
+        baseUrl: cleanerBaseUrlInput.value.trim(),
+        apiKey: cleanerApiKeyInput.value.trim()
+      } : {})
     }
   };
 }
@@ -534,33 +736,23 @@ function cacheCleanerProfileDraft(model, { provider = cleanerProviderSelect.valu
 function loadCleanerProfileDraft(model) {
   const profile = appSettings.cleanerProfiles?.[model];
   fillCleanerModel(model);
-  cleanerProviderSelect.value = profile?.provider
-    || (MIMO_CLEANER_MODELS.has(model) ? "mimo" : "openai-compatible");
-  cleanerBaseUrlInput.value = profile?.baseUrl || "";
-  cleanerApiKeyInput.value = profile?.apiKey || "";
+  cleanerProviderSelect.value = savedTextProviderFamily(model, profile);
+  cleanerBaseUrlInput.value = cleanerProviderSelect.value === "custom" ? profile?.baseUrl || "" : "";
+  cleanerApiKeyInput.value = cleanerProviderSelect.value === "custom" ? profile?.apiKey || "" : "";
+  renderCleanerConnectionFields();
   activeCleanerModelDraft = model;
-  activeCleanerProviderDraft = cleanerProviderSelect.value;
 }
 
 function handleCleanerProviderChange() {
-  if (cleanerModelPresetSelect.value === CUSTOM_CLEANER_MODEL) return;
-  const usesMimoModel = MIMO_CLEANER_MODELS.has(cleanerModelPresetSelect.value);
-  if (cleanerProviderSelect.value === "mimo" && !usesMimoModel) {
-    cacheCleanerProfileDraft(activeCleanerModelDraft, { provider: activeCleanerProviderDraft });
-    loadCleanerProfileDraft("mimo-v2.5");
-  } else if (cleanerProviderSelect.value === "openai-compatible" && usesMimoModel) {
-    cacheCleanerProfileDraft(activeCleanerModelDraft, { provider: activeCleanerProviderDraft });
-    loadCleanerProfileDraft("gpt-5.4-mini");
-  } else {
-    activeCleanerProviderDraft = cleanerProviderSelect.value;
-  }
+  renderCleanerConnectionFields();
 }
 
 function fillProfileModelSelector({ select, input, customField, model, profiles, presets, fallback }) {
   const value = String(model || "").trim() || fallback;
   syncSavedModelOptions(select, profiles, presets);
   input.value = value;
-  select.value = presets.has(value) || profiles?.[value] ? value : CUSTOM_ASR_MODEL;
+  const fromCatalog = select === meetingAnalysisModelPresetSelect && isOpenAiCatalogModel(value);
+  select.value = presets.has(value) || profiles?.[value] || fromCatalog ? value : CUSTOM_ASR_MODEL;
   customField.hidden = select.value !== CUSTOM_ASR_MODEL;
   return value;
 }
@@ -569,28 +761,20 @@ function selectedProfileModel(select, input) {
   return select.value === CUSTOM_ASR_MODEL ? input.value.trim() : select.value;
 }
 
-function meetingPreviewProfileDraft(model) {
-  const profiles = [appSettings.meetingRealtimeProfiles?.[model], appSettings.meetingQwenProfiles?.[model], appSettings.asrProfiles?.[model]].filter(Boolean);
-  return profiles.find(profile => profile.apiKey) || profiles[0] || {};
-}
-
 function cacheMeetingQwenProfileDraft(model) {
   const value = String(model || "").trim();
   if (!value) return;
   appSettings.meetingQwenProfiles = {
     ...(appSettings.meetingQwenProfiles || {}),
     [value]: {
-      ...(appSettings.meetingQwenProfiles?.[value] || {}),
       provider: /fun-asr/i.test(value) ? "fun-asr" : "qwen3-asr",
-      model: value,
-      baseUrl: meetingQwenBaseUrlInput.value.trim(),
-      apiKey: meetingQwenApiKeyInput.value.trim()
+      model: value
     }
   };
   if (Object.hasOwn(appSettings.meetingRealtimeProfiles || {}, value)) {
     appSettings.meetingRealtimeProfiles = {
       ...appSettings.meetingRealtimeProfiles,
-      [value]: { ...appSettings.meetingRealtimeProfiles[value], ...appSettings.meetingQwenProfiles[value] }
+      [value]: { ...appSettings.meetingQwenProfiles[value] }
     };
   }
 }
@@ -612,9 +796,6 @@ function loadMeetingQwenProfileDraft(model) {
     presets: MEETING_QWEN_MODEL_PRESETS,
     fallback: MEETING_LIVE_MODEL
   });
-  const profile = meetingPreviewProfileDraft(value);
-  meetingQwenBaseUrlInput.value = profile.baseUrl || QWEN_ASR_OPENAI_BASE_URL;
-  meetingQwenApiKeyInput.value = profile.apiKey || "";
   activeMeetingQwenModelDraft = value;
 }
 
@@ -625,12 +806,6 @@ function defaultMeetingFileAsrProvider(model) {
   return "mimo";
 }
 
-function defaultMeetingFileAsrBaseUrl(provider) {
-  if (provider === "qwen3-asr") return QWEN_ASR_OPENAI_BASE_URL;
-  if (provider === "fun-asr") return FUN_ASR_REST_BASE_URL;
-  return "https://api.xiaomimimo.com/v1";
-}
-
 function cacheMeetingFileAsrProfileDraft(model) {
   const value = String(model || "").trim();
   if (!value || !meetingFileAsrProviderSelect) return;
@@ -638,9 +813,7 @@ function cacheMeetingFileAsrProfileDraft(model) {
     ...(appSettings.meetingFileAsrProfiles || {}),
     [value]: {
       provider: meetingFileAsrProviderSelect.value || defaultMeetingFileAsrProvider(value),
-      model: value,
-      baseUrl: meetingFileAsrBaseUrlInput?.value.trim() || "",
-      apiKey: meetingFileAsrApiKeyInput?.value.trim() || ""
+      model: value
     }
   };
 }
@@ -658,11 +831,6 @@ function loadMeetingFileAsrProfileDraft(model) {
   const profile = appSettings.meetingFileAsrProfiles?.[value] || {};
   const provider = profile.provider || defaultMeetingFileAsrProvider(value);
   if (meetingFileAsrProviderSelect) meetingFileAsrProviderSelect.value = provider;
-  if (meetingFileAsrBaseUrlInput) {
-    meetingFileAsrBaseUrlInput.value =
-      profile.baseUrl || defaultMeetingFileAsrBaseUrl(provider);
-  }
-  if (meetingFileAsrApiKeyInput) meetingFileAsrApiKeyInput.value = profile.apiKey || "";
   activeMeetingFileAsrModelDraft = value;
 }
 
@@ -673,9 +841,7 @@ function cacheMeetingFunProfileDraft(model) {
     ...(appSettings.meetingFunAsrProfiles || {}),
     [value]: {
       provider: "fun-asr",
-      model: value,
-      baseUrl: meetingFunAsrBaseUrlInput.value.trim(),
-      apiKey: meetingFunAsrApiKeyInput.value.trim()
+      model: value
     }
   };
 }
@@ -690,30 +856,29 @@ function loadMeetingFunProfileDraft(model) {
     presets: MEETING_FUN_MODEL_PRESETS,
     fallback: FUN_ASR_MODEL
   });
-  const profile = appSettings.meetingFunAsrProfiles?.[value] || {};
-  meetingFunAsrBaseUrlInput.value = profile.baseUrl || FUN_ASR_REST_BASE_URL;
-  meetingFunAsrApiKeyInput.value = profile.apiKey || "";
   activeMeetingFunModelDraft = value;
-}
-
-function defaultMeetingAnalysisBaseUrl(model) {
-  return /^mimo-/i.test(model) ? "https://api.xiaomimimo.com/v1" : "https://api.openai.com/v1";
 }
 
 function cacheMeetingAnalysisProfileDraft(model) {
   const value = String(model || "").trim();
   if (!value) return;
+  const providerFamily = TEXT_PROVIDER_FAMILIES.has(meetingAnalysisProviderSelect.value)
+    ? meetingAnalysisProviderSelect.value
+    : defaultTextProviderFamily(value);
   appSettings.meetingAnalysisProfiles = {
     ...(appSettings.meetingAnalysisProfiles || {}),
     [value]: {
-      provider: /^mimo-/i.test(value) ? "mimo" : "openai-compatible",
+      provider: providerFamily === "mimo" ? "mimo" : providerFamily === "openai-compatible" ? "openai" : "openai-compatible",
+      providerFamily,
       model: value,
-      baseUrl: meetingAnalysisBaseUrlInput.value.trim(),
-      apiKey: meetingAnalysisApiKeyInput.value.trim(),
       contextWindow: Number(meetingAnalysisContextInput.value) || 128000,
       maxOutput: Number(meetingAnalysisMaxOutputInput.value) || 8192,
       reasoning: meetingAnalysisReasoningInput.value.trim(),
-      timeoutMs: Number(meetingAnalysisTimeoutInput.value) || 120000
+      timeoutMs: Number(meetingAnalysisTimeoutInput.value) || 120000,
+      ...(providerFamily === "custom" ? {
+        baseUrl: meetingAnalysisBaseUrlInput.value.trim(),
+        apiKey: meetingAnalysisApiKeyInput.value.trim()
+      } : {})
     }
   };
 }
@@ -729,8 +894,10 @@ function loadMeetingAnalysisProfileDraft(model) {
     fallback: "gpt-5.4-mini"
   });
   const profile = appSettings.meetingAnalysisProfiles?.[value] || {};
-  meetingAnalysisBaseUrlInput.value = profile.baseUrl || defaultMeetingAnalysisBaseUrl(value);
-  meetingAnalysisApiKeyInput.value = profile.apiKey || "";
+  meetingAnalysisProviderSelect.value = savedTextProviderFamily(value, profile);
+  meetingAnalysisBaseUrlInput.value = meetingAnalysisProviderSelect.value === "custom" ? profile.baseUrl || "" : "";
+  meetingAnalysisApiKeyInput.value = meetingAnalysisProviderSelect.value === "custom" ? profile.apiKey || "" : "";
+  meetingAnalysisCustomConnectionFields.hidden = meetingAnalysisProviderSelect.value !== "custom";
   meetingAnalysisContextInput.value = profile.contextWindow || 128000;
   meetingAnalysisMaxOutputInput.value = profile.maxOutput || 8192;
   meetingAnalysisReasoningInput.value = profile.reasoning || "";
@@ -822,6 +989,8 @@ function setSettingsTab(tabName) {
     panel.classList.toggle("is-active", active);
     panel.hidden = !active;
   }
+  const content = document.querySelector(".settings-tab-content");
+  if (content) content.scrollTop = 0;
 }
 
 function toggleSecretVisibility(button) {
@@ -837,7 +1006,7 @@ async function copySecretValue(button) {
   const input = document.getElementById(button.dataset.secretCopy);
   const value = input?.value || "";
   if (!value) {
-    setStatus("warning", "没有可复制的 Key", "当前模型尚未填写独立 API Key。");
+    setStatus("warning", "没有可复制的 Key", "当前连接尚未填写 API Key。");
     return;
   }
   await window.mimoInput.copyText(value);
@@ -1767,6 +1936,8 @@ async function saveHotkeySetting(kind, hotkey, originalValue, statusElement) {
 }
 
 function fillSettingsForm() {
+  fillProviderConnections();
+  renderOpenAiCatalogStatus();
   loadAsrProfileDraft(appSettings.asrModel || MIMO_ASR_MODEL);
   loadCleanerProfileDraft(appSettings.cleanerModel || appSettings.model || "mimo-v2.5");
   hotkeyInput.value = appSettings.hotkey || "CommandOrControl+Alt+M";
@@ -1843,7 +2014,7 @@ function applyWindowMode(mode) {
   document.body.classList.toggle("result-open", mode === "result");
   document.body.classList.toggle("meeting-mode", mode === "meeting");
   document.body.classList.toggle("file-mode", mode === "file");
-  document.body.classList.toggle("secondary-window-mode", ["settings", "meeting", "file"].includes(mode));
+  document.body.classList.toggle("secondary-window-mode", ["settings", "result", "meeting", "file"].includes(mode));
   if (meetingPanel) meetingPanel.hidden = mode !== "meeting";
   if (filePanel) filePanel.hidden = mode !== "file";
   if (mode === "recording" || mode === "compact" || mode === "result" || mode === "meeting" || mode === "file") {
@@ -1913,19 +2084,19 @@ async function saveAllSettings() {
   if (!voiceCheck?.ok) throw new Error(`短语音快捷键：${voiceCheck?.message || "不可用"}`);
   if (!meetingCheck?.ok) throw new Error(`长内容快捷键：${meetingCheck?.message || "不可用"}`);
   const nextSettings = {
+    providerConnections: collectProviderConnections(),
+    openaiModelCatalog: openAiCatalogModels(),
+    openaiModelCatalogUpdatedAt: appSettings.openaiModelCatalogUpdatedAt || "",
     asrProvider: asrProviderSelect.value,
     asrMode: normalizeAsrMode(asrModeSelect.value),
     asrModel,
     asrRealtimeModel: normalizeRealtimeModelForSelectedProvider(selectedAsrRealtimeModel()),
-    asrBaseUrl: asrBaseUrlInput.value.trim(),
-    asrApiKey: asrApiKeyInput.value.trim(),
     asrLanguage: asrLanguageInput.value.trim(),
     asrEnableItn: asrEnableItnInput.checked,
     asrProfiles: appSettings.asrProfiles || {},
-    cleanerProvider: cleanerProviderSelect.value,
+    cleanerProvider: cleanerProviderSelect.value === "mimo" ? "mimo" : "openai-compatible",
+    cleanerProviderFamily: cleanerProviderSelect.value,
     cleanerModel,
-    cleanerBaseUrl: cleanerBaseUrlInput.value.trim(),
-    cleanerApiKey: cleanerApiKeyInput.value.trim(),
     cleanerProfiles: appSettings.cleanerProfiles || {},
     hotkey: voiceCheck.accelerator || voiceHotkey,
     meetingHotkey: meetingCheck.accelerator || longHotkey,
@@ -1939,14 +2110,10 @@ async function saveAllSettings() {
       document.getElementById("meetingCaptureModeSelect")?.value || appSettings.meetingCaptureMode || "dual",
     meetingQwenModel,
     meetingRealtimeModel: meetingQwenModel,
-    meetingQwenBaseUrl: meetingQwenBaseUrlInput?.value.trim() || "",
-    meetingQwenApiKey: meetingQwenApiKeyInput?.value.trim() || "",
     meetingQwenProfiles: appSettings.meetingQwenProfiles || {},
     meetingRealtimeProfiles: appSettings.meetingRealtimeProfiles || {},
     meetingFileAsrProvider: meetingFileAsrProviderSelect?.value || "mimo",
     meetingFileAsrModel,
-    meetingFileAsrBaseUrl: meetingFileAsrBaseUrlInput?.value.trim() || "",
-    meetingFileAsrApiKey: meetingFileAsrApiKeyInput?.value.trim() || "",
     meetingFileAsrProfiles: appSettings.meetingFileAsrProfiles || {},
     meetingProcessMode:
       meetingUi.normalizeProcessMode?.(
@@ -1961,8 +2128,6 @@ async function saveAllSettings() {
         48
       ) || 48,
     meetingFunAsrModel: meetingFunModel,
-    meetingFunAsrBaseUrl: meetingFunAsrBaseUrlInput?.value.trim() || "",
-    meetingFunAsrApiKey: meetingFunAsrApiKeyInput?.value.trim() || "",
     meetingFunAsrProfiles: appSettings.meetingFunAsrProfiles || {},
     meetingOssRegion: meetingOssRegionInput?.value.trim() || "",
     meetingOssEndpoint: meetingOssEndpointInput?.value.trim() || "",
@@ -1971,8 +2136,7 @@ async function saveAllSettings() {
     meetingOssAccessKeyId: meetingOssAccessKeyIdInput?.value.trim() || "",
     meetingOssAccessKeySecret: meetingOssAccessKeySecretInput?.value.trim() || "",
     meetingAnalysisModel,
-    meetingAnalysisBaseUrl: meetingAnalysisBaseUrlInput?.value.trim() || "",
-    meetingAnalysisApiKey: meetingAnalysisApiKeyInput?.value.trim() || "",
+    meetingAnalysisProviderFamily: meetingAnalysisProviderSelect.value,
     meetingAnalysisProfiles: appSettings.meetingAnalysisProfiles || {},
     meetingAnalysisContextWindow: Number(meetingAnalysisContextInput?.value) || 128000,
     meetingAnalysisMaxOutput: Number(meetingAnalysisMaxOutputInput?.value) || 8192,
@@ -2005,6 +2169,60 @@ async function runMeetingEnhancedTest(target) {
     if (resultEl) resultEl.textContent = error.message || String(error);
   } finally {
     if (btn) btn.disabled = false;
+  }
+}
+
+async function runProviderConnectionTest(provider, button) {
+  const resultEl = document.querySelector(`[data-provider-test-result="${provider}"]`);
+  button.disabled = true;
+  if (resultEl) resultEl.textContent = "测试中…";
+  try {
+    await saveAllSettings();
+    if (typeof window.mimoInput.testProviderConnection !== "function") {
+      throw new Error("当前版本暂不支持供应商连接测试。");
+    }
+    const result = await window.mimoInput.testProviderConnection({ provider });
+    if (!result?.ok) throw new Error(result?.error?.message || "连接测试失败。");
+    if (result.provider && result.provider !== provider) throw new Error("连接测试结果与供应商不匹配。");
+    const latency = Number.isFinite(result.latencyMs) ? ` · ${result.latencyMs}ms` : "";
+    if (resultEl) resultEl.textContent = `可用${latency}`;
+  } catch (error) {
+    if (resultEl) resultEl.textContent = error.message || String(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function refreshOpenAiModelCatalog() {
+  for (const button of providerModelRefreshButtons) button.disabled = true;
+  setOpenAiCatalogStatus("正在获取模型列表…");
+  try {
+    appSettings = await window.mimoInput.saveSettings({
+      providerConnections: collectProviderConnections()
+    });
+    if (typeof window.mimoInput.listProviderModels !== "function") {
+      throw new Error("当前版本暂不支持自动获取模型列表。");
+    }
+    const result = await window.mimoInput.listProviderModels({ provider: "openai" });
+    if (!result?.ok) throw new Error(result?.error?.message || "获取模型列表失败。");
+    const models = normalizeModelCatalog(result.models);
+    if (!models.length) throw new Error("接口没有返回可用的模型 ID。");
+    appSettings = await window.mimoInput.saveSettings({
+      openaiModelCatalog: models,
+      openaiModelCatalogUpdatedAt: new Date().toISOString()
+    });
+    syncSavedModelOptions(cleanerModelPresetSelect, appSettings.cleanerProfiles, CLEANER_MODEL_PRESETS);
+    syncSavedModelOptions(
+      meetingAnalysisModelPresetSelect,
+      appSettings.meetingAnalysisProfiles,
+      MEETING_ANALYSIS_MODEL_PRESETS
+    );
+    const latency = Number.isFinite(result.latencyMs) ? ` · ${result.latencyMs}ms` : "";
+    setOpenAiCatalogStatus(`已获取 ${models.length} 个模型${latency}`);
+  } catch (error) {
+    setOpenAiCatalogStatus(error.message || String(error));
+  } finally {
+    for (const button of providerModelRefreshButtons) button.disabled = false;
   }
 }
 
@@ -2084,14 +2302,11 @@ meetingFunAsrModelPresetSelect.addEventListener("change", () => handleMeetingPro
 meetingAnalysisModelPresetSelect.addEventListener("change", () => handleMeetingProfileModelChange("analysis"));
 meetingQwenModelInput.addEventListener("input", () => handleMeetingCustomProfileInput("qwen"));
 meetingFileAsrModelInput?.addEventListener("input", () => handleMeetingCustomProfileInput("file-asr"));
-meetingFileAsrProviderSelect?.addEventListener("change", () => {
-  const provider = meetingFileAsrProviderSelect.value;
-  if (meetingFileAsrBaseUrlInput && !meetingFileAsrBaseUrlInput.value.trim()) {
-    meetingFileAsrBaseUrlInput.value = defaultMeetingFileAsrBaseUrl(provider);
-  }
-});
 meetingFunAsrModelInput.addEventListener("input", () => handleMeetingCustomProfileInput("fun"));
 meetingAnalysisModelInput.addEventListener("input", () => handleMeetingCustomProfileInput("analysis"));
+meetingAnalysisProviderSelect.addEventListener("change", () => {
+  meetingAnalysisCustomConnectionFields.hidden = meetingAnalysisProviderSelect.value !== "custom";
+});
 for (const button of settingsTabButtons) {
   button.addEventListener("click", () => setSettingsTab(button.dataset.settingsTab));
 }
@@ -2100,6 +2315,14 @@ for (const button of secretToggleButtons) {
 }
 for (const button of secretCopyButtons) {
   button.addEventListener("click", () => copySecretValue(button));
+}
+for (const button of providerConnectionTestButtons) {
+  button.addEventListener("click", () => {
+    runProviderConnectionTest(button.dataset.providerConnectionTest, button).catch(() => {});
+  });
+}
+for (const button of providerModelRefreshButtons) {
+  button.addEventListener("click", () => refreshOpenAiModelCatalog().catch(() => {}));
 }
 stableModeBtn.addEventListener("click", () => setTranscriptionMode("stable"));
 fastModeBtn.addEventListener("click", () => setTranscriptionMode("fast"));

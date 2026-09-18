@@ -1,5 +1,7 @@
 "use strict";
 
+const { resolveProviderConnection } = require("../../settings/provider-connections");
+
 const DEFAULT_MIMO_BASE_URL = "https://api.xiaomimimo.com/v1";
 const DEFAULT_QWEN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const DEFAULT_FUN_BASE_URL = "https://dashscope.aliyuncs.com/api/v1";
@@ -75,19 +77,29 @@ function resolveMeetingFileAsrCredentials({ env = process.env, settings = {} } =
     firstNonEmpty(profile.provider, s.meetingFileAsrProvider, env.OVI_MEETING_FILE_ASR_PROVIDER),
     modelId
   );
-  const apiKey = firstNonEmpty(profile.apiKey, s.meetingFileAsrApiKey, env.OVI_MEETING_FILE_ASR_API_KEY);
+  const operation = provider === "qwen3-asr" ? "compatible" : provider === "fun-asr" ? "rest" : "default";
+  const connection = resolveProviderConnection(s, {
+    modelId,
+    provider,
+    operation,
+    fallback: {
+      apiKey: firstNonEmpty(profile.apiKey, s.meetingFileAsrApiKey, env.OVI_MEETING_FILE_ASR_API_KEY),
+      baseUrl: firstNonEmpty(
+        profile.baseUrl,
+        s.meetingFileAsrBaseUrl,
+        env.OVI_MEETING_FILE_ASR_BASE_URL,
+        defaultBaseUrl(provider)
+      )
+    }
+  });
+  const apiKey = connection.apiKey;
   if (!apiKey) {
     const error = new Error("文件转写 ASR API Key 未配置，请在会议设置中填写当前文件 ASR 模型的 Key");
     error.code = "meeting_file_asr_credentials_missing";
     throw error;
   }
 
-  const baseUrlRaw = firstNonEmpty(
-    profile.baseUrl,
-    s.meetingFileAsrBaseUrl,
-    env.OVI_MEETING_FILE_ASR_BASE_URL,
-    defaultBaseUrl(provider)
-  );
+  const baseUrlRaw = connection.baseUrl;
   const baseUrl =
     provider === "qwen3-asr"
       ? normalizeQwenBaseUrl(baseUrlRaw)

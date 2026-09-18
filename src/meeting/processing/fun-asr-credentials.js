@@ -1,5 +1,7 @@
 "use strict";
 
+const { resolveProviderConnection } = require("../../settings/provider-connections");
+
 /**
  * Runtime-only Fun-ASR credentials for meeting enhanced mode.
  * Never persist resolved values. Do NOT fall back to meetingQwenApiKey.
@@ -54,20 +56,29 @@ function normalizeFunRestBaseUrl(baseUrl) {
  */
 function resolveMeetingFunAsrCredentials({ env = process.env, settings = {} } = {}) {
   const s = settings && typeof settings === "object" ? settings : {};
-  const apiKey = firstNonEmpty(
-    s.meetingFunAsrApiKey,
-    env.OVI_MEETING_FUN_ASR_API_KEY,
-    env.DASHSCOPE_API_KEY,
-    env.FUN_ASR_API_KEY
-  );
-  const baseUrl = normalizeFunRestBaseUrl(
-    firstNonEmpty(s.meetingFunAsrBaseUrl, env.OVI_MEETING_FUN_ASR_BASE_URL, DEFAULT_FUN_REST)
-  );
   const modelId = firstNonEmpty(
     s.meetingFunAsrModel,
     env.OVI_MEETING_FUN_ASR_MODEL,
     DEFAULT_FUN_MODEL
   );
+  const profile = s.meetingFunAsrProfiles?.[modelId] || {};
+  const connection = resolveProviderConnection(s, {
+    modelId,
+    provider: "fun-asr",
+    operation: "rest",
+    fallback: {
+      apiKey: firstNonEmpty(
+        profile.apiKey,
+        s.meetingFunAsrApiKey,
+        env.OVI_MEETING_FUN_ASR_API_KEY,
+        env.DASHSCOPE_API_KEY,
+        env.FUN_ASR_API_KEY
+      ),
+      baseUrl: firstNonEmpty(profile.baseUrl, s.meetingFunAsrBaseUrl, env.OVI_MEETING_FUN_ASR_BASE_URL, DEFAULT_FUN_REST)
+    }
+  });
+  const apiKey = connection.apiKey;
+  const baseUrl = normalizeFunRestBaseUrl(connection.baseUrl);
   if (!apiKey) {
     const error = new Error(
       "Meeting Fun-ASR API key not configured. Set OVI_MEETING_FUN_ASR_API_KEY or DASHSCOPE_API_KEY."

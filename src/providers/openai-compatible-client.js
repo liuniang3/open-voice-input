@@ -1,3 +1,5 @@
+const { normalizeApiStyle } = require("../settings/provider-connections");
+
 function normalizeBaseUrl(url, fallback) {
   const normalized = String(url || fallback || "").replace(/\/+$/, "");
   try {
@@ -19,6 +21,7 @@ function createOpenAiCompatibleClient({
   apiKey,
   baseUrl,
   model,
+  apiStyle = "chat-completions",
   requestTimeoutMs = 60000,
   headerName = "Authorization",
   headerValuePrefix = "Bearer ",
@@ -36,6 +39,10 @@ function createOpenAiCompatibleClient({
 
   function resolveModel() {
     return resolveMaybeFunction(model) || "";
+  }
+
+  function resolveApiStyle() {
+    return normalizeApiStyle(resolveMaybeFunction(apiStyle));
   }
 
   function resolveRequestTimeoutMs() {
@@ -82,31 +89,35 @@ function createOpenAiCompatibleClient({
 
     try {
       controller.signal.throwIfAborted();
-      const response = await fetchFn(`${resolveBaseUrl()}/chat/completions`, {
+      const style = resolveApiStyle();
+      const endpoint = style === "responses" ? "responses" : "chat/completions";
+      const response = await fetchFn(`${resolveBaseUrl()}/${endpoint}`, {
         method: "POST",
         signal: controller.signal,
         headers,
-        body: JSON.stringify({
-          model: resolveModel(),
-          messages,
-          max_completion_tokens: maxTokens,
-          temperature: 0,
-          top_p: 0.1,
-          stream: false,
-          ...extraBody
-        })
+        body: JSON.stringify(style === "responses"
+          ? buildResponsesRequest(resolveModel(), messages, maxTokens, extraBody)
+          : {
+              model: resolveModel(),
+              messages,
+              max_completion_tokens: maxTokens,
+              temperature: 0,
+              top_p: 0.1,
+              stream: false,
+              ...extraBody
+            })
       });
 
       controller.signal.throwIfAborted();
       const bodyText = await response.text();
       controller.signal.throwIfAborted();
       if (!response.ok) {
-        throw new Error(
-          `OpenAI-compatible API ${response.status} at ${resolveBaseUrl()}: ${String(bodyText).slice(0, 500)}`
-        );
+        throw new Error(`OpenAI-compatible API ${response.status} at ${resolveBaseUrl()}.`);
       }
 
-      const parsed = parseChatCompletionBody(bodyText);
+      const parsed = style === "responses"
+        ? parseResponsesBody(bodyText)
+        : parseChatCompletionBody(bodyText);
       const message = parsed.message;
       return {
         content: String(message.content || "").trim(),
@@ -146,8 +157,78 @@ function createOpenAiCompatibleClient({
   return {
     requestChat,
     resolveApiKey,
+    resolveApiStyle,
     resolveModel,
     resolveBaseUrl
+  };
+}
+
+function buildResponsesRequest(model, messages, maxTokens, extraBody) {
+  const extras = { ...(extraBody && typeof extraBody === "object" ? extraBody : {}) };
+  const reasoningEffort = extras.reasoning_effort;
+  delete extras.reasoning_effort;
+  if (reasoningEffort && !extras.reasoning) extras.reasoning = { effort: reasoningEffort };
+  return {
+    model,
+    input: Array.isArray(messages) ? messages : [],
+    max_output_tokens: maxTokens,
+    stream: false,
+    ...extras
+  };
+}
+
+function parseResponsesBody(bodyText) {
+  const text = String(bodyText || "").trim();
+  if (!text) throw new SyntaxError("Empty OpenAI Responses API response body.");
+  if (!/^data\s*:/im.test(text)) return parseCompletedResponse(JSON.parse(text));
+
+  const { chunks } = parseServerSentEvents(text);
+  const deltas = [];
+  let completedResponse = null;
+  let terminalType = "";
+  for (const chunk of chunks) {
+    const type = String(chunk?.type || "");
+    if (type === "response.output_text.delta" && chunk.delta != null) deltas.push(String(chunk.delta));
+    if (type === "response.completed") completedResponse = chunk.response || chunk;
+    if (["response.incomplete", "response.failed", "error"].includes(type)) terminalType = type;
+  }
+  if (terminalType || !completedResponse) {
+    throw Object.assign(new Error("Model response ended before completion."), { code: "response_incomplete" });
+  }
+  const parsed = parseCompletedResponse(completedResponse);
+  if (!parsed.message.content && deltas.length) parsed.message.content = deltas.join("").trim();
+  return parsed;
+}
+
+function parseCompletedResponse(body) {
+  if (body?.error) {
+    throw Object.assign(new Error("OpenAI Responses API returned an error."), { code: "response_failed" });
+  }
+  const status = String(body?.status || "").toLowerCase();
+  if (status !== "completed") {
+    throw Object.assign(new Error("Model response ended before completion."), { code: "response_incomplete" });
+  }
+  const contentParts = [];
+  const reasoningParts = [];
+  if (typeof body.output_text === "string") contentParts.push(body.output_text);
+  for (const item of typeof body.output_text === "string" ? [] : (Array.isArray(body?.output) ? body.output : [])) {
+    for (const content of Array.isArray(item?.content) ? item.content : []) {
+      if (content?.type === "output_text" && content.text != null) contentParts.push(String(content.text));
+      if (["reasoning_text", "summary_text"].includes(content?.type) && content.text != null) {
+        reasoningParts.push(String(content.text));
+      }
+    }
+    for (const summary of Array.isArray(item?.summary) ? item.summary : []) {
+      if (summary?.text != null) reasoningParts.push(String(summary.text));
+    }
+  }
+  return {
+    body,
+    finishReason: "stop",
+    message: {
+      content: contentParts.join("").trim(),
+      reasoning_content: reasoningParts.join("\n").trim()
+    }
   };
 }
 
@@ -244,7 +325,9 @@ function looksLikeJsonPayload(value) {
 
 module.exports = {
   createOpenAiCompatibleClient,
+  buildResponsesRequest,
   normalizeBaseUrl,
   parseChatCompletionBody,
+  parseResponsesBody,
   parseServerSentEventChunks
 };

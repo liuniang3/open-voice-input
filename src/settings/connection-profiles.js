@@ -1,6 +1,18 @@
 "use strict";
 
 const { isSupportedAliMeetingModel } = require("../providers/asr/ali-meeting-stream");
+const {
+  API_STYLES,
+  DEFAULT_CONNECTIONS,
+  PROVIDER_FAMILIES,
+  apiStyleFrom,
+  connectionBaseUrl,
+  mergeProviderConnections,
+  normalizeApiStyle,
+  normalizeProviderBaseUrl,
+  normalizeProviderConnection,
+  providerFamilyFor
+} = require("./provider-connections");
 
 const MIMO_ASR_MODEL = "mimo-v2.5-asr";
 const QWEN_ASR_MODEL = "qwen3-asr-flash";
@@ -78,9 +90,16 @@ function defaultAsrProfile(model) {
 function defaultCleanerProfile(model) {
   const id = trimStr(model) || "mimo-v2.5";
   if (id === "mimo-v2.5" || id === "mimo-v2.5-pro") {
-    return { provider: "mimo", baseUrl: MIMO_BASE_URL, apiKey: "" };
+    return { provider: "mimo", baseUrl: MIMO_BASE_URL, apiKey: "", apiStyle: API_STYLES.CHAT_COMPLETIONS };
   }
-  return { provider: "openai-compatible", baseUrl: "https://api.openai.com/v1", apiKey: "" };
+  return {
+    provider: "openai-compatible",
+    baseUrl: "https://api.openai.com/v1",
+    apiKey: "",
+    apiStyle: providerFamilyFor(id) === PROVIDER_FAMILIES.OPENAI
+      ? API_STYLES.RESPONSES
+      : API_STYLES.CHAT_COMPLETIONS
+  };
 }
 
 function defaultMeetingQwenProfile(model) {
@@ -134,6 +153,9 @@ function defaultMeetingAnalysisProfile(model) {
     provider: isMimo ? "mimo" : "openai-compatible",
     baseUrl: isMimo ? MIMO_BASE_URL : "https://api.openai.com/v1",
     apiKey: "",
+    apiStyle: isMimo ? API_STYLES.CHAT_COMPLETIONS : (
+      providerFamilyFor(id) === PROVIDER_FAMILIES.OPENAI ? API_STYLES.RESPONSES : API_STYLES.CHAT_COMPLETIONS
+    ),
     model: id,
     contextWindow: 128000,
     maxOutput: 8192,
@@ -148,6 +170,159 @@ function ensureProfilesMap(value) {
 
 function profileHasCredentials(profile) {
   return Boolean(trimStr(profile?.apiKey) || trimStr(profile?.baseUrl));
+}
+
+const PROFILE_GROUPS = Object.freeze([
+  { map: "asrProfiles", active: "asrModel", provider: "asrProvider", operation: asrOperation },
+  { map: "cleanerProfiles", active: "cleanerModel", provider: "cleanerProvider", operation: compatibleOperation },
+  { map: "meetingQwenProfiles", active: "meetingQwenModel", provider: null, operation: meetingQwenOperation },
+  { map: "meetingRealtimeProfiles", active: "meetingRealtimeModel", provider: null, operation: streamingOperation },
+  { map: "meetingFileAsrProfiles", active: "meetingFileAsrModel", provider: "meetingFileAsrProvider", operation: asrOperation },
+  { map: "meetingFunAsrProfiles", active: "meetingFunAsrModel", provider: null, operation: restOperation },
+  { map: "meetingAnalysisProfiles", active: "meetingAnalysisModel", provider: null, operation: compatibleOperation }
+]);
+
+function asrOperation(modelId, family) {
+  if (family !== PROVIDER_FAMILIES.ALIYUN) return "default";
+  return /fun-asr/i.test(modelId) ? "rest" : "compatible";
+}
+
+function compatibleOperation(_modelId, family) {
+  return family === PROVIDER_FAMILIES.ALIYUN ? "compatible" : "default";
+}
+
+function meetingQwenOperation(modelId, family) {
+  if (family !== PROVIDER_FAMILIES.ALIYUN) return "default";
+  return isSupportedAliMeetingModel(modelId) ? "streaming" : "compatible";
+}
+
+function streamingOperation(_modelId, family) {
+  return family === PROVIDER_FAMILIES.ALIYUN ? "streaming" : "default";
+}
+
+function restOperation(_modelId, family) {
+  return family === PROVIDER_FAMILIES.ALIYUN ? "rest" : "default";
+}
+
+function inferredProvider(group, modelId, profile, settings) {
+  if (trimStr(profile?.provider)) return trimStr(profile.provider);
+  if (group.provider && trimStr(settings[group.provider])) return trimStr(settings[group.provider]);
+  if (group.map === "meetingQwenProfiles" || group.map === "meetingRealtimeProfiles") return "aliyun-streaming";
+  if (group.map === "meetingFunAsrProfiles") return "fun-asr";
+  return "";
+}
+
+function profileCandidates(settings, { activeOnly = false } = {}) {
+  const candidates = [];
+  for (const group of PROFILE_GROUPS) {
+    const profiles = settings[group.map] || {};
+    const activeModel = trimStr(settings[group.active]);
+    for (const [modelId, profileValue] of Object.entries(profiles)) {
+      if (activeOnly && modelId !== activeModel) continue;
+      const profile = cloneProfile(profileValue);
+      const provider = inferredProvider(group, modelId, profile, settings);
+      const family = providerFamilyFor(modelId, provider);
+      if (!family) continue;
+      const rawStyle = profile.apiStyle ?? profile.wireApi ?? profile.wire_api;
+      candidates.push({
+        family,
+        modelId,
+        active: modelId === activeModel,
+        apiKey: trimStr(profile.apiKey),
+        baseUrl: trimStr(profile.baseUrl),
+        apiStyle: rawStyle == null ? "" : normalizeApiStyle(rawStyle),
+        operation: group.operation(modelId, family)
+      });
+    }
+  }
+  return candidates;
+}
+
+function candidateScore(candidate) {
+  const defaultRoot = normalizeProviderBaseUrl(candidate.family, DEFAULT_CONNECTIONS[candidate.family]?.baseUrl);
+  const root = candidate.baseUrl ? normalizeProviderBaseUrl(candidate.family, candidate.baseUrl) : "";
+  const customEndpoint = Boolean(root && root !== defaultRoot);
+  return (candidate.active ? 100 : 0)
+    + (candidate.apiKey ? 80 : 0)
+    + (customEndpoint ? 300 : 0)
+    + (candidate.apiKey && customEndpoint ? 500 : 0)
+    + (candidate.apiStyle === API_STYLES.RESPONSES ? 40 : 0);
+}
+
+function bestCandidate(candidates, family) {
+  return candidates
+    .filter(candidate => candidate.family === family)
+    .map((candidate, index) => ({ candidate, index, score: candidateScore(candidate) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)[0]?.candidate;
+}
+
+function connectionFromCandidate(family, candidate) {
+  return normalizeProviderConnection(family, {
+    apiKey: candidate?.apiKey,
+    baseUrl: candidate?.baseUrl,
+    apiStyle: candidate?.apiStyle || DEFAULT_CONNECTIONS[family]?.apiStyle
+  });
+}
+
+function initializeProviderConnections(settings) {
+  const supplied = settings.providerConnections && typeof settings.providerConnections === "object"
+    ? settings.providerConnections
+    : {};
+  const candidates = profileCandidates(settings);
+  const connections = {};
+  for (const family of Object.values(PROVIDER_FAMILIES)) {
+    const raw = supplied[family] && typeof supplied[family] === "object" ? supplied[family] : null;
+    const seed = bestCandidate(candidates, family);
+    if (!raw) {
+      connections[family] = connectionFromCandidate(family, seed);
+      continue;
+    }
+    const normalized = normalizeProviderConnection(family, raw);
+    const seedConnection = connectionFromCandidate(family, seed);
+    const rawRoot = normalizeProviderBaseUrl(family, raw.baseUrl);
+    const defaultRoot = normalizeProviderBaseUrl(family, DEFAULT_CONNECTIONS[family]?.baseUrl);
+    const seedRoot = normalizeProviderBaseUrl(family, seed?.baseUrl);
+    if (seed?.apiKey && seedRoot && seedRoot !== defaultRoot
+        && (!trimStr(raw.apiKey) || trimStr(raw.apiKey) === seed.apiKey)
+        && (!rawRoot || rawRoot === defaultRoot)) {
+      normalized.baseUrl = seedConnection.baseUrl;
+    }
+    if (!trimStr(raw.apiKey) && seed?.apiKey) normalized.apiKey = seed.apiKey;
+    if (raw.apiStyle == null && raw.wireApi == null && raw.wire_api == null && seed?.apiStyle) {
+      normalized.apiStyle = seed.apiStyle;
+    }
+    connections[family] = normalized;
+  }
+  settings.providerConnections = connections;
+  settings._providerConnectionsMigrated = true;
+}
+
+function normalizeExistingProviderConnections(settings) {
+  const connections = {};
+  for (const family of Object.values(PROVIDER_FAMILIES)) {
+    connections[family] = normalizeProviderConnection(family, settings.providerConnections?.[family]);
+  }
+  settings.providerConnections = connections;
+}
+
+function mirrorProviderConnectionsToProfiles(settings) {
+  for (const group of PROFILE_GROUPS) {
+    const profiles = settings[group.map] || {};
+    for (const [modelId, profileValue] of Object.entries(profiles)) {
+      const profile = cloneProfile(profileValue);
+      const provider = inferredProvider(group, modelId, profile, settings);
+      const family = providerFamilyFor(modelId, provider);
+      const connection = family ? settings.providerConnections?.[family] : null;
+      if (!connection) continue;
+      profiles[modelId] = {
+        ...profile,
+        apiKey: connection.apiKey,
+        baseUrl: connectionBaseUrl(family, connection, group.operation(modelId, family)),
+        apiStyle: connection.apiStyle
+      };
+    }
+    settings[group.map] = profiles;
+  }
 }
 
 function migrateConnectionProfiles(raw) {
@@ -184,7 +359,11 @@ function migrateConnectionProfiles(raw) {
     next.asrProfiles[asrModel] = profile;
   }
 
-  if (!trimStr(next.asrProfiles[asrModel].apiKey) && trimStr(next.apiKey)) {
+  const legacyCleanerModel = trimStr(next.cleanerModel) || trimStr(next.model) || "mimo-v2.5";
+  const legacyAsrFamily = providerFamilyFor(asrModel, next.asrProfiles[asrModel]?.provider);
+  const legacyCleanerFamily = providerFamilyFor(legacyCleanerModel, next.cleanerProvider);
+  if (legacyAsrFamily && legacyAsrFamily === legacyCleanerFamily
+      && !trimStr(next.asrProfiles[asrModel].apiKey) && trimStr(next.apiKey)) {
     next.asrProfiles[asrModel] = {
       ...next.asrProfiles[asrModel],
       apiKey: trimStr(next.apiKey)
@@ -203,13 +382,17 @@ function migrateConnectionProfiles(raw) {
       ...base,
       provider: trimStr(next.cleanerProvider) || base.provider,
       baseUrl: trimStr(next.cleanerBaseUrl) || base.baseUrl,
-      apiKey: trimStr(next.cleanerApiKey) || ""
+      apiKey: trimStr(next.cleanerApiKey) || "",
+      apiStyle: normalizeApiStyle(next.cleanerApiStyle || next.cleanerWireApi || base.apiStyle)
     };
     migrated.push("cleaner:" + cleanerModel);
   } else {
     const profile = cloneProfile(next.cleanerProfiles[cleanerModel]);
     if (!trimStr(profile.apiKey) && trimStr(next.cleanerApiKey)) profile.apiKey = trimStr(next.cleanerApiKey);
     if (!trimStr(profile.baseUrl) && trimStr(next.cleanerBaseUrl)) profile.baseUrl = trimStr(next.cleanerBaseUrl);
+    if (profile.apiStyle == null && (next.cleanerApiStyle || next.cleanerWireApi)) {
+      profile.apiStyle = normalizeApiStyle(next.cleanerApiStyle || next.cleanerWireApi);
+    }
     next.cleanerProfiles[cleanerModel] = profile;
   }
 
@@ -291,6 +474,9 @@ function migrateConnectionProfiles(raw) {
       ...base,
       baseUrl: trimStr(next.meetingAnalysisBaseUrl) || base.baseUrl,
       apiKey: trimStr(next.meetingAnalysisApiKey) || "",
+      apiStyle: normalizeApiStyle(
+        next.meetingAnalysisApiStyle || next.meetingAnalysisWireApi || next.wire_api || base.apiStyle
+      ),
       model: analysisModel,
       contextWindow: Number(next.meetingAnalysisContextWindow) || base.contextWindow,
       maxOutput: Number(next.meetingAnalysisMaxOutput) || base.maxOutput,
@@ -302,6 +488,11 @@ function migrateConnectionProfiles(raw) {
     const profile = cloneProfile(next.meetingAnalysisProfiles[analysisModel]);
     if (!trimStr(profile.apiKey) && trimStr(next.meetingAnalysisApiKey)) profile.apiKey = trimStr(next.meetingAnalysisApiKey);
     if (!trimStr(profile.baseUrl) && trimStr(next.meetingAnalysisBaseUrl)) profile.baseUrl = trimStr(next.meetingAnalysisBaseUrl);
+    if (profile.apiStyle == null && (next.meetingAnalysisApiStyle || next.meetingAnalysisWireApi || next.wire_api)) {
+      profile.apiStyle = normalizeApiStyle(
+        next.meetingAnalysisApiStyle || next.meetingAnalysisWireApi || next.wire_api
+      );
+    }
     if (!Number(profile.contextWindow) && Number(next.meetingAnalysisContextWindow)) profile.contextWindow = Number(next.meetingAnalysisContextWindow);
     if (!Number(profile.maxOutput) && Number(next.meetingAnalysisMaxOutput)) profile.maxOutput = Number(next.meetingAnalysisMaxOutput);
     if (!trimStr(profile.reasoning) && trimStr(next.meetingAnalysisReasoning)) profile.reasoning = trimStr(next.meetingAnalysisReasoning);
@@ -309,6 +500,8 @@ function migrateConnectionProfiles(raw) {
     next.meetingAnalysisProfiles[analysisModel] = profile;
   }
 
+  initializeProviderConnections(next);
+  mirrorProviderConnectionsToProfiles(next);
   applyActiveProfilesToTopLevel(next);
 
   if (trimStr(next.apiKey) || trimStr(next.baseUrl)) {
@@ -346,6 +539,7 @@ function applyActiveProfilesToTopLevel(settings) {
   next.cleanerProvider = trimStr(cleaner.provider) || next.cleanerProvider || "mimo";
   next.cleanerBaseUrl = trimStr(cleaner.baseUrl) || "";
   next.cleanerApiKey = trimStr(cleaner.apiKey) || "";
+  next.cleanerApiStyle = apiStyleFrom(cleaner);
 
   const mqModel = trimStr(next.meetingQwenModel) || MEETING_LIVE_MODEL;
   const mq = next.meetingQwenProfiles?.[mqModel] || defaultMeetingQwenProfile(mqModel);
@@ -367,6 +561,7 @@ function applyActiveProfilesToTopLevel(settings) {
   const ma = next.meetingAnalysisProfiles?.[maModel] || defaultMeetingAnalysisProfile(maModel);
   next.meetingAnalysisBaseUrl = trimStr(ma.baseUrl) || "";
   next.meetingAnalysisApiKey = trimStr(ma.apiKey) || "";
+  next.meetingAnalysisApiStyle = apiStyleFrom(ma);
   next.meetingAnalysisContextWindow = Number(ma.contextWindow) || 128000;
   next.meetingAnalysisMaxOutput = Number(ma.maxOutput) || 8192;
   next.meetingAnalysisReasoning = trimStr(ma.reasoning) || "";
@@ -411,6 +606,9 @@ function ensureConnectionProfiles(value) {
   next.meetingAnalysisModel = ma;
   if (!next.meetingAnalysisProfiles[ma]) next.meetingAnalysisProfiles[ma] = defaultMeetingAnalysisProfile(ma);
 
+  if (!next._providerConnectionsMigrated) initializeProviderConnections(next);
+  else normalizeExistingProviderConnections(next);
+  mirrorProviderConnectionsToProfiles(next);
   return applyActiveProfilesToTopLevel(next);
 }
 
@@ -426,6 +624,12 @@ module.exports = {
   MEETING_FILE_ASR_PRESETS,
   MEETING_FUN_PRESETS,
   MEETING_ANALYSIS_PRESETS,
+  API_STYLES,
+  PROVIDER_FAMILIES,
+  connectionBaseUrl,
+  mergeProviderConnections,
+  normalizeApiStyle,
+  providerFamilyFor,
   defaultAsrProfile,
   defaultCleanerProfile,
   defaultMeetingQwenProfile,

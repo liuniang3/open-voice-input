@@ -8,6 +8,7 @@ const { createMimoCleanerProvider } = require("./cleaner/mimo-cleaner-provider")
 const { createOpenAiCompatibleCleanerProvider } = require("./cleaner/openai-compatible-cleaner-provider");
 const { createMimoClient } = require("./mimo-client");
 const { createOpenAiCompatibleClient, normalizeBaseUrl } = require("./openai-compatible-client");
+const { resolveProviderConnection } = require("../settings/provider-connections");
 
 const QWEN_ASR_OPENAI_MODEL = "qwen3-asr-flash";
 const QWEN_ASR_OPENAI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -19,11 +20,17 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   const mimoClient = createMimoClient({
     getSettings: () => {
       const settings = readSettings();
+      const model = settings.asrModel || "mimo-v2.5-asr";
+      const connection = resolveProviderConnection(settings, {
+        modelId: model,
+        provider: "mimo",
+        fallback: { apiKey: settings.asrApiKey, baseUrl: settings.asrBaseUrl }
+      });
       return {
         ...settings,
-        apiKey: settings.asrApiKey || "",
-        baseUrl: settings.asrBaseUrl || "",
-        model: settings.asrModel || "mimo-v2.5-asr"
+        apiKey: connection.apiKey,
+        baseUrl: connection.baseUrl,
+        model
       };
     },
     useEnvironmentFallback: false
@@ -31,11 +38,17 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   const mimoCleanerClient = createMimoClient({
     getSettings: () => {
       const settings = readSettings();
+      const model = settings.cleanerModel || settings.model || "mimo-v2.5";
+      const connection = resolveProviderConnection(settings, {
+        modelId: model,
+        provider: "mimo",
+        fallback: { apiKey: settings.cleanerApiKey, baseUrl: settings.cleanerBaseUrl }
+      });
       return {
         ...settings,
-        apiKey: settings.cleanerApiKey || "",
-        baseUrl: settings.cleanerBaseUrl || "",
-        model: settings.cleanerModel || settings.model || "mimo-v2.5"
+        apiKey: connection.apiKey,
+        baseUrl: connection.baseUrl,
+        model
       };
     },
     useEnvironmentFallback: false
@@ -50,6 +63,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     apiKey: resolveCleanerApiKey,
     baseUrl: resolveCleanerBaseUrl,
     model: resolveCleanerModel,
+    apiStyle: resolveCleanerApiStyle,
     requestTimeoutMs: resolveRequestTimeoutMs
   });
   const asrProviders = providerOverrides.asrProviders || {
@@ -239,7 +253,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
         { role: "system", content: "Return exactly {\"text\":\"ok\"}." },
         { role: "user", content: "ok" }
       ];
-      if (settings.cleanerProvider === "openai-compatible") {
+      if (["openai", "openai-compatible"].includes(settings.cleanerProvider)) {
         await openAiCleanerClient.requestChat(messages, { maxTokens: 32 });
       } else {
         await mimoCleanerClient.requestChat(messages, { maxTokens: 32, model: resolveCleanerModel() });
@@ -268,7 +282,8 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   }
 
   function resolveCleanerProvider(settings) {
-    return cleanerProviders[settings.cleanerProvider] || cleanerProviders.mimo;
+    const provider = settings.cleanerProvider === "openai" ? "openai-compatible" : settings.cleanerProvider;
+    return cleanerProviders[provider] || cleanerProviders.mimo;
   }
 
   function resolveApiKey() {
@@ -290,12 +305,26 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
 
   function resolveDashScopeAsrApiKey() {
     const settings = readSettings();
-    return settings.asrApiKey || process.env.QWEN_ASR_API_KEY || process.env.DASHSCOPE_API_KEY || "";
+    return resolveProviderConnection(settings, {
+      modelId: settings.asrModel,
+      provider: settings.asrProvider,
+      operation: settings.asrProvider === "fun-asr" ? "rest" : "compatible",
+      fallback: { apiKey: settings.asrApiKey || process.env.QWEN_ASR_API_KEY || process.env.DASHSCOPE_API_KEY }
+    }).apiKey;
   }
 
   function resolveQwenAsrBaseUrl() {
     const settings = readSettings();
-    return normalizeBaseUrl(settings.asrBaseUrl || process.env.QWEN_ASR_BASE_URL || process.env.DASHSCOPE_BASE_URL, QWEN_ASR_OPENAI_BASE_URL);
+    const connection = resolveProviderConnection(settings, {
+      modelId: settings.asrModel,
+      provider: "qwen3-asr",
+      operation: "compatible",
+      fallback: {
+        apiKey: settings.asrApiKey || process.env.QWEN_ASR_API_KEY || process.env.DASHSCOPE_API_KEY,
+        baseUrl: settings.asrBaseUrl || process.env.QWEN_ASR_BASE_URL || process.env.DASHSCOPE_BASE_URL || QWEN_ASR_OPENAI_BASE_URL
+      }
+    });
+    return normalizeBaseUrl(connection.baseUrl, QWEN_ASR_OPENAI_BASE_URL);
   }
 
   function resolveQwenAsrModel() {
@@ -304,7 +333,16 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
 
   function resolveFunAsrBaseUrl() {
     const settings = readSettings();
-    return normalizeBaseUrl(settings.asrBaseUrl || process.env.FUN_ASR_BASE_URL || process.env.DASHSCOPE_BASE_URL, FUN_ASR_REST_BASE_URL);
+    const connection = resolveProviderConnection(settings, {
+      modelId: settings.asrModel,
+      provider: "fun-asr",
+      operation: "rest",
+      fallback: {
+        apiKey: settings.asrApiKey || process.env.DASHSCOPE_API_KEY,
+        baseUrl: settings.asrBaseUrl || process.env.FUN_ASR_BASE_URL || process.env.DASHSCOPE_BASE_URL || FUN_ASR_REST_BASE_URL
+      }
+    });
+    return normalizeBaseUrl(connection.baseUrl, FUN_ASR_REST_BASE_URL);
   }
 
   function resolveFunAsrModel() {
@@ -317,16 +355,33 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
 
   function resolveCleanerApiKey() {
     const settings = readSettings();
-    return settings.cleanerApiKey || process.env.CLEANER_API_KEY || "";
+    return resolveCleanerConnection(settings).apiKey;
   }
 
   function resolveCleanerBaseUrl() {
     const settings = readSettings();
-    return normalizeBaseUrl(settings.cleanerBaseUrl || process.env.CLEANER_BASE_URL, "https://api.openai.com/v1");
+    return normalizeBaseUrl(resolveCleanerConnection(settings).baseUrl, "https://api.openai.com/v1");
+  }
+
+  function resolveCleanerApiStyle() {
+    return resolveCleanerConnection(readSettings()).apiStyle;
+  }
+
+  function resolveCleanerConnection(settings) {
+    return resolveProviderConnection(settings, {
+      modelId: settings.cleanerModel,
+      provider: settings.cleanerProvider,
+      operation: "compatible",
+      fallback: {
+        apiKey: settings.cleanerApiKey || process.env.CLEANER_API_KEY || "",
+        baseUrl: settings.cleanerBaseUrl || process.env.CLEANER_BASE_URL || "https://api.openai.com/v1",
+        apiStyle: settings.cleanerApiStyle
+      }
+    });
   }
 
   function resolveActiveCleanerBaseUrl(settings) {
-    return settings.cleanerProvider === "openai-compatible"
+    return ["openai", "openai-compatible"].includes(settings.cleanerProvider)
       ? resolveCleanerBaseUrl()
       : mimoCleanerClient.resolveBaseUrl(mimoCleanerClient.resolveApiKey());
   }

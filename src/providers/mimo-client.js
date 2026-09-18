@@ -10,11 +10,7 @@ function createMimoClient({ getSettings, useEnvironmentFallback = true, fetchImp
     const settings = getSettings();
     const configured = settings.baseUrl || (useEnvironmentFallback ? process.env.MIMO_BASE_URL : "");
     if (configured) {
-      const normalized = configured.replace(/\/+$/, "");
-      if (!apiKey?.startsWith("tp-") && /token-plan/i.test(normalized)) {
-        return "https://api.xiaomimimo.com/v1";
-      }
-      return normalized;
+      return configured.replace(/\/+$/, "");
     }
     if (apiKey?.startsWith("tp-")) {
       return "https://token-plan-cn.xiaomimimo.com/v1";
@@ -79,7 +75,7 @@ function createMimoClient({ getSettings, useEnvironmentFallback = true, fetchImp
       const bodyText = await response.text();
       controller.signal.throwIfAborted();
       if (!response.ok) {
-        throw new Error(`MiMo API ${response.status} at ${baseUrl}: ${bodyText}`);
+        throw new Error(`MiMo API ${response.status} at ${baseUrl}.`);
       }
 
       const parsed = parseChatCompletionBody(bodyText);

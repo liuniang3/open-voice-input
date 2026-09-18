@@ -17,8 +17,8 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 - 第一阶段已改为可插拔 ASR：优先适配专用 `mimo-v2.5-asr`，并支持 Qwen3-ASR 和 Fun-ASR。
 - Qwen3-ASR 与 Fun-ASR 支持 WebSocket 实时预览；MiMo 使用周期性音频片段预览，最终结果始终由完整录音重新转写。
 - `Stable` 模式将原始 ASR 文本交给 MiMo 或 OpenAI 兼容小模型进行口头词、重复片段和标点清理；`Fast` 模式只执行 ASR。
-- 设置已整合进无边框主界面，并按常规、语音识别、文本清理和会议分栏，不再提供容易串用凭证的“通用凭证”。
-- 短语音 ASR、文本清理、会议 Qwen、会议 Fun-ASR 和会议分析都按模型分别保存 Base URL、API Key 与模型参数；切换模型会恢复对应配置，所有位置都支持预设名称和自定义模型 ID。
+- 设置已整合进无边框主界面，并新增独立的“供应商连接”页。
+- MiMo 全部模型共用一套 MiMo 连接，Qwen/Fun-ASR 共用一套阿里连接，GPT/OpenAI 模型共用一套 OpenAI 连接。OpenAI URL 可以填写 NowCoding 等自定义网关，并可选择 Responses 或 Chat Completions；Grok、GLM 等其他供应商仍按模型独立保存连接。
 - API Key 支持显示、隐藏和一键复制，便于本机检查配置；Key 仍只保存在 `%APPDATA%\\open-voice-input\\settings.json`，不会进入安装包或仓库。
 - 录音统一转换为 16 kHz、单声道、16-bit PCM WAV；长录音会按当前 ASR 供应商上限自动分段、提前转写并缓存，结束后按顺序拼接。
 - 新增独立文件转写工作区：可导入音频或视频、单独选择 ASR 模型、生成校订文本与结构化总结，并导出 Markdown、TXT 或 Word。
@@ -28,7 +28,7 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 
 ## 推荐配置
 
-**会议实时转录**配置 `qwen-audio-3.0-asr-flash-streaming` 或 `fun-asr-realtime`，各自使用匹配地域的 API 地址和 Key。两者走 DashScope `/api-ws/v1/inference` WebSocket 协议；`qwen3-asr-flash-realtime` 属于另一协议，不能在此工作区替代新 Streaming 模型。可选的会后 MiMo 复核使用普通 ASR API，不支持 Token Plan。校订/摘要 LLM 单独选择、单独配置 URL 和 Key，不借用 ASR 凭证。
+**会议实时转录**选择 `qwen-audio-3.0-asr-flash-streaming` 或 `fun-asr-realtime`，只需配置一次阿里根地址和 Key；程序会从同一连接派生兼容、REST 和 `/api-ws/v1/inference` 地址。可选的会后 MiMo 复核使用共享的普通 MiMo 连接。校订/摘要模型使用所属供应商连接，不借用其他供应商凭证。
 
 **短语音输入**仍优先适配专用 `mimo-v2.5-asr` 及普通 MiMo API，也支持 Qwen3-ASR 和 Fun-ASR。此推荐不改变会议工作区的阿里流式默认模型。
 
@@ -189,7 +189,7 @@ ASR 供应商：
 - `MiMo`：通过 MiMo 聊天模型清理文本，可选择 MiMo V2.5 或 MiMo V2.5 Pro。
 - `OpenAI 兼容接口`：通过任意兼容聊天接口清理文本，内置 GPT-5.4 mini 和 Grok 4.5 模型预设，并继续支持自定义模型 ID。
 
-目前综合推荐使用 GPT-5.4 mini。设置中选择 GPT 或 Grok 预设时会自动切换到 OpenAI 兼容清理供应商；选择 MiMo 预设时会切换到 MiMo 清理供应商。每个清洗模型会独立记住供应商、Base URL 和 API Key，切换回来时自动恢复，避免把一个渠道的凭据误用于另一个模型。
+目前综合推荐使用 GPT-5.4 mini。MiMo 的 ASR、清理和复核共用 MiMo 连接；Qwen 与 Fun-ASR 共用阿里连接；GPT 清理和分析共用 OpenAI 连接。OpenAI 连接既可填写官方地址，也可填写 NowCoding 等兼容网关，并选择 Responses 或 Chat Completions。Grok、GLM 等其他兼容模型继续独立保存 URL/Key，避免凭证跨供应商串用。
 
 ## 短语音转写模式
 

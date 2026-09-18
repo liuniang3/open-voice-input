@@ -244,11 +244,31 @@ async function verifyUpgradeBrowser(page, directory) {
   assert.deepEqual(settingsModels, ["qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "fun-asr-realtime-2026-09-18", "__custom__"]);
   assert(!settingsModels.includes("qwen3-asr-flash"));
   assert.equal(await page.locator("#meetingQwenModelPresetSelect").inputValue(), "qwen-audio-3.0-asr-flash-streaming");
+  await page.locator('[data-settings-tab="connections"]').click();
+  assert.equal(await page.locator("#aliyunApiKeyInput").inputValue(), "test-only-live-key");
+  await page.locator("#openaiBaseUrlInput").fill("https://nowcoding.example/v1");
+  await page.locator("#openaiApiStyleSelect").selectOption("chat-completions");
+  await page.locator('[data-settings-tab="meeting"]').click();
   await page.locator("#meetingQwenModelPresetSelect").selectOption("fun-asr-realtime-2026-09-18");
-  assert.equal(await page.locator("#meetingQwenApiKeyInput").inputValue(), "test-only-live-key");
+  assert.equal(await page.locator("#meetingQwenApiKeyInput").count(), 0);
   await page.locator("#meetingQwenModelPresetSelect").selectOption("__custom__");
   await page.locator("#meetingQwenModelInput").fill("fun-asr-realtime-latest");
-  assert.equal(await page.locator("#meetingQwenApiKeyInput").inputValue(), "");
+  await page.locator('[data-settings-tab="connections"]').click();
+  assert.equal(await page.locator("#aliyunApiKeyInput").inputValue(), "test-only-live-key");
+  assert.equal(await page.locator("#openaiBaseUrlInput").inputValue(), "https://nowcoding.example/v1");
+  assert.equal(await page.locator("#openaiApiStyleSelect").inputValue(), "chat-completions");
+  await page.locator('[data-settings-tab="meeting"]').click();
+  await page.locator("#meetingAnalysisModelPresetSelect").selectOption("grok-4.5");
+  assert.equal(await page.locator("#meetingAnalysisProviderSelect").inputValue(), "custom");
+  assert.equal(await page.locator("#meetingAnalysisCustomConnectionFields").isVisible(), true);
+  await page.locator("#meetingAnalysisBaseUrlInput").fill("https://grok.example/v1");
+  await page.locator("#meetingAnalysisApiKeyInput").fill("custom-grok-key");
+  await page.locator("#meetingAnalysisModelPresetSelect").selectOption("gpt-5.5");
+  assert.equal(await page.locator("#meetingAnalysisProviderSelect").inputValue(), "openai-compatible");
+  assert.equal(await page.locator("#meetingAnalysisCustomConnectionFields").isHidden(), true);
+  await page.locator("#meetingAnalysisModelPresetSelect").selectOption("grok-4.5");
+  assert.equal(await page.locator("#meetingAnalysisBaseUrlInput").inputValue(), "https://grok.example/v1");
+  assert.equal(await page.locator("#meetingAnalysisApiKeyInput").inputValue(), "custom-grok-key");
   await page.screenshot({ path: path.join(directory, "meeting-settings-live-models.png") });
 }
 

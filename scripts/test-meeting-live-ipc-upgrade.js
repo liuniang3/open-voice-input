@@ -45,7 +45,7 @@ function deferred() {
 const tests = [];
 const test = (name, run) => tests.push({ name, run });
 
-test("streaming defaults migrate batch choices while preserving each model's credentials", () => {
+test("streaming defaults migrate choices and unify Ali model credentials", () => {
   for (const old of [undefined, "mimo-v2.5-asr", "qwen3-asr-flash", "qwen3-asr-flash-filetrans"]) {
     const saved = { _connectionProfilesMigrated: true, meetingRealtimeModel: old,
       meetingQwenModel: "qwen3-asr-flash", meetingQwenApiKey: "obsolete-active-key",
@@ -57,13 +57,13 @@ test("streaming defaults migrate batch choices while preserving each model's cre
     const next = ensureConnectionProfiles(saved);
     assert.equal(next.meetingRealtimeModel, MEETING_LIVE_MODEL);
     assert.equal(next.asrProfiles[MEETING_LIVE_MODEL].apiKey, "preview-key");
-    assert.equal(next.meetingQwenProfiles["qwen3-asr-flash"].apiKey, "batch-key");
+    assert.equal(next.meetingQwenProfiles["qwen3-asr-flash"].apiKey, "preview-key");
     assert.equal(next.meetingFileAsrProfiles["mimo-v2.5-asr"].apiKey, "review-key");
     assert.equal(next.meetingAnalysisProfiles["gpt-5.4-mini"].apiKey, "summary-key");
     assert.deepEqual(saved, snapshot);
     const switched = ensureConnectionProfiles({ ...next, meetingQwenModel: MEETING_LIVE_MODEL });
-    assert.equal(switched.meetingQwenApiKey, "");
-    assert.equal(switched.meetingQwenProfiles["qwen3-asr-flash"].apiKey, "batch-key");
+    assert.equal(switched.meetingQwenApiKey, "preview-key");
+    assert.equal(switched.meetingQwenProfiles["qwen3-asr-flash"].apiKey, "preview-key");
   }
   const legacy = ensureConnectionProfiles({ meetingQwenApiKey: "old-batch-only" });
   assert.equal(legacy.meetingQwenModel, "qwen3-asr-flash");
@@ -75,55 +75,36 @@ test("streaming defaults migrate batch choices while preserving each model's cre
   assert.equal(ensureConnectionProfiles({ meetingRealtimeModel: "fun-asr-realtime" }).meetingRealtimeModel, "fun-asr-realtime");
 });
 
-test("settings model drafts restore exact-id profiles and never carry a key into a renamed model", () => {
+test("settings renderer prefers the shared provider map and only migrates legacy profiles once", () => {
   const source = fs.readFileSync(path.join(root, "src/renderer/renderer.js"), "utf8");
-  const code = source.slice(source.indexOf("function fillProfileModelSelector("), source.indexOf("function setSettingsTab("));
-  const context = vm.createContext({ appSettings: {
-    asrProfiles: { [MEETING_LIVE_MODEL]: { apiKey: "preview-key", baseUrl: "https://preview.example/v1" } },
-    meetingQwenProfiles: { [MEETING_LIVE_MODEL]: { apiKey: "", baseUrl: "https://blank.example/v1" } },
-    meetingRealtimeProfiles: { "fun-asr-realtime": { apiKey: "fun-key", baseUrl: "https://fun.example/v1" } },
-    meetingFileAsrProfiles: { "mimo-v2.5-asr": { apiKey: "review-key" } },
-    meetingAnalysisProfiles: { "gpt-5.4-mini": { apiKey: "llm-key" } }
-  }, MEETING_LIVE_MODEL, CUSTOM_ASR_MODEL: "__custom__", FUN_ASR_MODEL: "fun-asr",
-  QWEN_ASR_OPENAI_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  FUN_ASR_REST_BASE_URL: "https://dashscope.aliyuncs.com/api/v1", syncSavedModelOptions() {} });
-  for (const name of new Set(code.match(/\bmeeting\w+(?:Input|Select|Field)\b/g))) {
-    context[name] = { value: "", hidden: false, focus() {} };
-  }
-  for (const name of new Set(code.match(/\bactiveMeeting\w+Draft\b/g))) context[name] = "";
-  for (const name of new Set(code.match(/\bMEETING_\w+_PRESETS\b/g))) context[name] = new Set();
+  const code = source.slice(source.indexOf("const OPENAI_API_STYLES"), source.indexOf("let audioContext"));
+  const context = vm.createContext({});
   vm.runInContext(code, context);
-  vm.runInContext(`loadMeetingQwenProfileDraft(MEETING_LIVE_MODEL)`, context);
-  assert.equal(context.meetingQwenApiKeyInput.value, "preview-key");
-  assert.equal(context.meetingQwenBaseUrlInput.value, "https://preview.example/v1");
-  for (const [kind, prefix, initial, key] of [
-    ["qwen", "meetingQwen", MEETING_LIVE_MODEL, "preview-key"],
-    ["file-asr", "meetingFileAsr", "mimo-v2.5-asr", "review-key"],
-    ["analysis", "meetingAnalysis", "gpt-5.4-mini", "llm-key"]
-  ]) {
-    context.kind = kind;
-    context.initial = initial;
-    vm.runInContext("meetingProfileDraftConfig(kind).load(initial)", context);
-    assert.equal(context[`${prefix}ApiKeyInput`].value, key);
-    context[`${prefix}ModelPresetSelect`].value = "__custom__";
-    vm.runInContext("handleMeetingProfileModelChange(kind)", context);
-    assert.equal(context[`${prefix}ApiKeyInput`].value, "");
-    context[`${prefix}ModelInput`].value = "custom-a";
-    vm.runInContext("handleMeetingCustomProfileInput(kind)", context);
-    context[`${prefix}ApiKeyInput`].value = "custom-a-key";
-    context[`${prefix}ModelInput`].value = "custom-b";
-    vm.runInContext("handleMeetingCustomProfileInput(kind)", context);
-    assert.equal(context[`${prefix}ApiKeyInput`].value, "");
-    context[`${prefix}ModelInput`].value = initial;
-    vm.runInContext("handleMeetingCustomProfileInput(kind)", context);
-    assert.equal(context[`${prefix}ApiKeyInput`].value, key);
-  }
-  vm.runInContext("loadMeetingQwenProfileDraft('fun-asr-realtime')", context);
-  context.meetingQwenApiKeyInput.value = "changed-fun-key";
-  vm.runInContext("cacheMeetingQwenProfileDraft('fun-asr-realtime')", context);
-  assert.equal(context.appSettings.meetingRealtimeProfiles["fun-asr-realtime"].apiKey, "changed-fun-key");
-  assert.equal(context.appSettings.meetingQwenProfiles["fun-asr-realtime"].provider, "fun-asr");
-  assert.equal(context.appSettings.asrProfiles[MEETING_LIVE_MODEL].apiKey, "preview-key");
+  context.input = {
+    providerConnections: {
+      openai: { baseUrl: "https://shared.example/v1", apiKey: "shared-key", apiStyle: "chat-completions" }
+    },
+    meetingAnalysisProfiles: {
+      "gpt-5.5": { baseUrl: "https://api.openai.com/v1", apiKey: "stale-key" }
+    }
+  };
+  const shared = plain(vm.runInContext("providerConnectionsForSettings(input)", context));
+  assert.deepEqual(shared.openai, {
+    baseUrl: "https://shared.example/v1", apiKey: "shared-key", apiStyle: "chat-completions"
+  });
+  context.input = {
+    cleanerProfiles: {
+      "gpt-5.4-mini": { baseUrl: "https://nowcoding.example/v1", apiKey: "nowcoding-key" }
+    },
+    meetingAnalysisProfiles: {
+      "gpt-5.5": { baseUrl: "https://api.openai.com/v1", apiKey: "nowcoding-key" }
+    }
+  };
+  const migrated = plain(vm.runInContext("providerConnectionsForSettings(input)", context));
+  assert.equal(migrated.openai.baseUrl, "https://nowcoding.example/v1");
+  assert.equal(migrated.openai.apiKey, "nowcoding-key");
+  assert.match(source, /providerConnections:\s*collectProviderConnections\(\)/);
+  assert.doesNotMatch(source, /meetingQwenApiKeyInput|meetingFileAsrApiKeyInput|meetingFunAsrApiKeyInput/);
 });
 
 test("live connection test uses the selected realtime model and closes its probe", async () => {
@@ -216,7 +197,7 @@ for (const platform of ["win32", "darwin"]) {
     await h.invoke("meeting:live:window", { floating: true, alwaysOnTop: true });
     h.run("setWindowMode('settings')");
     assert.equal(geometry.top, false);
-    assert.deepEqual(plain(geometry.minimumSize), [720, 560]);
+    assert.deepEqual(plain(geometry.minimumSize), [640, 480]);
     const before = plain(geometry);
     assert.equal((await h.invoke("meeting:live:window", { floating: true })).error.code, "window_mode_unavailable");
     assert.deepEqual(plain(geometry), before);

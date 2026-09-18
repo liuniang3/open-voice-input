@@ -6,6 +6,7 @@ const { createOpenAiCompatibleClient } = require("../../providers/openai-compati
 const { createQwen3AsrProvider } = require("../../providers/asr/qwen3-asr-provider");
 const { isSupportedAliMeetingModel } = require("../../providers/asr/ali-meeting-stream");
 const { buildTextCleanupMessages, parseAndValidateCleanupResponse } = require("../../providers/cleaner/text-cleanup-method");
+const { resolveProviderConnection } = require("../../settings/provider-connections");
 const DEFAULT_LIVE_MODEL = "qwen-audio-3.0-asr-flash-streaming";
 
 function previewProfileFor(settings, modelId = DEFAULT_LIVE_MODEL) {
@@ -20,9 +21,15 @@ function previewProfileFor(settings, modelId = DEFAULT_LIVE_MODEL) {
       p = { apiKey: settings[`${prefix}ApiKey`], baseUrl: settings[`${prefix}BaseUrl`] };
     }
   }
-  if (!p?.apiKey) throw Object.assign(new Error("请在会议模型设置中为所选实时模型配置 API Key。"), { code: "live_credentials_missing" });
-  if (!p.baseUrl) throw Object.assign(new Error("请为所选实时模型填写所在地域的 API 地址。"), { code: "live_credentials_missing" });
-  return { apiKey: p.apiKey, baseUrl: p.baseUrl, model: modelId, provider: "aliyun-streaming" };
+  const connection = resolveProviderConnection(settings, {
+    modelId,
+    provider: "aliyun-streaming",
+    operation: "streaming",
+    fallback: p || {}
+  });
+  if (!connection.apiKey) throw Object.assign(new Error("请在会议模型设置中为所选实时模型配置 API Key。"), { code: "live_credentials_missing" });
+  if (!connection.baseUrl) throw Object.assign(new Error("请为所选实时模型填写所在地域的 API 地址。"), { code: "live_credentials_missing" });
+  return { apiKey: connection.apiKey, baseUrl: connection.baseUrl, model: modelId, provider: "aliyun-streaming" };
 }
 
 function languageModel(profile) {
@@ -34,6 +41,11 @@ function languageModel(profile) {
     if (response.finishReason && response.finishReason !== "stop") throw Object.assign(new Error("Incomplete model response"), { code: "analysis_response_incomplete" });
     return response.content;
   };
+}
+
+function positiveInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
 function profileFor(settings, modelId, cleanup = false, env = process.env) {
@@ -50,22 +62,53 @@ function profileFor(settings, modelId, cleanup = false, env = process.env) {
     }
   }
   const provider = p.provider || (modelId.startsWith("mimo-") ? "mimo" : modelId.includes("qwen") && !cleanup ? "qwen3-asr" : "openai-compatible");
-  const apiKey = p.apiKey || (!cleanup && provider === "mimo" ? env.MIMO_API_KEY : "");
+  const operation = cleanup ? "compatible" : /fun-asr/i.test(modelId) ? "rest" : provider === "qwen3-asr" ? "compatible" : "default";
+  const fallbackBaseUrl = p.baseUrl || (provider === "mimo"
+    ? "https://api.xiaomimimo.com/v1"
+    : cleanup ? "" : "https://dashscope.aliyuncs.com/compatible-mode/v1");
+  const connection = resolveProviderConnection(settings, {
+    modelId,
+    provider,
+    operation,
+    fallback: {
+      ...p,
+      apiKey: p.apiKey || (!cleanup && provider === "mimo" ? env.MIMO_API_KEY : ""),
+      baseUrl: fallbackBaseUrl
+    }
+  });
+  const apiKey = connection.apiKey;
   if (!apiKey) throw Object.assign(new Error("请先在设置中配置所选模型的 API Key"), { code: "live_credentials_missing" });
   if (!cleanup && (provider !== "mimo" && provider !== "qwen3-asr" || /realtime|filetrans/i.test(modelId)
     || provider === "mimo" && !/^mimo-.*asr/i.test(modelId))) {
     throw Object.assign(new Error("会议实时分段目前支持 MiMo ASR 或 Qwen3-ASR-Flash 非实时接口"), { code: "live_model_unsupported" });
   }
-  if (cleanup && provider !== "mimo" && !p.baseUrl) {
+  if (cleanup && provider !== "mimo" && !connection.baseUrl) {
     throw Object.assign(new Error("请为所选清理模型填写明确的 API 地址"), { code: "live_credentials_missing" });
   }
-  const baseUrl = p.baseUrl || (provider === "mimo" ? "https://api.xiaomimimo.com/v1" : "https://dashscope.aliyuncs.com/compatible-mode/v1");
+  const baseUrl = connection.baseUrl;
   const url = new URL(baseUrl);
   if (url.protocol !== "https:" || url.username || url.password) throw new Error("live_https_required");
   if (!cleanup && provider === "mimo" && (String(apiKey).startsWith("tp-") || /token-plan/i.test(baseUrl))) {
     throw Object.assign(new Error("MiMo ASR 需要普通 API Key 和普通 API 地址"), { code: "live_asr_token_plan_unsupported" });
   }
-  return { ...p, provider, modelId, apiKey, baseUrl, requestTimeoutMs: 45000 };
+  const requestTimeoutMs = positiveInteger(
+    p.timeoutMs ?? p.requestTimeoutMs ?? (cleanup ? settings.meetingAnalysisTimeoutMs : settings.requestTimeoutMs),
+    cleanup ? 120000 : 45000
+  );
+  const maxOutputTokens = positiveInteger(
+    p.maxOutput ?? p.maxOutputTokens ?? (cleanup ? settings.meetingAnalysisMaxOutput : undefined),
+    8192
+  );
+  return {
+    ...p,
+    provider,
+    modelId,
+    apiKey,
+    baseUrl,
+    apiStyle: connection.apiStyle,
+    requestTimeoutMs,
+    maxOutputTokens
+  };
 }
 
 function transcriber(profile) {

@@ -22,6 +22,8 @@ const { pathToFileURL } = require("node:url");
 const { Readable } = require("node:stream");
 const { createRuntimeLogWriter } = require("./runtime-log");
 const { createVoicePipeline } = require("./providers/voice-pipeline");
+const { testProviderConnection } = require("./providers/provider-connection-test");
+const { listProviderModels } = require("./providers/provider-model-catalog");
 const { createQwenRealtimeSession } = require("./providers/asr/qwen-realtime-session");
 const { createFunAsrRealtimeSession } = require("./providers/asr/fun-asr-realtime-session");
 const {
@@ -166,6 +168,8 @@ const WINDOW_SIZES = {
   file: { width: 1180, height: 760 }
 };
 
+const RESIZABLE_WINDOW_MODES = new Set(["settings", "result", "meeting", "file"]);
+
 const DEFAULT_SETTINGS = {
   hotkey: "CommandOrControl+Alt+M",
   meetingHotkey: "CommandOrControl+Alt+Shift+M",
@@ -191,7 +195,30 @@ const DEFAULT_SETTINGS = {
   directSubmit: false,
   restoreClipboard: false,
   requestTimeoutMs: 60000,
-  // Meeting-scoped (isolated from short-voice ASR/cleaner keys)
+  // Credentials are shared only inside a provider family; model-specific maps
+  // remain as migration/fallback data for custom third-party endpoints.
+  providerConnections: {
+    mimo: {
+      provider: "mimo",
+      baseUrl: "https://api.xiaomimimo.com/v1",
+      apiKey: "",
+      apiStyle: "chat-completions"
+    },
+    aliyun: {
+      provider: "aliyun",
+      baseUrl: "https://dashscope.aliyuncs.com",
+      apiKey: ""
+    },
+    openai: {
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "",
+      apiStyle: "responses"
+    }
+  },
+  openaiModelCatalog: [],
+  openaiModelCatalogUpdatedAt: "",
+  // Meeting-scoped model choices and non-provider storage settings.
   meetingMicrophoneDeviceId: "",
   meetingSystemDeviceId: "",
   meetingCaptureMode: "dual",
@@ -757,18 +784,24 @@ function normalizeAsrMode(mode) {
 }
 
 function createWindow() {
+  const isWindows = os.platform() === "win32";
   mainWindow = new BrowserWindow({
     width: WINDOW_SIZES.compact.width,
     height: WINDOW_SIZES.compact.height,
     useContentSize: true,
     show: false,
     frame: false,
+    thickFrame: isWindows,
     alwaysOnTop: true,
     resizable: false,
     skipTaskbar: os.platform() !== "darwin",
     icon: APP_ICON_PATH,
-    transparent: true,
-    backgroundColor: "#00000000",
+    // Electron/Chromium cannot provide reliable resize hit-testing for a
+    // transparent frameless HWND. Acrylic keeps the visual treatment while
+    // preserving the native Windows resize frame and cursor.
+    transparent: !isWindows,
+    backgroundColor: isWindows ? "#eef4f1" : "#00000000",
+    ...(isWindows ? { backgroundMaterial: "acrylic" } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -777,7 +810,6 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
-  installNativeResizeHitTest(mainWindow);
   mainWindow.on("maximize", () => mainWindow.webContents.send("window-maximized", true));
   mainWindow.on("unmaximize", () => mainWindow.webContents.send("window-maximized", false));
   mainWindow.on("blur", () => {
@@ -790,42 +822,6 @@ function createWindow() {
     }
   });
   mainWindow.on("closed", () => { mainWindow = null; });
-}
-
-function installNativeResizeHitTest(win) {
-  if (os.platform() !== "win32" || !win || typeof win.hookWindowMessage !== "function") return;
-  const WM_NCHITTEST = 0x0084;
-  const HIT = {
-    left: 10,
-    right: 11,
-    top: 12,
-    topLeft: 13,
-    topRight: 14,
-    bottom: 15,
-    bottomLeft: 16,
-    bottomRight: 17
-  };
-  win.hookWindowMessage(WM_NCHITTEST, () => {
-    if (win.isDestroyed() || win.isMaximized() || !win.isResizable()) return;
-    if (!["settings", "meeting", "file"].includes(windowMode)) return;
-    const bounds = win.getBounds();
-    const point = screen.getCursorScreenPoint();
-    const margin = 8;
-    const left = point.x >= bounds.x && point.x <= bounds.x + margin;
-    const right = point.x >= bounds.x + bounds.width - margin && point.x <= bounds.x + bounds.width;
-    const top = point.y >= bounds.y && point.y <= bounds.y + margin;
-    const bottom = point.y >= bounds.y + bounds.height - margin && point.y <= bounds.y + bounds.height;
-    let result = 0;
-    if (top && left) result = HIT.topLeft;
-    else if (top && right) result = HIT.topRight;
-    else if (bottom && left) result = HIT.bottomLeft;
-    else if (bottom && right) result = HIT.bottomRight;
-    else if (left) result = HIT.left;
-    else if (right) result = HIT.right;
-    else if (top) result = HIT.top;
-    else if (bottom) result = HIT.bottom;
-    if (result) win.setWindowMessageResult(result);
-  });
 }
 
 function isAppLocalUrl(value) {
@@ -1025,13 +1021,16 @@ function enforceWindowGeometry(win, mode = windowMode, resetSize = false) {
   }
   const size = WINDOW_SIZES[mode] || WINDOW_SIZES.compact;
   const isSettings = mode === "settings";
+  const isResult = mode === "result";
   const isMeeting = mode === "meeting";
   const isFile = mode === "file";
-  const resizable = isSettings || isMeeting || isFile;
+  const resizable = RESIZABLE_WINDOW_MODES.has(mode);
   if (isMeeting || isFile) {
-    win.setMinimumSize(960, 640);
+    win.setMinimumSize(720, 520);
   } else if (isSettings) {
-    win.setMinimumSize(720, 560);
+    win.setMinimumSize(640, 480);
+  } else if (isResult) {
+    win.setMinimumSize(420, 320);
   } else {
     win.setMinimumSize(1, 1);
   }
@@ -1703,7 +1702,7 @@ ipcMain.handle("window:minimize", async (event) => {
 });
 ipcMain.handle("window:toggle-maximize", async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
-  if (!win || win.isDestroyed() || !["settings", "meeting", "file"].includes(windowMode)) {
+  if (!win || win.isDestroyed() || !RESIZABLE_WINDOW_MODES.has(windowMode)) {
     return { ok: false, maximized: false };
   }
   if (win.isMaximized()) win.unmaximize();
@@ -1747,6 +1746,24 @@ ipcMain.handle("voice:realtime:append", async (_event, base64Audio) => appendRea
 ipcMain.handle("voice:realtime:finish", async (_event, payload) => finishRealtimeAsr(payload));
 ipcMain.handle("voice:realtime:cancel", async () => stopRealtimeAsr());
 ipcMain.handle("connection:test", async () => voicePipeline.testConnection());
+ipcMain.handle("provider:test-connection", async (event, payload = {}) => {
+  try {
+    if (!isAppSender(event.sender, event.senderFrame?.url)) throw new Error("untrusted_sender");
+    const provider = typeof payload?.provider === "string" ? payload.provider.trim() : "";
+    return await testProviderConnection({ settings, provider });
+  } catch (error) {
+    return sanitizeIpcError(error);
+  }
+});
+ipcMain.handle("provider:list-models", async (event, payload = {}) => {
+  try {
+    if (!isAppSender(event.sender, event.senderFrame?.url)) throw new Error("untrusted_sender");
+    const provider = typeof payload?.provider === "string" ? payload.provider.trim() : "";
+    return await listProviderModels({ settings, provider });
+  } catch (error) {
+    return sanitizeIpcError(error);
+  }
+});
 ipcMain.handle("input:inject", async (_event, text) => injectText(text));
 ipcMain.handle("clipboard:write-text", async (_event, text) => clipboard.writeText(String(text || "")));
 ipcMain.handle("recording:keys:clear", async () => {

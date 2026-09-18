@@ -132,6 +132,7 @@ function createMeetingSessionAnalyzer({
       apiKey: creds.apiKey,
       baseUrl: creds.baseUrl,
       model: creds.modelId,
+      apiStyle: creds.apiStyle,
       requestTimeoutMs: creds.timeoutMs
     });
     return (messages, opts) => client.requestChat(messages, opts);
