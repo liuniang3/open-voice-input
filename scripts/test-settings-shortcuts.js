@@ -288,7 +288,8 @@ test("settings UI has unified provider connections and model-only vendor control
   assert.match(html, /id="meetingBtn"[\s\S]*会议工作台/);
   assert.match(html, /id="asrRealtimeModelPresetSelect"/);
   assert.match(html, /value="mimo-v2\.5-asr"/);
-  assert.match(html, /value="qwen3-asr-flash-realtime"/);
+  assert.match(html, /value="qwen-audio-3\.0-asr-flash-streaming"/);
+  assert.doesNotMatch(html, /value="qwen3-asr-flash-realtime"(?:\s|>)/);
   assert.match(html, /value="qwen3-asr-flash-realtime-2026-02-10"/);
   assert.match(html, /value="fun-asr-realtime"/);
   assert.match(html, /id="asrCustomRealtimeModelField"[^>]*hidden/);

@@ -121,7 +121,8 @@ document.documentElement.dataset.platform = desktopPlatform;
 const TRANSCRIPTION_MODES = new Set(["stable", "fast"]);
 const ASR_MODES = new Set(["batch", "realtime"]);
 const QWEN_ASR_OPENAI_MODEL = "qwen3-asr-flash";
-const QWEN_ASR_REALTIME_MODEL = "qwen3-asr-flash-realtime";
+const QWEN_ASR_REALTIME_MODEL = "qwen-audio-3.0-asr-flash-streaming";
+const QWEN_ASR_LEGACY_REALTIME_MODEL = "qwen3-asr-flash-realtime";
 const MIMO_ASR_MODEL = "mimo-v2.5-asr";
 const FUN_ASR_MODEL = "fun-asr";
 const FUN_ASR_REALTIME_MODEL = "fun-asr-realtime";
@@ -435,6 +436,7 @@ function normalizeQwenRealtimeModel(model) {
     || value === "mimo-v2.5"
     || value === MIMO_ASR_MODEL
     || value === QWEN_ASR_OPENAI_MODEL
+    || value === QWEN_ASR_LEGACY_REALTIME_MODEL
     || value === FUN_ASR_REALTIME_MODEL
   ) {
     return QWEN_ASR_REALTIME_MODEL;
@@ -466,6 +468,7 @@ function normalizeFunAsrRealtimeModel(model) {
     || value === MIMO_ASR_MODEL
     || value === QWEN_ASR_OPENAI_MODEL
     || value === QWEN_ASR_REALTIME_MODEL
+    || value === QWEN_ASR_LEGACY_REALTIME_MODEL
     || value === "qwen3-asr-flash-realtime-2026-02-10"
     || value === FUN_ASR_MODEL
   ) {
@@ -1352,20 +1355,27 @@ async function stopRecording() {
 
   try {
     let realtimeText = "";
+    let realtimeSucceeded = false;
     if (recordingAsrMode === "realtime") {
       setStatus(
         "transcribing",
         "正在生成最终文本",
         socketRealtime ? "正在汇总实时转写结果。" : "正在完成剩余音频分段。"
       );
-      realtimeText = await cleanupRealtimePreview({
-        finish: socketRealtime,
-        shortContext: recordingShortContext,
-        transcriptionMode
-      });
+      try {
+        realtimeText = await cleanupRealtimePreview({
+          finish: socketRealtime,
+          shortContext: recordingShortContext,
+          transcriptionMode
+        });
+        realtimeSucceeded = socketRealtime && Boolean(realtimeText);
+      } catch (error) {
+        logRenderer("realtime preview: finalization failed", error.message || String(error));
+        setStatus("transcribing", "实时预览中断", "正在使用完整录音重新转写。");
+      }
     }
 
-    queueBufferedRecordingAudio(segmentState, { transcribe: !socketRealtime });
+    queueBufferedRecordingAudio(segmentState, { transcribe: !realtimeSucceeded });
     const transcriptionRequest = {
       audioSegments: segmentState.payloads,
       shortContext: recordingShortContext,
@@ -1375,17 +1385,11 @@ async function stopRecording() {
     };
     lastVoiceRequest = transcriptionRequest;
 
-    if (socketRealtime && realtimeText) {
+    if (realtimeSucceeded) {
       await completeRawTranscript(realtimeText, transcriptionRequest);
-    } else if (!socketRealtime) {
+    } else {
       const rawText = await collectCachedSegmentTranscripts(segmentState);
       await completeRawTranscript(rawText, transcriptionRequest);
-    } else {
-      await runVoiceRequest(transcriptionRequest, {
-        bytes: totalAudioBytes(segmentState.payloads),
-        retry: false,
-        allowActive: true
-      });
     }
   } catch (error) {
     logRenderer("segmented transcription failed", error.message || String(error));

@@ -15,7 +15,7 @@ Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 - Live meetings use Alibaba Streaming or Fun-ASR realtime; optional MiMo full-audio review, LLM reconciliation, and separate summary/mindmap generation run only after recording stops.
 - Meeting capture supports microphone-only, dual-track and genuine system-only modes, with floating/compact views, optional always-on-top, pause/resume, full WAV archives and 30-second Markdown autosave.
 - The first stage is now a pluggable ASR layer, tuned most heavily for the dedicated `mimo-v2.5-asr` model and also supporting Qwen3-ASR and Fun-ASR.
-- Qwen3-ASR and Fun-ASR provide WebSocket realtime preview. MiMo uses periodic partial-audio preview, while the final transcript is always regenerated from the complete recording.
+- Short-dictation Qwen preview now defaults to `qwen-audio-3.0-asr-flash-streaming`; Fun-ASR also provides WebSocket preview. MiMo uses periodic partial-audio preview, and a failed realtime stream falls back to non-realtime transcription of the complete recording.
 - `Stable` mode sends raw ASR text to a MiMo or OpenAI-compatible small model for filler removal, repetition cleanup, and punctuation. `Fast` mode performs ASR only.
 - Settings now live in the frameless main UI, with a dedicated Provider Connections tab instead of a separate native Windows settings window.
 - MiMo models share one MiMo connection, Qwen/Fun-ASR models share one Alibaba connection, and GPT models share one OpenAI connection. The OpenAI URL may be a custom gateway such as NowCoding and supports either Responses or Chat Completions. Unrelated providers such as Grok or GLM retain independent model connections.
@@ -207,7 +207,7 @@ The cleaner is forbidden from paraphrasing, expanding, reordering, or summarizin
 
 Each recording uses a settings snapshot captured at recording start, so changing settings while a recording is processing affects only the next recording.
 
-Realtime text is treated as preview only. Qwen3-ASR and Fun-ASR use provider WebSocket realtime APIs; MiMo `mimo-v2.5-asr` currently uses the official file-style API for periodic partial-audio preview, not true low-latency WebSocket realtime recognition. When you press `Enter`, the app submits the full captured recording again to produce the final transcript; in `Stable` mode, that final transcript still flows into the second-stage cleanup model. This reduces the chance that realtime segmentation, brief pauses, or provider-side provisional punctuation become the final inserted text.
+In realtime mode, Qwen defaults to the `qwen-audio-3.0-asr-flash-streaming` WebSocket `run-task` protocol, while Fun-ASR uses its streaming endpoint. MiMo `mimo-v2.5-asr` still refreshes preview through periodic file-style requests. Qwen draft/final revisions are tracked by sentence identity rather than text deduplication; if connection, audio delivery, or final acknowledgement fails, the retained complete recording is transcribed through the non-realtime model. Stable mode then runs the second-stage text cleaner as usual.
 
 ## Privacy
 

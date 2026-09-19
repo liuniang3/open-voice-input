@@ -18,7 +18,8 @@ const MIMO_ASR_MODEL = "mimo-v2.5-asr";
 const QWEN_ASR_MODEL = "qwen3-asr-flash";
 const MEETING_LIVE_MODEL = "qwen-audio-3.0-asr-flash-streaming";
 const FUN_ASR_MODEL = "fun-asr";
-const QWEN_ASR_REALTIME_MODEL = "qwen3-asr-flash-realtime";
+const QWEN_ASR_REALTIME_MODEL = MEETING_LIVE_MODEL;
+const QWEN_ASR_LEGACY_REALTIME_MODEL = "qwen3-asr-flash-realtime";
 const FUN_ASR_REALTIME_MODEL = "fun-asr-realtime";
 const QWEN_ASR_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const FUN_ASR_BASE_URL = "https://dashscope.aliyuncs.com/api/v1";
@@ -50,6 +51,13 @@ function trimStr(value) {
 
 function cloneProfile(profile) {
   return profile && typeof profile === "object" ? { ...profile } : {};
+}
+
+function normalizeShortQwenRealtimeModel(model) {
+  const id = trimStr(model);
+  return !id || id === QWEN_ASR_MODEL || id === QWEN_ASR_LEGACY_REALTIME_MODEL
+    ? QWEN_ASR_REALTIME_MODEL
+    : id;
 }
 
 function defaultAsrProfile(model) {
@@ -525,8 +533,12 @@ function applyActiveProfilesToTopLevel(settings) {
   if (!isSupportedAliMeetingModel(next.meetingRealtimeModel)) next.meetingRealtimeModel = MEETING_LIVE_MODEL;
   next.meetingRealtimeDestination = trimStr(next.meetingRealtimeDestination);
   const asrModel = trimStr(next.asrModel) || MIMO_ASR_MODEL;
-  const asr = next.asrProfiles?.[asrModel] || defaultAsrProfile(asrModel);
+  const asr = cloneProfile(next.asrProfiles?.[asrModel] || defaultAsrProfile(asrModel));
   next.asrProvider = trimStr(asr.provider) || next.asrProvider || "mimo";
+  if (next.asrProvider === "qwen3-asr") {
+    asr.realtimeModel = normalizeShortQwenRealtimeModel(asr.realtimeModel || next.asrRealtimeModel);
+    next.asrProfiles[asrModel] = asr;
+  }
   next.asrMode = trimStr(asr.mode) || next.asrMode || "batch";
   next.asrRealtimeModel = trimStr(asr.realtimeModel) || next.asrRealtimeModel || "";
   next.asrBaseUrl = trimStr(asr.baseUrl) || "";
@@ -615,6 +627,7 @@ function ensureConnectionProfiles(value) {
 module.exports = {
   MIMO_ASR_MODEL,
   QWEN_ASR_MODEL,
+  QWEN_ASR_REALTIME_MODEL,
   MEETING_LIVE_MODEL,
   FUN_ASR_MODEL,
   MEETING_FILE_ASR_MODEL,

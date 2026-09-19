@@ -299,8 +299,9 @@ async function run() {
   assert.equal(normalizeMimoAsrModel("mimo-v2.5-asr"), "mimo-v2.5-asr");
   assert.equal(normalizeQwenAsrMode("realtime"), "realtime");
   assert.equal(normalizeQwenAsrMode("unknown"), "batch");
-  assert.equal(normalizeQwenRealtimeModel(""), "qwen3-asr-flash-realtime");
-  assert.equal(normalizeQwenRealtimeModel("qwen3-asr-flash"), "qwen3-asr-flash-realtime");
+  assert.equal(normalizeQwenRealtimeModel(""), "qwen-audio-3.0-asr-flash-streaming");
+  assert.equal(normalizeQwenRealtimeModel("qwen3-asr-flash"), "qwen-audio-3.0-asr-flash-streaming");
+  assert.equal(normalizeQwenRealtimeModel("qwen3-asr-flash-realtime"), "qwen-audio-3.0-asr-flash-streaming");
   assert.equal(normalizeQwenRealtimeModel("qwen3-asr-flash-realtime-2026-02-10"), "qwen3-asr-flash-realtime-2026-02-10");
   assert.equal(normalizeFunAsrModel(""), "fun-asr");
   assert.equal(normalizeFunAsrModel("mimo-v2.5"), "fun-asr");

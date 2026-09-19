@@ -15,7 +15,7 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 - 会议实时转录改用阿里 Streaming 或 Fun-ASR 实时接口；停止后可选 MiMo 全音频复核、独立 LLM 校订，再单独生成详细总结和思维导图。
 - 会议新增真正的仅系统声音采集、悬浮/精简窗口、可选置顶和暂停/继续；保留完整 WAV、原生音频及独立的 30 秒 Markdown 自动保存。
 - 第一阶段已改为可插拔 ASR：优先适配专用 `mimo-v2.5-asr`，并支持 Qwen3-ASR 和 Fun-ASR。
-- Qwen3-ASR 与 Fun-ASR 支持 WebSocket 实时预览；MiMo 使用周期性音频片段预览，最终结果始终由完整录音重新转写。
+- 短语音 Qwen 实时预览默认使用 `qwen-audio-3.0-asr-flash-streaming`；Fun-ASR 同样支持 WebSocket 实时预览。MiMo 使用周期性音频片段预览；实时流失败时会用完整录音自动回退到非实时转写。
 - `Stable` 模式将原始 ASR 文本交给 MiMo 或 OpenAI 兼容小模型进行口头词、重复片段和标点清理；`Fast` 模式只执行 ASR。
 - 设置已整合进无边框主界面，并新增独立的“供应商连接”页。
 - MiMo 全部模型共用一套 MiMo 连接，Qwen/Fun-ASR 共用一套阿里连接，GPT/OpenAI 模型共用一套 OpenAI 连接。OpenAI URL 可以填写 NowCoding 等自定义网关，并可选择 Responses 或 Chat Completions；Grok、GLM 等其他供应商仍按模型独立保存连接。
@@ -207,7 +207,7 @@ ASR 供应商：
 
 每次录音都会使用录音开始时锁定的设置快照，因此录音处理中途修改设置只会影响下一次录音。
 
-实时模式中的文字只作为录音过程中的预览。Qwen3-ASR 和 Fun-ASR 使用供应商的实时 WebSocket；MiMo `mimo-v2.5-asr` 目前按官方文件式接口做周期性片段预览，并不是真正的低延迟 WebSocket 实时识别。按 `Enter` 结束录音后，程序会用同一段完整录音重新生成最终转写；如果当前是 `Stable` 模式，最终转写还会继续进入第二步文本清理。这样可以减少实时分段、短暂停顿和供应商临时标点对最终输入结果的影响。
+实时模式下，Qwen 默认通过 `qwen-audio-3.0-asr-flash-streaming` 的 WebSocket `run-task` 协议显示逐句草稿，Fun-ASR 使用其流式接口；MiMo `mimo-v2.5-asr` 仍按文件式接口周期性刷新预览。Qwen 草稿和定稿按句子 ID 更新，不按文字内容去重，因此相同句子不会被误删。按 `Enter` 后会等待流式任务完成；如果连接、音频发送或结束确认失败，则自动使用保留的完整录音执行非实时转写。`Stable` 模式随后仍会进入第二步文本清理。
 
 ## 隐私
 

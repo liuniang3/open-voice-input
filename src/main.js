@@ -24,7 +24,7 @@ const { createRuntimeLogWriter } = require("./runtime-log");
 const { createVoicePipeline } = require("./providers/voice-pipeline");
 const { testProviderConnection } = require("./providers/provider-connection-test");
 const { listProviderModels } = require("./providers/provider-model-catalog");
-const { createQwenRealtimeSession } = require("./providers/asr/qwen-realtime-session");
+const { createQwenRealtimeSession, isQwenAudioStreamingModel } = require("./providers/asr/qwen-realtime-session");
 const { createFunAsrRealtimeSession } = require("./providers/asr/fun-asr-realtime-session");
 const {
   createMeetingCaptureService,
@@ -45,6 +45,7 @@ const { resolveMeetingQwenCredentials } = require("./meeting/processing/meeting-
 const { buildHelperReadyErrorResponse } = require("./meeting/processing/session-processor");
 const { resolveMeetingAnalysisCredentials } = require("./meeting/analysis/credentials");
 const { ensureConnectionProfiles } = require("./settings/connection-profiles");
+const { resolveProviderConnection } = require("./settings/provider-connections");
 const { validateHotkey, normalizeAccelerator } = require("./hotkeys/validate-hotkey");
 
 let meetingImportJobs = null;
@@ -179,7 +180,7 @@ const DEFAULT_SETTINGS = {
   asrProvider: "mimo",
   asrMode: "batch",
   asrModel: "mimo-v2.5-asr",
-  asrRealtimeModel: "qwen3-asr-flash-realtime",
+  asrRealtimeModel: "qwen-audio-3.0-asr-flash-streaming",
   asrApiKey: "",
   asrBaseUrl: "",
   asrLanguage: "",
@@ -1595,9 +1596,21 @@ function resolveBaseUrl(apiKey) {
 }
 
 function qwenRealtimeSettings() {
+  const model = settings.asrRealtimeModel || settings.asrModel || "qwen-audio-3.0-asr-flash-streaming";
+  const fallback = settings.asrProfiles?.[settings.asrModel] || {
+    apiKey: settings.asrApiKey,
+    baseUrl: settings.asrBaseUrl
+  };
+  const connection = resolveProviderConnection(settings, {
+    modelId: model,
+    provider: "qwen3-asr",
+    operation: isQwenAudioStreamingModel(model) ? "streaming" : "realtime",
+    fallback
+  });
   return {
-    apiKey: settings.asrApiKey || process.env.QWEN_ASR_API_KEY || process.env.DASHSCOPE_API_KEY || "",
-    model: settings.asrRealtimeModel || settings.asrModel || "qwen3-asr-flash-realtime",
+    apiKey: connection.apiKey || process.env.QWEN_ASR_API_KEY || process.env.DASHSCOPE_API_KEY || "",
+    baseUrl: connection.baseUrl,
+    model,
     language: settings.asrLanguage || "",
     enableItn: Boolean(settings.asrEnableItn)
   };
@@ -1647,7 +1660,7 @@ async function startRealtimeAsr(event) {
 }
 
 function appendRealtimeAudio(base64Audio) {
-  realtimeSession?.appendPcm16Base64(base64Audio);
+  return realtimeSession?.appendPcm16Base64(base64Audio);
 }
 
 async function finishRealtimeAsr({ clean = true, shortContext = "", transcriptionMode } = {}) {
@@ -1663,8 +1676,9 @@ async function finishRealtimeAsr({ clean = true, shortContext = "", transcriptio
 }
 
 function stopRealtimeAsr() {
-  realtimeSession?.close();
+  const closing = realtimeSession?.close();
   realtimeSession = null;
+  return closing;
 }
 
 function sendPasteKeystroke() {
