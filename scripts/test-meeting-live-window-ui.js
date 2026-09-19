@@ -175,6 +175,13 @@ async function nativeChecks() {
       push({ ...controller.state, window: plainFlags(controller.context.liveWindowFlags) });
       function plainFlags(flags) { return { floating: flags.floating, compact: flags.compact, alwaysOnTop: flags.alwaysOnTop }; }
     });
+    const compactHeight = await page.locator("#liveRaw").evaluate(element => element.clientHeight);
+    await application.evaluate(() => globalThis.liveWindowReview.win.setSize(620, 560));
+    await page.waitForFunction(() => innerWidth === 620 && innerHeight === 560);
+    const expandedCompactHeight = await page.locator("#liveRaw").evaluate(element => element.clientHeight);
+    assert(expandedCompactHeight > compactHeight + 100,
+      `compact transcript grows with native window (${compactHeight} -> ${expandedCompactHeight})`);
+    await page.screenshot({ path: path.join(directory, "compact-native-expanded.png") });
     await application.evaluate(() => globalThis.liveWindowReview.win.setSize(360, 240));
     await page.waitForFunction(() => innerWidth === 360);
     for (const id of ["liveAlwaysOnTop", "liveCompact", "liveDetail", "livePause", "liveStop"]) {

@@ -1163,8 +1163,15 @@ function resizeRecordingWindowToContent() {
   if (currentWindowMode !== "recording") return;
   const textLength = statusDetail.textContent.length;
   const contentWidth = textLength > 48 ? 520 : textLength > 22 ? 420 : 320;
-  const chromeHeight = document.getElementById("recordingChrome")?.offsetHeight || 0;
-  const contentHeight = Math.min(420, Math.max(132, Math.ceil(statusPanel.scrollHeight + chromeHeight + 36)));
+  const chrome = document.getElementById("recordingChrome");
+  const chromeHeight = chrome?.offsetHeight || 0;
+  const titleHeight = statusTitle.offsetHeight || 0;
+  const detailHeight = statusDetail.textContent ? statusDetail.scrollHeight + 7 : 0;
+  const meterHeight = levelMeter.hidden ? 0 : levelMeter.offsetHeight + 8;
+  // The panel fills the current viewport, so its scrollHeight cannot shrink
+  // after a long preview. Measure only its intrinsic children instead.
+  const panelHeight = Math.max(76, titleHeight + detailHeight + meterHeight);
+  const contentHeight = Math.min(420, Math.max(132, Math.ceil(panelHeight + chromeHeight + 30)));
   window.mimoInput.resizeRecordingWindow?.({
     width: contentWidth,
     height: contentHeight
@@ -2479,7 +2486,7 @@ window.mimoInput.onRetryLastVoiceRequest(() => {
 });
 
 window.mimoInput.onPartialTranscript((text) => {
-  if (!isRecording && !isTranscribing) return;
+  if (!isRecording) return;
   resultText.value = text || "";
   if (text) {
     setStatus("recording", "实时结果", text);

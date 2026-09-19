@@ -130,6 +130,7 @@ function fakeStreamFactory(state) {
     assert.match(stopRecording, /realtimeSucceeded = socketRealtime && Boolean\(realtimeText\)/);
     assert.match(stopRecording, /queueBufferedRecordingAudio\(segmentState, \{ transcribe: !realtimeSucceeded \}\)/);
     assert.match(stopRecording, /if \(realtimeSucceeded\)[\s\S]*collectCachedSegmentTranscripts\(segmentState\)/);
+    assert.match(renderer, /onPartialTranscript\(\(text\) => \{\s*if \(!isRecording\) return;/);
   });
 
   console.log("Qwen short streaming tests passed");

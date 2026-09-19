@@ -181,8 +181,16 @@ body.meeting-mode .meeting-panel.live-floating { grid-template-rows: minmax(0, 1
 .live-compact .live-health,
 .live-compact #liveElapsedLabel { display: none; }
 .live-compact .live-results { flex: 1 1 0; min-height: 0; }
-.live-compact #liveRaw { min-height: 0; max-height: 64px; padding: 4px; }
-.live-compact .live-preview pre { max-height: 64px; }
+.live-compact .live-text-section { flex: 1 1 0; min-height: 0; }
+.live-compact #liveRaw { flex: 1 1 0; min-height: 0; max-height: none; padding: 4px; }
+.live-compact .live-preview:not([hidden]) {
+  display: flex;
+  flex: 0 1 35%;
+  flex-direction: column;
+  min-height: 0;
+  max-height: none;
+}
+.live-compact .live-preview pre { flex: 1 1 0; min-height: 0; max-height: none; }
 .live-compact .live-clock strong { font-size: 16px; min-width: 52px; }
 .live-compact .live-clock { margin-left: 0; }
 

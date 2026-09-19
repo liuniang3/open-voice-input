@@ -10,6 +10,7 @@ const root = path.resolve(__dirname, "..");
 const main = fs.readFileSync(path.join(root, "src/main.js"), "utf8");
 const renderer = fs.readFileSync(path.join(root, "src/renderer/renderer.js"), "utf8");
 const css = fs.readFileSync(path.join(root, "src/renderer/styles.css"), "utf8");
+const liveCss = fs.readFileSync(path.join(root, "src/renderer/live-meeting.css"), "utf8");
 
 assert.match(main, /const isWindows = os\.platform\(\) === "win32"/);
 assert.match(main, /thickFrame:\s*isWindows/);
@@ -22,6 +23,10 @@ assert.match(renderer, /\["settings", "result", "meeting", "file"\]\.includes\(m
 assert.match(css, /body\.secondary-window-mode \.shell[\s\S]*border-radius:\s*16px/);
 assert.match(css, /html\[data-platform="win32"\] body\.secondary-window-mode \.shell[\s\S]*margin:\s*0/);
 assert.match(css, /@media \(max-width: 760px\)[\s\S]*body\.settings-open \.settings-tabs/);
+assert.doesNotMatch(renderer, /statusPanel\.scrollHeight \+ chromeHeight/);
+assert.match(renderer, /const panelHeight = Math\.max\(76, titleHeight \+ detailHeight \+ meterHeight\)/);
+assert.match(liveCss, /\.live-compact #liveRaw \{[^}]*flex:\s*1 1 0;[^}]*max-height:\s*none;/s);
+assert.match(liveCss, /\.live-compact \.live-preview:not\(\[hidden\]\)[^}]*flex:\s*0 1 35%;/s);
 
 console.log("window resize contract tests passed");
 
@@ -104,6 +109,41 @@ async function verifyResponsiveWindows() {
       assert(layout.shell.right <= item.width + 1 && layout.shell.bottom <= item.height + 1, `${item.mode} shell must fit`);
       await page.screenshot({ path: path.join(directory, `${item.mode}-${item.width}x${item.height}.png`) });
     }
+
+    await page.setViewportSize({ width: 520, height: 420 });
+    const recordingSizes = await page.evaluate(async () => {
+      window.applyWindowMode("recording");
+      const before = window.mockCalls.length;
+      window.setStatus("recording", "实时结果", "这是一段用于验证窗口自适应的实时转写内容。".repeat(30));
+      window.resizeRecordingWindowToContent();
+      const expanded = window.mockCalls.slice(before).filter(call => call.name === "resizeRecordingWindow").at(-1)?.payload;
+      window.setStatus("transcribing", "正在清理文本", "正在整理完整转写结果。");
+      window.resizeRecordingWindowToContent();
+      const compact = window.mockCalls.slice(before).filter(call => call.name === "resizeRecordingWindow").at(-1)?.payload;
+      return { expanded, compact };
+    });
+    assert(recordingSizes.expanded.height > recordingSizes.compact.height,
+      "the cleanup state must shrink after a long realtime transcript");
+    assert.equal(recordingSizes.compact.width, 320);
+    assert(recordingSizes.compact.height >= 132 && recordingSizes.compact.height <= 145,
+      `cleanup state should return to its natural compact height (${recordingSizes.compact.height})`);
+
+    await page.evaluate(async () => {
+      window.applyWindowMode("meeting");
+      await window.MeetingLiveUi.open();
+      window.mockPush({ status: "recording", recording: true,
+        rawText: "用于验证精简窗口可视区域随窗口增大的实时转写内容。\n".repeat(100),
+        previewText: "当前实时草稿也应使用可用空间。".repeat(20), previewStatus: "streaming" });
+      document.getElementById("meetingPanel").classList.add("live-floating", "live-compact");
+    });
+    await page.setViewportSize({ width: 420, height: 300 });
+    const smallCompact = await page.locator("#liveRaw").evaluate(element => element.clientHeight);
+    await page.screenshot({ path: path.join(directory, "meeting-compact-420x300.png") });
+    await page.setViewportSize({ width: 620, height: 560 });
+    const largeCompact = await page.locator("#liveRaw").evaluate(element => element.clientHeight);
+    await page.screenshot({ path: path.join(directory, "meeting-compact-620x560.png") });
+    assert(largeCompact > smallCompact + 100,
+      `compact transcript must grow with the window (${smallCompact} -> ${largeCompact})`);
     console.log(`responsive window browser checks passed: ${directory}`);
   } finally {
     await browser.close();
