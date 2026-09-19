@@ -1,7 +1,7 @@
 {
   "name": "open-voice-input",
   "productName": "Open Voice Input",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Windows and macOS voice input assistant with pluggable ASR providers and optional LLM cleanup.",
   "main": "src/main.js",
   "scripts": {
@@ -58,6 +58,7 @@
   },
   "dependencies": {
     "ali-oss": "6.23.0",
+    "electron-updater": "6.8.9",
     "ws": "8.21.0"
   },
   "build": {
@@ -92,10 +93,22 @@
     "win": {
       "icon": "assets/mimo-icon.ico",
       "extraResources": [
-        { "from": "src/win-hotkey-helper.ps1", "to": "win-hotkey-helper.ps1" },
-        { "from": "assets/mimo-icon.ico", "to": "assets/mimo-icon.ico" },
-        { "from": "native/audio-capture-helper/target/release/audio-capture-helper.exe", "to": "native/audio-capture-helper.exe" },
-        { "from": "native/ffmpeg/ffmpeg.exe", "to": "native/ffmpeg.exe" }
+        {
+          "from": "src/win-hotkey-helper.ps1",
+          "to": "win-hotkey-helper.ps1"
+        },
+        {
+          "from": "assets/mimo-icon.ico",
+          "to": "assets/mimo-icon.ico"
+        },
+        {
+          "from": "native/audio-capture-helper/target/release/audio-capture-helper.exe",
+          "to": "native/audio-capture-helper.exe"
+        },
+        {
+          "from": "native/ffmpeg/ffmpeg.exe",
+          "to": "native/ffmpeg.exe"
+        }
       ],
       "target": [
         {
@@ -116,8 +129,11 @@
       "category": "public.app-category.productivity",
       "icon": "assets/mimo-icon.png",
       "minimumSystemVersion": "13.0",
-      "target": ["dmg", "zip"],
-      "artifactName": "${productName}-macOS-${version}-${arch}.${ext}",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "Open-Voice-Input-macOS-${version}-${arch}.${ext}",
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
@@ -125,14 +141,23 @@
         "NSMicrophoneUsageDescription": "Record your voice and save local meeting audio.",
         "NSScreenCaptureUsageDescription": "Capture meeting system audio. Screen video is not saved."
       },
-      "binaries": ["Contents/Resources/native/audio-capture-helper", "Contents/Resources/native/ffmpeg"],
+      "binaries": [
+        "Contents/Resources/native/audio-capture-helper",
+        "Contents/Resources/native/ffmpeg"
+      ],
       "extraResources": [
-        { "from": "native/macos-audio-capture-helper/.build/release/audio-capture-helper", "to": "native/audio-capture-helper" },
-        { "from": "native/ffmpeg/ffmpeg", "to": "native/ffmpeg" }
+        {
+          "from": "native/macos-audio-capture-helper/.build/release/audio-capture-helper",
+          "to": "native/audio-capture-helper"
+        },
+        {
+          "from": "native/ffmpeg/ffmpeg",
+          "to": "native/ffmpeg"
+        }
       ]
     },
     "nsis": {
-      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
+      "artifactName": "Open-Voice-Input-Setup-${version}-${arch}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
@@ -140,7 +165,7 @@
       "shortcutName": "Open Voice Input"
     },
     "portable": {
-      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
+      "artifactName": "Open-Voice-Input-Portable-${version}-${arch}.${ext}"
     },
     "publish": {
       "provider": "github",

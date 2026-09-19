@@ -24,6 +24,7 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 - 新增独立文件转写工作区：可导入音频或视频、单独选择 ASR 模型、生成校订文本与结构化总结，并导出 Markdown、TXT 或 Word。
 - 设置、会议和文件工作区支持自绘最小化、最大化/恢复、窗口拖动与边缘缩放。
 - 新增 Windows x64 安装版、单文件便携版、GitHub Release 自动构建和 SHA-256 校验。
+- 发布版可在应用内检查 GitHub Releases、显示下载进度并重启安装，无需打开浏览器；默认启动后检查并每 6 小时复查一次，可在设置中关闭。
 - 构建过程不会打包 `.env` 或本机用户设置，并会在生成发布包前扫描疑似真实 API Key。
 
 ## 推荐配置
@@ -75,6 +76,8 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 - `Open Voice Input-Portable-<版本>-x64.exe`：单文件便携版，复制到另一台 Windows 电脑后直接运行。
 
 发布版不需要安装 Node.js、npm 或 Electron。首次启动没有可用 API Key 时会自动打开设置窗口；填写 ASR 和可选文本清理 API 后即可使用。
+
+需要先从 Releases 手动安装一次 `0.4.0` 或更高版本来获得更新器。之后可使用“设置 > 关于与更新”或托盘菜单“检查更新”；检查更新不会上传 API 配置、录音或转录内容。
 
 安装版和便携版都把本机配置保存在：
 
@@ -151,7 +154,7 @@ npm run dist
 
 构建产物位于 `dist/`。构建前会自动运行 API Key 扫描和测试；`.env`、日志、录音和用户设置不会进入安装包。
 
-推送 `v*` 标签后，`.github/workflows/release.yml` 会在 GitHub Actions 中构建两个 Windows `.exe`、生成 `SHA256SUMS.txt`，并上传到 GitHub Releases。
+推送 `v*` 标签后，`.github/workflows/release.yml` 会构建 Windows 与 macOS 发布包、生成 `SHA256SUMS.txt`，并上传 `electron-updater` 所需的更新清单和 blockmap。
 
 ## 短语音使用
 
@@ -247,7 +250,7 @@ npm run test:meeting:4c
 - 实时 ASR 质量受麦克风、网络延迟、供应商行为和模型版本影响。
 - 如果第一步 ASR 已经听错，第二步文本清理只能整理已有文本，不能恢复没有听准的内容。
 - 文本清理模型仍可能把有意义的重复误判为结巴，或过于保守地保留自我修正。当前已关闭本地重复词正则，并通过最小编辑提示词和结果校验降低误伤，但无法从纯文本中彻底消除语义歧义。
-- 目前没有自动更新和代码签名。未签名的发布版可能触发 Windows SmartScreen，公开分发时需要用户手动确认运行。
+- 正式打包版本支持应用内更新。Windows 发布包仍未签名，可能触发 SmartScreen；macOS 已为 Intel 与 Apple Silicon 分离更新通道，但无人值守安装必须使用签名发布包，当前未签名测试包可能报告签名错误并需要手动替换。
 - 会议：基础不分多人；增强依赖 Fun+OSS；首音轨导入；无 AEC / 未做真实多小时验收（见上文与 docs/MEETING_STAGE_4C.md）。
 
 ## 许可证

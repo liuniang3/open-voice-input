@@ -253,7 +253,8 @@ const DEFAULT_SETTINGS = {
   meetingAnalysisContextWindow: 128000,
   meetingAnalysisMaxOutput: 8192,
   meetingAnalysisReasoning: "",
-  meetingAnalysisTimeoutMs: 120000
+  meetingAnalysisTimeoutMs: 120000,
+  updateAutoCheck: true
 };
 
 app.setPath("userData", path.join(app.getPath("appData"), STABLE_USER_DATA_DIR));
@@ -292,6 +293,9 @@ let shortStartPending = false;
 let macUtilities = null;
 const liveOutputPaths = new Set();
 let meetingQuitCleanupStarted = false;
+let updateService = null;
+let updateStartupTimer = null;
+let updateIntervalTimer = null;
 const MEETING_QUIT_TIMEOUT_MS = 15000;
 const singleInstanceLock = app.requestSingleInstanceLock();
 
@@ -746,6 +750,7 @@ async function saveSettings(nextSettings) {
   await fs.mkdir(app.getPath("userData"), { recursive: true });
   await fs.writeFile(settingsPath(), JSON.stringify(settings, null, 2), "utf8");
   if (!shortcutCaptureSuspended) await registerHotkey();
+  configureUpdateSchedule();
   return settings;
 }
 
@@ -902,7 +907,7 @@ function showWindowOnly() {
   mainWindow.focus();
 }
 
-function showSettings() {
+function showSettings(tabName = "") {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   targetWindowHandle = "";
   logEvent("settings: show in main window");
@@ -911,7 +916,12 @@ function showSettings() {
   mainWindow.show();
   enforceWindowGeometry(mainWindow, "settings");
   focusWindow(mainWindow, "settings", { topmost: false });
-  sendWhenLoaded(mainWindow, "open-settings");
+  sendWhenLoaded(mainWindow, "open-settings", typeof tabName === "string" ? tabName : "");
+}
+
+function showUpdateSettings() {
+  showSettings("updates");
+  void getUpdateService().check();
 }
 
 function showResultWindow() {
@@ -1092,6 +1102,49 @@ function sendWhenLoaded(win, channel, ...args) {
       win.webContents.send(channel, ...args);
     }
   });
+}
+
+function publishUpdateStatus(value) {
+  sendWhenLoaded(mainWindow, "app:update:status", value);
+}
+
+function updateInstallBlocked() {
+  const live = realtimeMeeting?.status();
+  return Boolean(captureOwner || shortStartPending || legacyCapturePending || liveStartPromise || liveStopPromise
+    || liveRecoveryPromise || liveActionPromise || liveControlPromise || livePostprocessBusy(live)
+    || live?.recording || live?.paused || live?.status === "stopping");
+}
+
+function getUpdateService() {
+  if (updateService) return updateService;
+  const { autoUpdater } = require("electron-updater");
+  const { createUpdateService } = require("./updater");
+  updateService = createUpdateService({
+    autoUpdater,
+    currentVersion: app.getVersion(),
+    isPackaged: app.isPackaged,
+    platform: os.platform(),
+    arch: process.arch,
+    beforeInstall: async () => {
+      if (updateInstallBlocked() || meetingQuitCleanupStarted) throw liveError("update_busy");
+    },
+    onStatus: publishUpdateStatus,
+    logger: (message, detail) => logEvent(message, detail)
+  });
+  return updateService;
+}
+
+function configureUpdateSchedule() {
+  if (updateStartupTimer) clearTimeout(updateStartupTimer);
+  if (updateIntervalTimer) clearInterval(updateIntervalTimer);
+  updateStartupTimer = null;
+  updateIntervalTimer = null;
+  if (!app.isPackaged || settings.updateAutoCheck === false) return;
+  const check = () => getUpdateService().check().catch(() => {});
+  updateStartupTimer = setTimeout(check, 12000);
+  updateStartupTimer.unref?.();
+  updateIntervalTimer = setInterval(check, 6 * 60 * 60 * 1000);
+  updateIntervalTimer.unref?.();
 }
 
 function hotkeyCandidates() {
@@ -1492,6 +1545,7 @@ function createTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "显示", click: showWindowOnly },
     { label: "设置", click: showSettings },
+    { label: "检查更新", click: showUpdateSettings },
     { label: "文件转写", click: showFileTranscriptionWorkspace },
     { label: "开始实时会议转写", click: showAndStartLiveMeeting },
     { label: "打开会议工作台", click: showMeetingWorkspace },
@@ -1511,6 +1565,7 @@ function configureApplicationMenu() {
     { label: APP_DISPLAY_NAME, submenu: [
       { role: "about" }, { type: "separator" },
       { label: "设置", accelerator: "Command+,", click: showSettings },
+      { label: "检查更新", click: showUpdateSettings },
       { type: "separator" }, { role: "services" }, { type: "separator" },
       { role: "hide" }, { role: "hideOthers" }, { role: "unhide" },
       { type: "separator" }, { role: "quit" }
@@ -1684,6 +1739,10 @@ public static class Win32 {
 
 ipcMain.handle("settings:get", async () => settings);
 ipcMain.handle("settings:save", async (_event, nextSettings) => saveSettings(nextSettings));
+ipcMain.handle("app:update:status", async () => getUpdateService().status());
+ipcMain.handle("app:update:check", async () => getUpdateService().check());
+ipcMain.handle("app:update:download", async () => getUpdateService().download());
+ipcMain.handle("app:update:install", async () => getUpdateService().install());
 ipcMain.handle("shortcut:check", async (_event, payload) => checkHotkeyAvailability(payload));
 ipcMain.handle("shortcut:capture-start", async () => suspendConfiguredHotkeys());
 ipcMain.handle("shortcut:capture-end", async () => resumeConfiguredHotkeys());
@@ -2739,6 +2798,7 @@ app.whenReady().then(async () => {
     showSettings();
   }
   logEvent("app: initialized");
+  configureUpdateSchedule();
 });
 
 function cleanupHotkeysAndShortcuts() {

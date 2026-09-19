@@ -24,6 +24,7 @@ Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 - An independent file transcription workspace can import audio or video, select its ASR model, generate corrected text and a structured summary, and export Markdown, TXT, or Word.
 - Settings, meeting, and file workspaces provide custom minimize, maximize/restore, window dragging, and edge resizing controls.
 - Windows x64 installer and single-file portable builds are available, with GitHub Release automation and SHA-256 checksums.
+- Release builds can check GitHub Releases in-app, download an update with visible progress, and restart into the installer without opening a browser. Checks run after startup and every six hours by default and can be disabled in Settings.
 - Release builds exclude `.env` and machine-local settings, and packaging stops if a real-looking API key is detected.
 
 ## Recommended Setup
@@ -75,6 +76,8 @@ The recommended option is to download a Windows build from GitHub Releases:
 - `Open Voice Input-Portable-<version>-x64.exe`: single-file portable build that can be copied to another Windows PC.
 
 Release builds do not require Node.js, npm, or a separate Electron installation. If no usable API key is available on first launch, the settings window opens automatically.
+
+Install version `0.4.0` or newer once from Releases to enable in-app updates. Afterwards use `Settings > About & Updates` or the tray `Check for Updates` command. API settings, recordings and transcripts are never sent during update checks.
 
 Both builds store machine-local settings in:
 
@@ -151,7 +154,7 @@ npm run dist
 
 Artifacts are written to `dist/`. The build runs tests and a real-looking API key scan first. `.env` files, logs, recordings, and user settings are not included.
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, builds both Windows executables, generates `SHA256SUMS.txt`, and attaches them to a GitHub Release.
+Pushing a `v*` tag runs `.github/workflows/release.yml`, builds Windows and macOS artifacts, generates `SHA256SUMS.txt`, and uploads the updater channel metadata and blockmaps required by `electron-updater`.
 
 ## Short Dictation Usage
 
@@ -247,7 +250,7 @@ npm run test:meeting:4c
 - Realtime ASR quality depends on microphone choice, network latency, provider behavior, and model version.
 - If the ASR step mishears speech, the cleanup step can only clean the mistaken text; it cannot recover unheard content.
 - A cleanup model may still confuse meaningful repetition with a stutter or conservatively retain a self-correction. The local repetition regex is disabled, and the minimal-edit prompt plus output validator reduce damage, but text alone cannot resolve every semantic ambiguity.
-- Automatic updates and code signing are not configured yet. Unsigned builds may trigger Windows SmartScreen and require manual confirmation.
+- In-app updates are available in packaged builds. Windows releases remain unsigned and may trigger SmartScreen. macOS update checks use separate Intel/Apple Silicon channels, but unattended installation requires a signed release; current unsigned macOS test builds may report a signature error and must be replaced manually.
 - Meeting: basic has no multi-speaker split; enhanced needs Fun+OSS; first-track import; no AEC / no multi-hour acceptance claim (see above and docs/MEETING_STAGE_4C.md).
 
 ## License

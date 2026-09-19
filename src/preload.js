@@ -2,6 +2,10 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("mimoInput", {
   getStatus: () => ipcRenderer.invoke("app:status"),
+  getUpdateStatus: () => ipcRenderer.invoke("app:update:status"),
+  checkForUpdates: () => ipcRenderer.invoke("app:update:check"),
+  downloadUpdate: () => ipcRenderer.invoke("app:update:download"),
+  installUpdate: () => ipcRenderer.invoke("app:update:install"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   checkHotkey: (payload) => ipcRenderer.invoke("shortcut:check", payload),
@@ -57,7 +61,13 @@ contextBridge.exposeInMainWorld("mimoInput", {
   onHotkeyRecord: (callback) => ipcRenderer.on("hotkey-record", callback),
   onRecordingCommand: (callback) => ipcRenderer.on("recording-command", (_event, command) => callback(command)),
   onRetryLastVoiceRequest: (callback) => ipcRenderer.on("retry-last-voice-request", callback),
-  onOpenSettings: (callback) => ipcRenderer.on("open-settings", callback),
+  onOpenSettings: (callback) => ipcRenderer.on("open-settings", (_event, tabName) => callback(tabName)),
+  onUpdateStatus: (callback) => {
+    if (typeof callback !== "function") throw new TypeError("callback required");
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("app:update:status", listener);
+    return () => ipcRenderer.removeListener("app:update:status", listener);
+  },
   onOpenMeeting: (callback) => ipcRenderer.on("open-meeting", callback),
   onOpenFile: (callback) => ipcRenderer.on("open-file", callback),
   onWindowMode: (callback) => ipcRenderer.on("window-mode", (_event, mode) => callback(mode)),

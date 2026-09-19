@@ -95,6 +95,16 @@ const meetingHotkeyStatus = document.getElementById("meetingHotkeyStatus");
 const stableModeBtn = document.getElementById("stableModeBtn");
 const fastModeBtn = document.getElementById("fastModeBtn");
 const testConnectionBtn = document.getElementById("testConnectionBtn");
+const updateCurrentVersion = document.getElementById("updateCurrentVersion");
+const updateStateBadge = document.getElementById("updateStateBadge");
+const updateStatusTitle = document.getElementById("updateStatusTitle");
+const updateStatusDetail = document.getElementById("updateStatusDetail");
+const updateProgress = document.getElementById("updateProgress");
+const updateCheckBtn = document.getElementById("updateCheckBtn");
+const updateDownloadBtn = document.getElementById("updateDownloadBtn");
+const updateInstallBtn = document.getElementById("updateInstallBtn");
+const updateAutoCheckInput = document.getElementById("updateAutoCheckInput");
+const updatePlatformNote = document.getElementById("updatePlatformNote");
 const settingsTabButtons = [...document.querySelectorAll("[data-settings-tab]")];
 const settingsTabPanels = [...document.querySelectorAll("[data-settings-panel]")];
 const secretToggleButtons = [...document.querySelectorAll("[data-secret-toggle]")];
@@ -345,6 +355,7 @@ let isRecording = false;
 let isStartingRecording = false;
 let isTranscribing = false;
 let appSettings = {};
+let appUpdateState = null;
 let autoSendAfterTranscript = false;
 let currentWindowMode = "compact";
 let activeHotkeyCapture = null;
@@ -991,6 +1002,82 @@ function setSettingsTab(tabName) {
   }
   const content = document.querySelector(".settings-tab-content");
   if (content) content.scrollTop = 0;
+  if (activeSettingsTab === "updates") void refreshUpdateStatus();
+}
+
+function formatUpdateRate(value) {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes < 1024) return `${Math.round(bytes)} B/s`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB/s`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB/s`;
+}
+
+function renderUpdateStatus(next) {
+  if (!next || typeof next !== "object") return;
+  appUpdateState = next;
+  const status = String(next.status || "idle");
+  const labels = {
+    idle: "等待检查",
+    checking: "正在检查",
+    current: "已是最新",
+    available: "发现更新",
+    downloading: "正在下载",
+    downloaded: "等待安装",
+    installing: "正在重启",
+    error: "更新失败",
+    unsupported: "当前不可用"
+  };
+  const busy = ["checking", "downloading", "installing"].includes(status);
+  updateCurrentVersion.textContent = `当前版本 ${next.currentVersion ? `v${next.currentVersion}` : "—"}`;
+  updateStateBadge.textContent = labels[status] || "等待检查";
+  updateStateBadge.dataset.kind = status;
+  updateStatusTitle.textContent = status === "current" ? "当前已是最新版本"
+    : status === "available" ? `发现 v${next.availableVersion || "新版本"}`
+      : status === "downloading" ? `正在下载 v${next.availableVersion || "新版本"}`
+        : status === "downloaded" ? `v${next.availableVersion || "新版本"} 已下载`
+          : status === "installing" ? "正在退出并安装更新"
+            : status === "checking" ? "正在检查 GitHub Releases"
+              : status === "error" ? "更新未完成"
+                : status === "unsupported" ? "此运行方式不支持自动更新"
+                  : "检查 GitHub Releases 获取新版本";
+  updateStatusDetail.textContent = status === "error" ? next.error?.message || "更新失败，当前版本未修改。"
+    : status === "downloading" ? `${Math.round(next.progress?.percent || 0)}% · ${formatUpdateRate(next.progress?.bytesPerSecond)}`
+      : status === "downloaded" ? "可以立即重启安装；录音或处理任务运行时不会开始安装。"
+        : status === "available" ? [next.releaseName, next.releaseDate].filter(Boolean).join(" · ") || "可在应用内下载。"
+          : status === "unsupported" ? "开发模式不会连接更新服务，请在正式安装包中使用。"
+            : "不会上传 API 配置、录音或转录内容。";
+  updateProgress.hidden = !["downloading", "downloaded"].includes(status);
+  updateProgress.value = Math.max(0, Math.min(100, Number(next.progress?.percent) || 0));
+  updateCheckBtn.disabled = busy;
+  updateCheckBtn.textContent = status === "checking" ? "正在检查…" : "检查更新";
+  updateDownloadBtn.hidden = !next.availableVersion || next.downloaded;
+  updateDownloadBtn.disabled = busy;
+  updateInstallBtn.hidden = !next.downloaded;
+  updateInstallBtn.disabled = status === "installing";
+  updatePlatformNote.textContent = next.platform === "darwin"
+    ? "macOS 自动安装需要签名发布包；未签名测试包会保留当前版本并报告签名错误。"
+    : "Windows 安装版会在下载完成后退出并运行安装程序。";
+}
+
+async function refreshUpdateStatus() {
+  if (typeof window.mimoInput.getUpdateStatus !== "function") return;
+  try {
+    renderUpdateStatus(await window.mimoInput.getUpdateStatus());
+  } catch (error) {
+    renderUpdateStatus({ ...(appUpdateState || {}), status: "error",
+      error: { message: error.message || String(error) } });
+  }
+}
+
+async function runUpdateAction(method, button) {
+  if (typeof window.mimoInput[method] !== "function" || button?.disabled) return;
+  button.disabled = true;
+  try {
+    renderUpdateStatus(await window.mimoInput[method]());
+  } catch (error) {
+    renderUpdateStatus({ ...(appUpdateState || {}), status: "error",
+      error: { message: error.message || String(error) } });
+  }
 }
 
 function toggleSecretVisibility(button) {
@@ -1967,6 +2054,7 @@ function fillSettingsForm() {
   renderMeetingSettingsMode(settingsMode);
   loadMeetingFileAsrProfileDraft(appSettings.meetingFileAsrModel || MIMO_ASR_MODEL);
   loadMeetingAnalysisProfileDraft(appSettings.meetingAnalysisModel || "gpt-5.4-mini");
+  if (updateAutoCheckInput) updateAutoCheckInput.checked = appSettings.updateAutoCheck !== false;
   syncWorkbenchProcessModeFromSettings({ silent: true });
 }
 
@@ -2141,7 +2229,8 @@ async function saveAllSettings() {
     meetingAnalysisContextWindow: Number(meetingAnalysisContextInput?.value) || 128000,
     meetingAnalysisMaxOutput: Number(meetingAnalysisMaxOutputInput?.value) || 8192,
     meetingAnalysisReasoning: meetingAnalysisReasoningInput?.value.trim() || "",
-    meetingAnalysisTimeoutMs: Number(meetingAnalysisTimeoutInput?.value) || 120000
+    meetingAnalysisTimeoutMs: Number(meetingAnalysisTimeoutInput?.value) || 120000,
+    updateAutoCheck: updateAutoCheckInput?.checked !== false
   };
   appSettings = await window.mimoInput.saveSettings({
     ...nextSettings
@@ -2310,6 +2399,9 @@ meetingAnalysisProviderSelect.addEventListener("change", () => {
 for (const button of settingsTabButtons) {
   button.addEventListener("click", () => setSettingsTab(button.dataset.settingsTab));
 }
+updateCheckBtn?.addEventListener("click", () => runUpdateAction("checkForUpdates", updateCheckBtn));
+updateDownloadBtn?.addEventListener("click", () => runUpdateAction("downloadUpdate", updateDownloadBtn));
+updateInstallBtn?.addEventListener("click", () => runUpdateAction("installUpdate", updateInstallBtn));
 for (const button of secretToggleButtons) {
   button.addEventListener("click", () => toggleSecretVisibility(button));
 }
@@ -2392,15 +2484,17 @@ window.mimoInput.onPartialTranscript((text) => {
   setButtons(isRecording ? "recording" : "transcribing");
 });
 
-window.mimoInput.onOpenSettings(async () => {
+window.mimoInput.onOpenSettings(async (tabName) => {
   stopMeetingPolling();
   applyWindowMode("settings");
   settingsPanel.hidden = false;
   if (meetingPanel) meetingPanel.hidden = true;
-  setSettingsTab(activeSettingsTab);
+  setSettingsTab(typeof tabName === "string" && tabName ? tabName : activeSettingsTab);
   await refreshStatus();
   await refreshMicrophones({ requestPermission: true });
 });
+
+window.mimoInput.onUpdateStatus?.((status) => renderUpdateStatus(status));
 
 window.mimoInput.onOpenMeeting?.(async () => {
   await openMeetingWorkspace({ fromModeEvent: true });
