@@ -88,7 +88,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
 
   function safeError(error, fallback) {
     // Provider error bodies can contain credentials or transcript data. Never persist them.
-    const allowed = new Set(["live_credentials_missing", "live_model_unsupported", "live_asr_token_plan_unsupported", "live_cleanup_validation_failed"]);
+    const allowed = new Set(["live_credentials_missing", "live_model_unsupported", "live_cleanup_validation_failed"]);
     return { code: allowed.has(error?.code) ? error.code : fallback,
       message: allowed.has(error?.code) ? error.message : {
         live_audio_failed: "音频归档暂时失败，原始录音片段仍保留。请检查磁盘空间并重试。",

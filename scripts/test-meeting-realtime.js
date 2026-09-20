@@ -210,11 +210,41 @@ async function main() {
     const b = Buffer.alloc(8); b.writeFloatLE(0.5, 0); b.writeFloatLE(0.5, 4);
     assert.equal(normalizeChunk(b, { sampleRate: RATE, channels: 2, bitsPerSample: 32, formatTag: 3, blockAlign: 8 }).readInt16LE(0), 16384);
   });
-  await test("profile isolation and token-plan rejection", async () => {
+  await test("profile isolation and MiMo Token Plan support", async () => {
     assert.throws(() => profileFor({ asrModel: "qwen3-asr-flash", asrApiKey: "fixture" }, "mimo-v2.5-asr", false, {}));
     const p = profileFor({ asrProfiles: { "mimo-v2.5-asr": { apiKey: "fixture", baseUrl: "https://example.invalid/v1" } } }, "mimo-v2.5-asr", false, {});
     assert.equal(p.provider, "mimo");
-    assert.throws(() => profileFor({ asrProfiles: { "mimo-v2.5-asr": { apiKey: "tp-fixture" } } }, "mimo-v2.5-asr", false, {}));
+    const tokenPlan = profileFor({ providerConnections: { mimo: {
+      apiKey: "tp-fixture", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1"
+    } } }, "mimo-v2.5-asr", false, {});
+    assert.equal(tokenPlan.provider, "mimo");
+    assert.equal(tokenPlan.apiKey, "tp-fixture");
+    assert.equal(tokenPlan.baseUrl, "https://token-plan-cn.xiaomimimo.com/v1");
+  });
+  await test("MiMo Token Plan meeting ASR uses its own endpoint and current audio only", async () => {
+    const originalFetch = global.fetch;
+    let request;
+    global.fetch = async (url, options) => {
+      request = { url, headers: options.headers, body: JSON.parse(options.body) };
+      return { ok: true, text: async () => JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content: "Token Plan transcript" } }]
+      }) };
+    };
+    try {
+      const profile = profileFor({ providerConnections: { mimo: {
+        apiKey: "tp-fixture", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1"
+      } } }, "mimo-v2.5-asr", false, {});
+      const result = await transcriber(profile)({ audioDataUrl: "data:audio/wav;base64,CURRENT" });
+      assert.equal(result.text, "Token Plan transcript");
+      assert.equal(request.url, "https://token-plan-cn.xiaomimimo.com/v1/chat/completions");
+      assert.equal(request.headers["api-key"], "tp-fixture");
+      assert.equal(request.body.model, "mimo-v2.5-asr");
+      assert.deepEqual(request.body.messages, [{ role: "user", content: [{
+        type: "input_audio", input_audio: { data: "data:audio/wav;base64,CURRENT" }
+      }] }]);
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
   await test("audio written before checkpoint replays without duplication", async () => {
     const x = await setup(); let recovered;

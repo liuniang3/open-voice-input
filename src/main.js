@@ -421,7 +421,6 @@ function liveIpcError(error) {
     permission_unavailable: "此平台不支持该权限设置入口。",
     live_credentials_missing: "所选模型未配置独立凭据，请在设置中配置该模型。",
     live_model_unsupported: "所选模型不支持会议转写，请选择可用的 ASR 模型。",
-    live_asr_token_plan_unsupported: "当前凭据类型不支持会议转写，请检查模型配置。",
     live_audio_failed: "音频归档失败，原始片段仍保留，请检查磁盘后重试。",
     live_save_failed: "Markdown 保存失败，请检查文件权限、磁盘空间或外部编辑。",
     live_asr_failed: "转写失败，录音已保留，请检查模型配置或网络后重试。",

@@ -9,15 +9,15 @@
 | 环节 | 当前模型 / 接口 | 何时调用 |
 | --- | --- | --- |
 | 会议转录 | 默认 `qwen-audio-3.0-asr-flash-streaming`，可选 `fun-asr-realtime`；备用 `mimo-v2.5-asr` 非实时分段模式 | 阿里模型持续流式发送；MiMo 按所选间隔提交独立片段；停止后均可重试缺口 |
-| 音频复核 | 可选 `mimo-v2.5-asr`，普通 MiMo ASR API | 停止并完成音频收尾后，勾选复核并执行校订 |
+| 音频复核 | 可选 `mimo-v2.5-asr`，普通 MiMo 或 Token Plan ASR API | 停止并完成音频收尾后，勾选复核并执行校订 |
 | 文本校订 | 单独选择、配置的 MiMo 或 OpenAI 兼容 LLM | 用户明确执行校订 |
 | 总结 / 思维导图 | 界面当前所选的校订 / 摘要 LLM | 用户单独点击“生成摘要” |
 
 两个阿里实时模型使用 `/api-ws/v1/inference` 的 `run-task` / `finish-task` 协议，默认地址为 `wss://dashscope.aliyuncs.com/api-ws/v1/inference`。应配置与模型、地域及账号相匹配的地址和 Key。常见 HTTPS REST 基址会转换为同主机的 WebSocket 路径；不会因为切换模型而替换成另一个模型的凭证。
 
-`qwen3-asr-flash-realtime` 使用不同的 `/realtime` 协议，不能当作新 Streaming 模型使用；普通 `fun-asr` 文件接口也不是 `fun-asr-realtime`。当前会议流式传输只接受上述两个准确的阿里模型 ID。`mimo-v2.5-asr` 走普通 MiMo 文件式 ASR API，不建立 WebSocket，也不会显示尚未定稿的实时草稿。
+`qwen3-asr-flash-realtime` 使用不同的 `/realtime` 协议，不能当作新 Streaming 模型使用；普通 `fun-asr` 文件接口也不是 `fun-asr-realtime`。当前会议流式传输只接受上述两个准确的阿里模型 ID。`mimo-v2.5-asr` 走 MiMo 文件式 ASR API，不建立 WebSocket，也不会显示尚未定稿的实时草稿。
 
-MiMo 会议转录和会后复核都使用共享的普通 MiMo API 地址与普通 API Key，不接受 Token Plan。阿里实时识别、MiMo ASR 和 LLM 各按所选模型解析配置，不跨供应商借用 URL 或 Key。选择阿里转录且不开启复核时不会要求 MiMo 凭证。
+MiMo 会议转录和会后复核都使用共享的 MiMo 连接，支持普通 API 地址与 Key，也支持 Token Plan 的 `https://token-plan-cn.xiaomimimo.com/v1` 与 `tp-` Key。阿里实时识别、MiMo ASR 和 LLM 各按所选模型解析配置，不跨供应商借用 URL 或 Key。选择阿里转录且不开启复核时不会要求 MiMo 凭证。
 
 ## 音源和权限
 
@@ -33,7 +33,7 @@ macOS 系统音源是显示器过滤的系统混音，不是 Windows 的硬件�
 
 ## 使用流程
 
-1. 在会议模型设置中配置所选模型：阿里 Streaming / Fun-ASR 使用阿里连接，`mimo-v2.5-asr` 使用普通 MiMo 连接。会后需要校订时，另行配置 LLM。
+1. 在会议模型设置中配置所选模型：阿里 Streaming / Fun-ASR 使用阿里连接，`mimo-v2.5-asr` 使用普通 MiMo 或 Token Plan 连接。会后需要校订时，另行配置 LLM。
 2. 打开“会议实时转录”，选择仅系统声音、仅麦克风或双轨，可提前选择 Markdown 文件路径，并分别选择转录间隔和自动保存间隔。
 3. 点击开始，或按设置中的会议快捷键。再次按快捷键只置前当前会话。
 4. 录音始终先写入本地。阿里模式再以有界 PCM 数据包发送到 WebSocket，实时草稿可以被后续草稿替换，只有确认句子进入已确认原文。MiMo 模式按转录间隔封存并提交独立片段，界面明确显示“非实时分段转录”。

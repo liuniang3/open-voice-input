@@ -102,9 +102,6 @@ function profileFor(settings, modelId, cleanup = false, env = process.env) {
   const baseUrl = connection.baseUrl;
   const url = new URL(baseUrl);
   if (url.protocol !== "https:" || url.username || url.password) throw new Error("live_https_required");
-  if (!cleanup && provider === "mimo" && (String(apiKey).startsWith("tp-") || /token-plan/i.test(baseUrl))) {
-    throw Object.assign(new Error("MiMo ASR 需要普通 API Key 和普通 API 地址"), { code: "live_asr_token_plan_unsupported" });
-  }
   const requestTimeoutMs = positiveInteger(
     p.timeoutMs ?? p.requestTimeoutMs ?? (cleanup ? settings.meetingAnalysisTimeoutMs : settings.requestTimeoutMs),
     cleanup ? 120000 : 45000

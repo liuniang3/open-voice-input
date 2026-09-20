@@ -10,6 +10,8 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 
 英文文档见：[README.md](README.md)
 
+版本更新记录：[CHANGELOG.md](CHANGELOG.md)
+
 ## 当前版本更新
 
 - 会议转录默认使用阿里 Streaming 或 Fun-ASR 实时接口，也可切换到 `mimo-v2.5-asr` 非实时分段备用模式；停止后可选 MiMo 全音频复核、独立 LLM 校订，再单独生成详细总结和思维导图。
@@ -30,9 +32,9 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 
 ## 推荐配置
 
-**会议实时转录**默认选择 `qwen-audio-3.0-asr-flash-streaming` 或 `fun-asr-realtime`，只需配置一次阿里根地址和 Key；程序会从同一连接派生兼容、REST 和 `/api-ws/v1/inference` 地址。阿里不可用时可选择 `mimo-v2.5-asr`，通过共享的普通 MiMo 连接执行非实时分段转录。校订/摘要模型使用所属供应商连接，不借用其他供应商凭证。
+**会议实时转录**默认选择 `qwen-audio-3.0-asr-flash-streaming` 或 `fun-asr-realtime`，只需配置一次阿里根地址和 Key；程序会从同一连接派生兼容、REST 和 `/api-ws/v1/inference` 地址。阿里不可用时可选择 `mimo-v2.5-asr`，通过共享的 MiMo 连接执行非实时分段转录；普通 MiMo 地址与 Key、Token Plan 的 `https://token-plan-cn.xiaomimimo.com/v1` 与 `tp-` Key 均受支持。校订/摘要模型使用所属供应商连接，不借用其他供应商凭证。
 
-**短语音输入**仍优先适配专用 `mimo-v2.5-asr` 及普通 MiMo API，也支持 Qwen3-ASR 和 Fun-ASR。此推荐不改变会议工作区的阿里流式默认模型。
+**短语音输入**仍优先适配专用 `mimo-v2.5-asr`，同时支持普通 MiMo 与 Token Plan 连接，也支持 Qwen3-ASR 和 Fun-ASR。此推荐不改变会议工作区的阿里流式默认模型。
 
 第二步文字清洗不需要很大的模型。推荐使用 GPT-5.4 mini，或其他兼容 OpenAI 接口的小模型，用来删除口头词、合并重复片段并补充标点。
 
@@ -184,7 +186,7 @@ npm run dist
 
 ASR 供应商：
 
-- `MiMo`：默认使用官方 `mimo-v2.5-asr` 专用 ASR 模型，支持普通 MiMo API 地址和流式返回解析，是目前本项目适配度最高的第一步语音后端。
+- `MiMo`：默认使用官方 `mimo-v2.5-asr` 专用 ASR 模型，支持普通 MiMo 和 Token Plan 地址及流式返回解析，是目前本项目适配度最高的第一步语音后端。
 - `Qwen3-ASR`：通过 DashScope/OpenAI 兼容配置接入专用 ASR，支持非实时和实时模式。
 - `Fun-ASR`：通过 DashScope 接入专用 ASR。本地麦克风录音使用 WebSocket 实时协议；公网音频 URL 可走官方 REST 批处理。
 

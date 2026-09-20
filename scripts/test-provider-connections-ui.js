@@ -38,6 +38,7 @@ test("provider connection panel exposes one accessible connection per vendor", (
   assert.match(html, /data-provider-model-refresh="analysis"/);
   assert.match(html, /data-provider-model-status="openai"/);
   assert.match(html, /aria-describedby="mimoConnectionDescription"/);
+  assert.match(html, /token-plan-cn[^<]+tp- Key/);
   assert.match(html, /aria-describedby="aliyunConnectionDescription"/);
   assert.match(html, /aria-describedby="openaiConnectionDescription"/);
   assert.match(html, /aria-describedby="openCodeGoConnectionDescription"/);

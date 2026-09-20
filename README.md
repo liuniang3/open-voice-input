@@ -10,6 +10,8 @@ Open Voice Input is an Electron MVP for global dictation and persistent meeting 
 
 Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 
+Release history: [CHANGELOG.md](CHANGELOG.md)
+
 ## Current Release Highlights
 
 - Live meetings default to Alibaba Streaming or Fun-ASR realtime and can switch to segmented non-realtime `mimo-v2.5-asr` when Alibaba is unavailable. Optional MiMo full-audio review, LLM reconciliation, and separate summary/mindmap generation run only after recording stops.
@@ -30,9 +32,9 @@ Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 
 ## Recommended Setup
 
-For **live meetings**, normally select `qwen-audio-3.0-asr-flash-streaming` or `fun-asr-realtime` and configure the shared Alibaba root URL and key once. The app derives the required compatible, REST and `/api-ws/v1/inference` endpoints from that connection. If Alibaba is unavailable, select `mimo-v2.5-asr` for segmented non-realtime transcription through the shared regular MiMo connection. The reconciliation/summary model uses its own provider family connection.
+For **live meetings**, normally select `qwen-audio-3.0-asr-flash-streaming` or `fun-asr-realtime` and configure the shared Alibaba root URL and key once. The app derives the required compatible, REST and `/api-ws/v1/inference` endpoints from that connection. If Alibaba is unavailable, select `mimo-v2.5-asr` for segmented non-realtime transcription through the shared MiMo connection. Both the regular MiMo endpoint/key and Token Plan `https://token-plan-cn.xiaomimimo.com/v1` with a `tp-` key are supported. The reconciliation/summary model uses its own provider family connection.
 
-For **short dictation**, the project is tuned most heavily around the dedicated `mimo-v2.5-asr` model and the regular MiMo API endpoint. Qwen3-ASR and Fun-ASR are also supported. This short-dictation recommendation does not change the live-meeting streaming default.
+For **short dictation**, the project is tuned most heavily around the dedicated `mimo-v2.5-asr` model and supports both regular MiMo and Token Plan connections. Qwen3-ASR and Fun-ASR are also supported. This short-dictation recommendation does not change the live-meeting streaming default.
 
 For the second-stage rewrite step, a small chat model is usually enough. GPT-5.4 mini or another low-cost OpenAI-compatible model can remove disfluencies and organize the raw transcript into a coherent paragraph without changing its intent.
 
@@ -183,7 +185,7 @@ Outputs remain separate: original `.md`, optional `.reviewed.md`, reconciled `.c
 
 ASR providers:
 
-- `MiMo`: the official dedicated `mimo-v2.5-asr` model. It uses the regular MiMo API endpoint, supports streamed response parsing, and is currently the best-adapted first-stage speech backend in this project.
+- `MiMo`: the official dedicated `mimo-v2.5-asr` model. It supports regular MiMo and Token Plan endpoints, parses streamed responses, and is currently the best-adapted first-stage speech backend in this project.
 - `Qwen3-ASR`: dedicated ASR through DashScope-compatible configuration. Supports batch and realtime modes.
 - `Fun-ASR`: dedicated DashScope ASR. Realtime recording uses the WebSocket API. Batch URL transcription uses the REST API when a public audio URL is provided.
 

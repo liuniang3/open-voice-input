@@ -4,6 +4,42 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## v0.4.6 - 2026-09-20
+
+### Fixed
+
+- Enabled `mimo-v2.5-asr` meeting transcription and post-recording audio review with MiMo Token Plan connections, including `https://token-plan-cn.xiaomimimo.com/v1` and `tp-` keys.
+- Removed the obsolete client-side rejection that prevented valid Token Plan requests from reaching MiMo.
+- Updated the MiMo settings guidance and meeting documentation to describe regular and Token Plan credentials consistently.
+
+### Tests
+
+- Added request-contract coverage for the Token Plan endpoint, authentication header, model ID, and audio-only payload.
+- Added a regression assertion that each meeting ASR request contains only its current audio segment and never previous transcript context.
+- Verified the Token Plan route with a real API smoke test, the complete shared test suite, and the release secret scan without storing credentials or provider response bodies.
+
+## v0.4.5 - 2026-09-20
+
+### Added
+
+- Integrated meeting history into the realtime meeting workspace. Previous sessions can be searched and reopened locally, then reviewed with MiMo, corrected, or summarized without starting a new recording.
+- Added OpenCode Go as an isolated provider for Stable-mode cleanup and meeting summaries, including model discovery and independent credentials.
+- Added capability presets for OpenCode Go and DeepSeek-family models, while retaining editable context-window and output-token values for custom models.
+
+### Changed
+
+- Unified MiMo, Alibaba, OpenAI-compatible, and OpenCode Go connections by provider family so every feature resolves the selected model through the same saved endpoint and credentials.
+- Removed the separate legacy meeting-history entry and made the realtime meeting workspace the single home for current and previous sessions.
+- Changed Stable-mode short-dictation cleanup from narrow filler deletion to context-aware organization into a clear, coherent paragraph, with local validation and raw-text fallback.
+- Improved frameless-window drag and resize behavior, including non-selectable title regions and macOS three-finger window dragging compatibility.
+
+### Fixed
+
+- Prevented meeting cleanup and summary jobs from borrowing an unrelated provider's URL, key, or model settings.
+- Hardened history reopening, concurrent post-processing, stale-result handling, and local-only session browsing.
+
+## v0.3.0 - v0.4.4
+
 ### Cross-Platform Meeting Realtime Transcription
 
 - Added a macOS native microphone/system audio helper, permission and paste handling, platform-aware hotkeys, and macOS build/CI configuration alongside Windows.
