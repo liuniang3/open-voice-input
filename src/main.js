@@ -218,6 +218,7 @@ const DEFAULT_SETTINGS = {
     }
   },
   openaiModelCatalog: [],
+  openaiModelCapabilities: {},
   openaiModelCatalogUpdatedAt: "",
   // Meeting-scoped model choices and non-provider storage settings.
   meetingMicrophoneDeviceId: "",
@@ -225,6 +226,8 @@ const DEFAULT_SETTINGS = {
   meetingCaptureMode: "dual",
   meetingRealtimeDestination: "",
   meetingRealtimeModel: "qwen-audio-3.0-asr-flash-streaming",
+  meetingTranscriptionIntervalSeconds: 30,
+  meetingAutosaveIntervalSeconds: 30,
   meetingQwenApiKey: "",
   meetingQwenBaseUrl: "",
   meetingQwenModel: "qwen-audio-3.0-asr-flash-streaming",
@@ -454,7 +457,8 @@ function liveDto(value = {}) {
     "cleanedMarkdownPath", "audioPaths", "pendingSegments", "failedSegments", "lastSavedAt",
     "cleanupStatus", "modelId", "startedAtMs", "durationMs", "captureMode", "cleanupModelId",
     "finalizationPending", "paused", "previewText", "previewStatus", "reviewedText",
-    "reviewedMarkdownPath", "summaryMarkdownPath", "postprocessStatus"
+    "reviewedMarkdownPath", "summaryMarkdownPath", "postprocessStatus", "transport",
+    "transcriptionIntervalSeconds", "saveIntervalSeconds"
   ]);
   // Nested service objects also cross the trust boundary; never forward provider bodies.
   for (const key of Object.keys(dto)) {
@@ -563,9 +567,14 @@ function startLiveMeeting(payload = {}) {
   captureOwner = "live";
   liveStartPromise = (async () => {
     if (liveRecoveryPromise) await liveRecoveryPromise;
-    const input = pickMeetingFields(payload, ["destinationPath", "title", "captureMode", "modelId", "provider"]);
-    for (const value of Object.values(input)) {
+    const input = pickMeetingFields(payload, ["destinationPath", "title", "captureMode", "modelId", "provider",
+      "transcriptionIntervalSeconds", "saveIntervalSeconds"]);
+    for (const value of [input.destinationPath, input.title, input.captureMode, input.modelId, input.provider].filter(value => value !== undefined)) {
       if (typeof value !== "string" || value.length > 4096) throw liveError("invalid_payload");
+    }
+    for (const [field, min, max] of [["transcriptionIntervalSeconds", 5, 30], ["saveIntervalSeconds", 5, 300]]) {
+      if (!Object.hasOwn(input, field)) continue;
+      if (!Number.isInteger(input[field]) || input[field] < min || input[field] > max) throw liveError("invalid_payload");
     }
     input.captureMode ||= settings.meetingCaptureMode || "dual";
     input.modelId ||= settings.meetingRealtimeModel || "qwen-audio-3.0-asr-flash-streaming";
@@ -1556,7 +1565,7 @@ function createTray() {
     { type: "separator" },
     { label: "退出", click: () => app.quit() }
   ]));
-  tray.on("click", showWindowOnly);
+  tray.on("double-click", showSettings);
   logEvent("tray: created");
 }
 
@@ -1884,7 +1893,11 @@ registerLiveIpc("meeting:live:test-connection", async (payload = {}) => {
   const modelId = requestedModel.trim();
   if (!modelId) throw liveError("invalid_payload");
   if (captureOwner || liveStartPromise || liveStopPromise || realtimeMeeting?.status().recording) throw liveError("capture_busy");
-  const { previewProfileFor } = require("./meeting/realtime/providers");
+  const { previewProfileFor, profileFor, MIMO_BATCH_MODEL } = require("./meeting/realtime/providers");
+  if (modelId === MIMO_BATCH_MODEL) {
+    profileFor(settings, modelId);
+    return { modelId, scope: "meeting-batch", audioTested: false };
+  }
   const { createAliMeetingStream } = require("./providers/asr/ali-meeting-stream");
   const profile = previewProfileFor(settings, modelId);
   let stream;

@@ -1,6 +1,6 @@
 # Open Voice Input
 
-当前开发版支持 Windows/macOS 和 **会议实时转录**：默认阿里 `qwen-audio-3.0-asr-flash-streaming`，也可选 `fun-asr-realtime`，实时草稿与已确认原文分开显示。支持仅麦克风、仅系统声音、双轨、悬浮窗和暂停/继续；完整音频持续保留，Markdown 独立每 30 秒自动保存。停止后可选 MiMo 全音频复核，再由独立配置的 LLM 校订；详细总结与思维导图另行触发。详见 [会议实时转录与恢复说明](docs/MEETING_REALTIME.md)。
+当前开发版支持 Windows/macOS 和 **会议实时转录**：默认阿里 `qwen-audio-3.0-asr-flash-streaming`，也可选 `fun-asr-realtime`；阿里不可用时可切换到 `mimo-v2.5-asr` 非实时分段备用模式。支持仅麦克风、仅系统声音、双轨、悬浮窗和暂停/继续；完整音频持续保留，转录与 Markdown 自动保存间隔可分别选择。停止后可选 MiMo 全音频复核，再由独立配置的 LLM 校订；详细总结与思维导图另行触发。详见 [会议实时转录与恢复说明](docs/MEETING_REALTIME.md)。
 
 macOS 使用 AVAudioEngine 采集麦克风、ScreenCaptureKit 采集系统声音（macOS 13+）。仅系统模式不会打开麦克风，也不会请求麦克风权限，但仍需要屏幕/系统音频录制权限；自动粘贴另需辅助功能权限。已提供 Apple Silicon/Intel 构建配置，本次更新不宣称通过 Mac 真机采集或粘贴验证。在装有 Xcode Command Line Tools 的 Mac 上执行 `npm run dist:mac`，Windows 继续执行 `npm run dist`。
 
@@ -12,8 +12,8 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 
 ## 当前版本更新
 
-- 会议实时转录改用阿里 Streaming 或 Fun-ASR 实时接口；停止后可选 MiMo 全音频复核、独立 LLM 校订，再单独生成详细总结和思维导图。
-- 会议新增真正的仅系统声音采集、悬浮/精简窗口、可选置顶和暂停/继续；保留完整 WAV、原生音频及独立的 30 秒 Markdown 自动保存。
+- 会议转录默认使用阿里 Streaming 或 Fun-ASR 实时接口，也可切换到 `mimo-v2.5-asr` 非实时分段备用模式；停止后可选 MiMo 全音频复核、独立 LLM 校订，再单独生成详细总结和思维导图。
+- 会议新增真正的仅系统声音采集、悬浮/精简窗口、可选置顶和暂停/继续；保留完整 WAV 与原生音频，转录分段和 Markdown 自动保存使用两个独立的可配置计时器。
 - 第一阶段已改为可插拔 ASR：优先适配专用 `mimo-v2.5-asr`，并支持 Qwen3-ASR 和 Fun-ASR。
 - 短语音 Qwen 实时预览默认使用 `qwen-audio-3.0-asr-flash-streaming`；Fun-ASR 同样支持 WebSocket 实时预览。MiMo 使用周期性音频片段预览；实时流失败时会用完整录音自动回退到非实时转写。
 - `Stable` 模式将原始 ASR 文本交给 MiMo 或 OpenAI 兼容小模型进行口头词、重复片段和标点清理；`Fast` 模式只执行 ASR。
@@ -29,7 +29,7 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 
 ## 推荐配置
 
-**会议实时转录**选择 `qwen-audio-3.0-asr-flash-streaming` 或 `fun-asr-realtime`，只需配置一次阿里根地址和 Key；程序会从同一连接派生兼容、REST 和 `/api-ws/v1/inference` 地址。可选的会后 MiMo 复核使用共享的普通 MiMo 连接。校订/摘要模型使用所属供应商连接，不借用其他供应商凭证。
+**会议实时转录**默认选择 `qwen-audio-3.0-asr-flash-streaming` 或 `fun-asr-realtime`，只需配置一次阿里根地址和 Key；程序会从同一连接派生兼容、REST 和 `/api-ws/v1/inference` 地址。阿里不可用时可选择 `mimo-v2.5-asr`，通过共享的普通 MiMo 连接执行非实时分段转录。校订/摘要模型使用所属供应商连接，不借用其他供应商凭证。
 
 **短语音输入**仍优先适配专用 `mimo-v2.5-asr` 及普通 MiMo API，也支持 Qwen3-ASR 和 Fun-ASR。此推荐不改变会议工作区的阿里流式默认模型。
 
@@ -170,10 +170,10 @@ npm run dist
 
 ## 会议实时工作流
 
-1. 配置所选阿里实时模型，打开会议工作区，选择音源和 Markdown 保存位置。
-2. 开始录制。实时草稿可以变化，已确认句子按顺序保留；Markdown 每 30 秒独立保存，不等待 ASR 返回，各启用音轨同时保留完整音频。
+1. 配置所选阿里实时模型，或配置作为备用的 `mimo-v2.5-asr`，再打开会议工作区，选择音源、Markdown 保存位置、转录间隔和自动保存间隔。
+2. 开始录制。阿里模式显示可变化的实时草稿并按顺序保留已确认句子；MiMo 模式按所选间隔执行非实时分段转录。Markdown 按独立间隔保存，不等待 ASR 返回，各启用音轨同时保留完整音频。
 3. 可切换悬浮窗或精简视图、选择置顶，再返回详情；暂停/继续操作的是同一个会话。暂停期间的声音不会作为录音内容保存，原生日志记录暂停空洞，也可在暂停状态直接停止。
-4. 停止后等待音频收尾和流式任务完成；有转写缺口时从保留音频重试。停止不会自动调用 MiMo 或 LLM。
+4. 停止后等待音频收尾以及流式或分段任务完成；有转写缺口时从保留音频重试。停止不会自动调用会后复核或 LLM。
 5. 按需勾选 **MiMo 音频复核**、选择其 ASR 配置，再用单独选择的 LLM 执行**校订**。复核以有界分段覆盖全部保存音频；不勾选时只校订实时原文。保留有意义的重复及尚未解决的分歧，原文始终保留。
 6. 单独点击**生成摘要**，得到详细纪要与层级思维导图。已有完成的校订稿时以它为依据，否则使用原文；校订完成不会自动生成总结。
 

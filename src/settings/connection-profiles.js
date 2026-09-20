@@ -13,6 +13,11 @@ const {
   normalizeProviderConnection,
   providerFamilyFor
 } = require("./provider-connections");
+const {
+  GENERIC_MODEL_CAPABILITY,
+  capabilityForProfile,
+  resolveModelCapability
+} = require("./model-capabilities");
 
 const MIMO_ASR_MODEL = "mimo-v2.5-asr";
 const QWEN_ASR_MODEL = "qwen3-asr-flash";
@@ -28,7 +33,7 @@ const MEETING_FILE_ASR_MODEL = MIMO_ASR_MODEL;
 
 const ASR_PRESETS = new Set([MIMO_ASR_MODEL, QWEN_ASR_MODEL, FUN_ASR_MODEL]);
 const CLEANER_PRESETS = new Set(["gpt-5.4-mini", "grok-4.5", "mimo-v2.5", "mimo-v2.5-pro"]);
-const MEETING_QWEN_PRESETS = new Set([MEETING_LIVE_MODEL, FUN_ASR_REALTIME_MODEL]);
+const MEETING_QWEN_PRESETS = new Set([MEETING_LIVE_MODEL, FUN_ASR_REALTIME_MODEL, MIMO_ASR_MODEL]);
 const MEETING_FUN_PRESETS = new Set(["fun-asr", "fun-asr-mtl"]);
 const MEETING_FILE_ASR_PRESETS = new Set([
   MIMO_ASR_MODEL,
@@ -111,12 +116,25 @@ function defaultCleanerProfile(model) {
 }
 
 function defaultMeetingQwenProfile(model) {
+  const id = trimStr(model) || MEETING_LIVE_MODEL;
+  if (id === MIMO_ASR_MODEL) {
+    return { provider: "mimo", baseUrl: MIMO_BASE_URL, apiKey: "", model: id };
+  }
   return {
-    provider: /fun-asr/i.test(model) ? "fun-asr" : "qwen3-asr",
+    provider: /fun-asr/i.test(id) ? "fun-asr" : "qwen3-asr",
     baseUrl: QWEN_ASR_BASE_URL,
     apiKey: "",
-    model: trimStr(model) || MEETING_LIVE_MODEL
+    model: id
   };
+}
+
+function isSupportedMeetingTranscriptionModel(model) {
+  return model === MIMO_ASR_MODEL || isSupportedAliMeetingModel(model);
+}
+
+function boundedInteger(value, fallback, min, max) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
 function defaultMeetingFileAsrProfile(model) {
@@ -157,6 +175,7 @@ function defaultMeetingFunProfile(model) {
 function defaultMeetingAnalysisProfile(model) {
   const id = trimStr(model) || "gpt-5.4-mini";
   const isMimo = id === "mimo-v2.5" || id === "mimo-v2.5-pro";
+  const capability = resolveModelCapability(id);
   return {
     provider: isMimo ? "mimo" : "openai-compatible",
     baseUrl: isMimo ? MIMO_BASE_URL : "https://api.openai.com/v1",
@@ -165,15 +184,47 @@ function defaultMeetingAnalysisProfile(model) {
       providerFamilyFor(id) === PROVIDER_FAMILIES.OPENAI ? API_STYLES.RESPONSES : API_STYLES.CHAT_COMPLETIONS
     ),
     model: id,
-    contextWindow: 128000,
-    maxOutput: 8192,
-    reasoning: "",
-    timeoutMs: 120000
+    contextWindow: capability.contextWindow,
+    maxOutput: capability.maxOutput,
+    reasoning: capability.reasoning,
+    timeoutMs: capability.timeoutMs,
+    capabilityManaged: true,
+    capabilitySource: capability.capabilitySource,
+    capabilityRevision: capability.capabilityRevision
   };
 }
 
 function ensureProfilesMap(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? { ...value } : {};
+}
+
+function ensureMeetingAnalysisCapabilities(settings) {
+  const savedCapabilities = ensureProfilesMap(settings.openaiModelCapabilities);
+  const catalogCapabilities = {};
+  const unsafeModelIds = new Set(["__proto__", "prototype", "constructor"]);
+  const catalogModels = Array.isArray(settings.openaiModelCatalog) ? settings.openaiModelCatalog : [];
+  for (const modelId of catalogModels.slice(0, 1000)) {
+    const id = trimStr(modelId);
+    if (!id || id.length > 256 || unsafeModelIds.has(id)) continue;
+    catalogCapabilities[id] = resolveModelCapability(id, savedCapabilities[id]);
+  }
+  settings.openaiModelCapabilities = catalogCapabilities;
+  const modelIds = new Set([
+    ...MEETING_ANALYSIS_PRESETS,
+    ...Object.keys(settings.meetingAnalysisProfiles || {}),
+    trimStr(settings.meetingAnalysisModel) || "gpt-5.4-mini"
+  ]);
+  for (const modelId of modelIds) {
+    const id = trimStr(modelId);
+    if (!id) continue;
+    const existing = settings.meetingAnalysisProfiles[id];
+    const base = existing || defaultMeetingAnalysisProfile(id);
+    settings.meetingAnalysisProfiles[id] = capabilityForProfile(
+      id,
+      base,
+      catalogCapabilities[id]
+    );
+  }
 }
 
 function profileHasCredentials(profile) {
@@ -489,7 +540,10 @@ function migrateConnectionProfiles(raw) {
       contextWindow: Number(next.meetingAnalysisContextWindow) || base.contextWindow,
       maxOutput: Number(next.meetingAnalysisMaxOutput) || base.maxOutput,
       reasoning: trimStr(next.meetingAnalysisReasoning) || "",
-      timeoutMs: Number(next.meetingAnalysisTimeoutMs) || base.timeoutMs
+      timeoutMs: Number(next.meetingAnalysisTimeoutMs) || base.timeoutMs,
+      capabilityManaged: undefined,
+      capabilitySource: undefined,
+      capabilityRevision: undefined
     };
     migrated.push("meetingAnalysis:" + analysisModel);
   } else {
@@ -507,6 +561,8 @@ function migrateConnectionProfiles(raw) {
     if (!Number(profile.timeoutMs) && Number(next.meetingAnalysisTimeoutMs)) profile.timeoutMs = Number(next.meetingAnalysisTimeoutMs);
     next.meetingAnalysisProfiles[analysisModel] = profile;
   }
+
+  ensureMeetingAnalysisCapabilities(next);
 
   initializeProviderConnections(next);
   mirrorProviderConnectionsToProfiles(next);
@@ -530,8 +586,10 @@ function applyActiveProfilesToTopLevel(settings) {
   // Live meetings select a model independently; never copy an active provider's key.
   const savedMeetingRealtimeModel = typeof next.meetingRealtimeModel === "string" ? next.meetingRealtimeModel : "";
   next.meetingRealtimeModel = savedMeetingRealtimeModel || MEETING_LIVE_MODEL;
-  if (!isSupportedAliMeetingModel(next.meetingRealtimeModel)) next.meetingRealtimeModel = MEETING_LIVE_MODEL;
+  if (!isSupportedMeetingTranscriptionModel(next.meetingRealtimeModel)) next.meetingRealtimeModel = MEETING_LIVE_MODEL;
   next.meetingRealtimeDestination = trimStr(next.meetingRealtimeDestination);
+  next.meetingTranscriptionIntervalSeconds = boundedInteger(next.meetingTranscriptionIntervalSeconds, 30, 5, 30);
+  next.meetingAutosaveIntervalSeconds = boundedInteger(next.meetingAutosaveIntervalSeconds, 30, 5, 300);
   const asrModel = trimStr(next.asrModel) || MIMO_ASR_MODEL;
   const asr = cloneProfile(next.asrProfiles?.[asrModel] || defaultAsrProfile(asrModel));
   next.asrProvider = trimStr(asr.provider) || next.asrProvider || "mimo";
@@ -574,10 +632,10 @@ function applyActiveProfilesToTopLevel(settings) {
   next.meetingAnalysisBaseUrl = trimStr(ma.baseUrl) || "";
   next.meetingAnalysisApiKey = trimStr(ma.apiKey) || "";
   next.meetingAnalysisApiStyle = apiStyleFrom(ma);
-  next.meetingAnalysisContextWindow = Number(ma.contextWindow) || 128000;
-  next.meetingAnalysisMaxOutput = Number(ma.maxOutput) || 8192;
+  next.meetingAnalysisContextWindow = Number(ma.contextWindow) || GENERIC_MODEL_CAPABILITY.contextWindow;
+  next.meetingAnalysisMaxOutput = Number(ma.maxOutput) || GENERIC_MODEL_CAPABILITY.maxOutput;
   next.meetingAnalysisReasoning = trimStr(ma.reasoning) || "";
-  next.meetingAnalysisTimeoutMs = Number(ma.timeoutMs) || 120000;
+  next.meetingAnalysisTimeoutMs = Number(ma.timeoutMs) || GENERIC_MODEL_CAPABILITY.timeoutMs;
   return next;
 }
 
@@ -617,6 +675,7 @@ function ensureConnectionProfiles(value) {
   const ma = trimStr(next.meetingAnalysisModel) || "gpt-5.4-mini";
   next.meetingAnalysisModel = ma;
   if (!next.meetingAnalysisProfiles[ma]) next.meetingAnalysisProfiles[ma] = defaultMeetingAnalysisProfile(ma);
+  ensureMeetingAnalysisCapabilities(next);
 
   if (!next._providerConnectionsMigrated) initializeProviderConnections(next);
   else normalizeExistingProviderConnections(next);
@@ -637,6 +696,7 @@ module.exports = {
   MEETING_FILE_ASR_PRESETS,
   MEETING_FUN_PRESETS,
   MEETING_ANALYSIS_PRESETS,
+  isSupportedMeetingTranscriptionModel,
   API_STYLES,
   PROVIDER_FAMILIES,
   connectionBaseUrl,
@@ -649,6 +709,7 @@ module.exports = {
   defaultMeetingFileAsrProfile,
   defaultMeetingFunProfile,
   defaultMeetingAnalysisProfile,
+  ensureMeetingAnalysisCapabilities,
   migrateConnectionProfiles,
   ensureConnectionProfiles,
   applyActiveProfilesToTopLevel

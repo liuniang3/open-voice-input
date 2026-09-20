@@ -16,7 +16,12 @@ const harnessSource = fs.readFileSync(path.join(__dirname, "test-settings-shortc
 const harnessCode = harnessSource.slice(harnessSource.indexOf("function mainHarness("),
   harnessSource.indexOf("async function integrationTests(")).replace(
     '    "./platform/macos": mac',
-    `    "./meeting/realtime/providers": { previewProfileFor: (_settings, modelId) => {
+    `    "./meeting/realtime/providers": { MIMO_BATCH_MODEL: "mimo-v2.5-asr",
+      profileFor: (_settings, modelId) => {
+        (controls.batchProfileModels ||= []).push(modelId);
+        return { apiKey: "unit-value", baseUrl: "https://unit.example/v1", modelId, provider: "mimo" };
+      },
+      previewProfileFor: (_settings, modelId) => {
       (controls.connectionProfileModels ||= []).push(modelId);
       if (controls.connectionProfileError) throw controls.connectionProfileError;
       return { apiKey: "unit-value", baseUrl: "https://unit.example/api-ws/v1/inference",
@@ -45,8 +50,8 @@ function deferred() {
 const tests = [];
 const test = (name, run) => tests.push({ name, run });
 
-test("streaming defaults migrate choices and unify Ali model credentials", () => {
-  for (const old of [undefined, "mimo-v2.5-asr", "qwen3-asr-flash", "qwen3-asr-flash-filetrans"]) {
+test("streaming defaults migrate legacy choices while preserving the MiMo batch fallback", () => {
+  for (const old of [undefined, "qwen3-asr-flash", "qwen3-asr-flash-filetrans"]) {
     const saved = { _connectionProfilesMigrated: true, meetingRealtimeModel: old,
       meetingQwenModel: "qwen3-asr-flash", meetingQwenApiKey: "obsolete-active-key",
       asrProfiles: { [MEETING_LIVE_MODEL]: { apiKey: "preview-key", baseUrl: "https://preview.example/v1" } },
@@ -73,6 +78,7 @@ test("streaming defaults migrate choices and unify Ali model credentials", () =>
   assert.equal(fresh.meetingQwenModel, MEETING_LIVE_MODEL);
   assert.equal(fresh.meetingQwenApiKey, "");
   assert.equal(ensureConnectionProfiles({ meetingRealtimeModel: "fun-asr-realtime" }).meetingRealtimeModel, "fun-asr-realtime");
+  assert.equal(ensureConnectionProfiles({ meetingRealtimeModel: "mimo-v2.5-asr" }).meetingRealtimeModel, "mimo-v2.5-asr");
 });
 
 test("settings renderer prefers the shared provider map and only migrates legacy profiles once", () => {
@@ -124,6 +130,12 @@ test("live connection test uses the selected realtime model and closes its probe
   assert.equal(explicit.ok, true);
   assert.equal(explicit.modelId, MEETING_LIVE_MODEL);
   assert.equal(h.controls.connectionClosed, 2);
+  const batch = await h.invoke("meeting:live:test-connection", { modelId: "mimo-v2.5-asr" });
+  assert.deepEqual(plain(batch), {
+    ok: true, modelId: "mimo-v2.5-asr", scope: "meeting-batch", audioTested: false
+  });
+  assert.deepEqual(plain(h.controls.batchProfileModels), ["mimo-v2.5-asr"]);
+  assert.equal(h.controls.connectionClosed, 2);
   assert.equal((await h.invoke("meeting:live:test-connection", [])).error.code, "invalid_payload");
   assert.equal((await h.invoke("meeting:live:test-connection", { modelId: " " })).error.code, "invalid_payload");
 
@@ -138,6 +150,23 @@ test("live connection test uses the selected realtime model and closes its probe
   const before = h.controls.connectionProfileModels.length;
   assert.equal((await h.invoke("meeting:live:test-connection", { modelId: MEETING_LIVE_MODEL })).error.code, "capture_busy");
   assert.equal(h.controls.connectionProfileModels.length, before);
+});
+
+test("meeting start validates interval bounds and forwards valid independent intervals", async () => {
+  const invalid = mainHarness();
+  assert.equal((await invalid.invoke("meeting:live:start", {
+    transcriptionIntervalSeconds: 4, saveIntervalSeconds: 30
+  })).error.code, "invalid_payload");
+  assert.equal(invalid.controls.startCount, 0);
+
+  const valid = mainHarness();
+  const started = await valid.invoke("meeting:live:start", {
+    modelId: "mimo-v2.5-asr", transcriptionIntervalSeconds: 15, saveIntervalSeconds: 60
+  });
+  assert.equal(started.ok, true);
+  assert.equal(valid.controls.startInput.modelId, "mimo-v2.5-asr");
+  assert.equal(valid.controls.startInput.transcriptionIntervalSeconds, 15);
+  assert.equal(valid.controls.startInput.saveIntervalSeconds, 60);
 });
 
 for (const platform of ["win32", "darwin"]) {

@@ -86,6 +86,7 @@ const meetingAnalysisContextInput = document.getElementById("meetingAnalysisCont
 const meetingAnalysisMaxOutputInput = document.getElementById("meetingAnalysisMaxOutputInput");
 const meetingAnalysisReasoningInput = document.getElementById("meetingAnalysisReasoningInput");
 const meetingAnalysisTimeoutInput = document.getElementById("meetingAnalysisTimeoutInput");
+const meetingAnalysisCapabilityHint = document.getElementById("meetingAnalysisCapabilityHint");
 const hotkeyInput = document.getElementById("hotkeyInput");
 const hotkeyHint = document.getElementById("hotkeyHint");
 const hotkeyStatus = document.getElementById("hotkeyStatus");
@@ -139,8 +140,9 @@ const CUSTOM_CLEANER_MODEL = "__custom__";
 const CLEANER_MODEL_PRESETS = new Set(["gpt-5.4-mini", "grok-4.5", "mimo-v2.5", "mimo-v2.5-pro"]);
 const MEETING_LIVE_MODEL = "qwen-audio-3.0-asr-flash-streaming";
 const isSupportedMeetingLiveModel = (model) => typeof model === "string" && model === model.trim()
-  && /^(?:qwen-audio-3\.0-asr-flash-streaming|fun-asr-realtime)(?:-\d{4}-\d{2}-\d{2})?$/.test(model);
-const MEETING_QWEN_MODEL_PRESETS = new Set([MEETING_LIVE_MODEL, "fun-asr-realtime"]);
+  && (model === MIMO_ASR_MODEL
+    || /^(?:qwen-audio-3\.0-asr-flash-streaming|fun-asr-realtime)(?:-\d{4}-\d{2}-\d{2})?$/.test(model));
+const MEETING_QWEN_MODEL_PRESETS = new Set([MEETING_LIVE_MODEL, "fun-asr-realtime", MIMO_ASR_MODEL]);
 const MEETING_FUN_MODEL_PRESETS = new Set(["fun-asr", "fun-asr-mtl"]);
 const MEETING_FILE_ASR_MODEL_PRESETS = new Set([
   "mimo-v2.5-asr",
@@ -289,10 +291,11 @@ function collectProviderConnections() {
 function normalizeModelCatalog(value) {
   const models = Array.isArray(value) ? value : [];
   const seen = new Set();
+  const unsafeIds = new Set(["__proto__", "prototype", "constructor"]);
   const normalized = [];
   for (const raw of models) {
     const model = String(raw || "").trim();
-    if (!model || model.length > 256 || seen.has(model)) continue;
+    if (!model || model.length > 256 || unsafeIds.has(model) || seen.has(model)) continue;
     seen.add(model);
     normalized.push(model);
     if (normalized.length >= 1000) break;
@@ -302,6 +305,50 @@ function normalizeModelCatalog(value) {
 
 function openAiCatalogModels() {
   return normalizeModelCatalog(appSettings.openaiModelCatalog);
+}
+
+const GENERIC_ANALYSIS_CAPABILITY = Object.freeze({
+  contextWindow: 128000,
+  maxOutput: 8192,
+  reasoning: "",
+  timeoutMs: 180000,
+  capabilitySource: "generic",
+  capabilityManaged: true
+});
+
+function meetingAnalysisCapability(model, profile = null) {
+  return profile && Number(profile.contextWindow) > 0
+    ? profile
+    : appSettings.openaiModelCapabilities?.[String(model || "").trim()] || GENERIC_ANALYSIS_CAPABILITY;
+}
+
+function analysisCapabilityValues(profile) {
+  return {
+    contextWindow: Number(profile?.contextWindow) || GENERIC_ANALYSIS_CAPABILITY.contextWindow,
+    maxOutput: Number(profile?.maxOutput) || GENERIC_ANALYSIS_CAPABILITY.maxOutput,
+    reasoning: String(profile?.reasoning || "").trim(),
+    timeoutMs: Number(profile?.timeoutMs) || GENERIC_ANALYSIS_CAPABILITY.timeoutMs
+  };
+}
+
+function sameAnalysisCapability(left, right) {
+  return left.contextWindow === right.contextWindow
+    && left.maxOutput === right.maxOutput
+    && left.reasoning === right.reasoning
+    && left.timeoutMs === right.timeoutMs;
+}
+
+function renderMeetingAnalysisCapabilityHint(profile) {
+  if (!meetingAnalysisCapabilityHint) return;
+  const source = profile?.capabilityManaged === false ? "manual" : profile?.capabilitySource || "generic";
+  const labels = {
+    official: "已基于模型官方能力资料预设；超时等缺失项采用应用保守值，所有参数均可修改。",
+    provider: "已采用模型接口返回的能力参数，可直接修改；修改后将为此模型单独保存。",
+    compatibility: "已采用兼容供应商的保守能力预设，可直接修改。",
+    manual: "当前使用你为此模型保存的自定义参数。",
+    generic: "未找到专用能力档，已填入通用保守预设，可直接修改。"
+  };
+  meetingAnalysisCapabilityHint.textContent = labels[source] || labels.generic;
 }
 
 function isOpenAiCatalogModel(model) {
@@ -376,6 +423,7 @@ let activeMeetingQwenModelDraft = "";
 let activeMeetingFileAsrModelDraft = "";
 let activeMeetingFunModelDraft = "";
 let activeMeetingAnalysisModelDraft = "";
+let activeMeetingAnalysisCapabilityBaseline = null;
 let activeSettingsTab = "general";
 
 function createSettingsSnapshot() {
@@ -781,7 +829,7 @@ function cacheMeetingQwenProfileDraft(model) {
   appSettings.meetingQwenProfiles = {
     ...(appSettings.meetingQwenProfiles || {}),
     [value]: {
-      provider: /fun-asr/i.test(value) ? "fun-asr" : "qwen3-asr",
+      provider: value === MIMO_ASR_MODEL ? "mimo" : /fun-asr/i.test(value) ? "fun-asr" : "qwen3-asr",
       model: value
     }
   };
@@ -795,7 +843,8 @@ function cacheMeetingQwenProfileDraft(model) {
 
 function loadMeetingQwenProfileDraft(model) {
   const supportsLiveModel = value => typeof value === "string" && value === value.trim()
-    && /^(?:qwen-audio-3\.0-asr-flash-streaming|fun-asr-realtime)(?:-\d{4}-\d{2}-\d{2})?$/.test(value);
+    && (value === MIMO_ASR_MODEL
+      || /^(?:qwen-audio-3\.0-asr-flash-streaming|fun-asr-realtime)(?:-\d{4}-\d{2}-\d{2})?$/.test(value));
   const liveProfiles = Object.fromEntries([
     ...Object.entries(appSettings.asrProfiles || {}),
     ...Object.entries(appSettings.meetingQwenProfiles || {}),
@@ -879,16 +928,31 @@ function cacheMeetingAnalysisProfileDraft(model) {
   const providerFamily = TEXT_PROVIDER_FAMILIES.has(meetingAnalysisProviderSelect.value)
     ? meetingAnalysisProviderSelect.value
     : defaultTextProviderFamily(value);
+  const capability = analysisCapabilityValues({
+    contextWindow: meetingAnalysisContextInput.value,
+    maxOutput: meetingAnalysisMaxOutputInput.value,
+    reasoning: meetingAnalysisReasoningInput.value,
+    timeoutMs: meetingAnalysisTimeoutInput.value
+  });
+  const previous = appSettings.meetingAnalysisProfiles?.[value];
+  const sourceProfile = meetingAnalysisCapability(value, previous);
+  const baseline = value === activeMeetingAnalysisModelDraft && activeMeetingAnalysisCapabilityBaseline
+    ? activeMeetingAnalysisCapabilityBaseline
+    : analysisCapabilityValues(sourceProfile);
+  const manuallyChanged = previous?.capabilityManaged === false || !sameAnalysisCapability(capability, baseline);
   appSettings.meetingAnalysisProfiles = {
     ...(appSettings.meetingAnalysisProfiles || {}),
     [value]: {
       provider: providerFamily === "mimo" ? "mimo" : providerFamily === "openai-compatible" ? "openai" : "openai-compatible",
       providerFamily,
       model: value,
-      contextWindow: Number(meetingAnalysisContextInput.value) || 128000,
-      maxOutput: Number(meetingAnalysisMaxOutputInput.value) || 8192,
-      reasoning: meetingAnalysisReasoningInput.value.trim(),
-      timeoutMs: Number(meetingAnalysisTimeoutInput.value) || 120000,
+      contextWindow: capability.contextWindow,
+      maxOutput: capability.maxOutput,
+      reasoning: capability.reasoning,
+      timeoutMs: capability.timeoutMs,
+      capabilityManaged: !manuallyChanged,
+      capabilitySource: manuallyChanged ? "manual" : sourceProfile.capabilitySource || "generic",
+      capabilityRevision: sourceProfile.capabilityRevision || 1,
       ...(providerFamily === "custom" ? {
         baseUrl: meetingAnalysisBaseUrlInput.value.trim(),
         apiKey: meetingAnalysisApiKeyInput.value.trim()
@@ -907,15 +971,17 @@ function loadMeetingAnalysisProfileDraft(model) {
     presets: MEETING_ANALYSIS_MODEL_PRESETS,
     fallback: "gpt-5.4-mini"
   });
-  const profile = appSettings.meetingAnalysisProfiles?.[value] || {};
+  const profile = meetingAnalysisCapability(value, appSettings.meetingAnalysisProfiles?.[value]);
   meetingAnalysisProviderSelect.value = savedTextProviderFamily(value, profile);
   meetingAnalysisBaseUrlInput.value = meetingAnalysisProviderSelect.value === "custom" ? profile.baseUrl || "" : "";
   meetingAnalysisApiKeyInput.value = meetingAnalysisProviderSelect.value === "custom" ? profile.apiKey || "" : "";
   meetingAnalysisCustomConnectionFields.hidden = meetingAnalysisProviderSelect.value !== "custom";
-  meetingAnalysisContextInput.value = profile.contextWindow || 128000;
-  meetingAnalysisMaxOutputInput.value = profile.maxOutput || 8192;
+  meetingAnalysisContextInput.value = profile.contextWindow || GENERIC_ANALYSIS_CAPABILITY.contextWindow;
+  meetingAnalysisMaxOutputInput.value = profile.maxOutput || GENERIC_ANALYSIS_CAPABILITY.maxOutput;
   meetingAnalysisReasoningInput.value = profile.reasoning || "";
-  meetingAnalysisTimeoutInput.value = profile.timeoutMs || 120000;
+  meetingAnalysisTimeoutInput.value = profile.timeoutMs || GENERIC_ANALYSIS_CAPABILITY.timeoutMs;
+  activeMeetingAnalysisCapabilityBaseline = analysisCapabilityValues(profile);
+  renderMeetingAnalysisCapabilityHint(profile);
   activeMeetingAnalysisModelDraft = value;
 }
 
@@ -2168,7 +2234,7 @@ async function saveAllSettings() {
     throw new Error("请填写所有已选择的自定义模型 ID。");
   }
   if (!isSupportedMeetingLiveModel(meetingQwenModel)) {
-    throw new Error("会议实时模型仅支持 Qwen Audio Streaming、Fun-ASR Realtime 或其 YYYY-MM-DD 日期版本。");
+    throw new Error("会议转录模型仅支持 Qwen Audio Streaming、Fun-ASR Realtime、MiMo V2.5 ASR 或阿里模型的 YYYY-MM-DD 日期版本。");
   }
   cacheMeetingQwenProfileDraft(meetingQwenModel);
   cacheMeetingFileAsrProfileDraft(meetingFileAsrModel);
@@ -2185,6 +2251,7 @@ async function saveAllSettings() {
   const nextSettings = {
     providerConnections: collectProviderConnections(),
     openaiModelCatalog: openAiCatalogModels(),
+    openaiModelCapabilities: appSettings.openaiModelCapabilities || {},
     openaiModelCatalogUpdatedAt: appSettings.openaiModelCatalogUpdatedAt || "",
     asrProvider: asrProviderSelect.value,
     asrMode: normalizeAsrMode(asrModeSelect.value),
@@ -2209,6 +2276,8 @@ async function saveAllSettings() {
       document.getElementById("meetingCaptureModeSelect")?.value || appSettings.meetingCaptureMode || "dual",
     meetingQwenModel,
     meetingRealtimeModel: meetingQwenModel,
+    meetingTranscriptionIntervalSeconds: appSettings.meetingTranscriptionIntervalSeconds || 30,
+    meetingAutosaveIntervalSeconds: appSettings.meetingAutosaveIntervalSeconds || 30,
     meetingQwenProfiles: appSettings.meetingQwenProfiles || {},
     meetingRealtimeProfiles: appSettings.meetingRealtimeProfiles || {},
     meetingFileAsrProvider: meetingFileAsrProviderSelect?.value || "mimo",
@@ -2237,10 +2306,10 @@ async function saveAllSettings() {
     meetingAnalysisModel,
     meetingAnalysisProviderFamily: meetingAnalysisProviderSelect.value,
     meetingAnalysisProfiles: appSettings.meetingAnalysisProfiles || {},
-    meetingAnalysisContextWindow: Number(meetingAnalysisContextInput?.value) || 128000,
-    meetingAnalysisMaxOutput: Number(meetingAnalysisMaxOutputInput?.value) || 8192,
+    meetingAnalysisContextWindow: Number(meetingAnalysisContextInput?.value) || GENERIC_ANALYSIS_CAPABILITY.contextWindow,
+    meetingAnalysisMaxOutput: Number(meetingAnalysisMaxOutputInput?.value) || GENERIC_ANALYSIS_CAPABILITY.maxOutput,
     meetingAnalysisReasoning: meetingAnalysisReasoningInput?.value.trim() || "",
-    meetingAnalysisTimeoutMs: Number(meetingAnalysisTimeoutInput?.value) || 120000,
+    meetingAnalysisTimeoutMs: Number(meetingAnalysisTimeoutInput?.value) || GENERIC_ANALYSIS_CAPABILITY.timeoutMs,
     updateAutoCheck: updateAutoCheckInput?.checked !== false
   };
   appSettings = await window.mimoInput.saveSettings({
@@ -2309,6 +2378,7 @@ async function refreshOpenAiModelCatalog() {
     if (!models.length) throw new Error("接口没有返回可用的模型 ID。");
     appSettings = await window.mimoInput.saveSettings({
       openaiModelCatalog: models,
+      openaiModelCapabilities: result.capabilities || {},
       openaiModelCatalogUpdatedAt: new Date().toISOString()
     });
     syncSavedModelOptions(cleanerModelPresetSelect, appSettings.cleanerProfiles, CLEANER_MODEL_PRESETS);
@@ -2316,6 +2386,11 @@ async function refreshOpenAiModelCatalog() {
       meetingAnalysisModelPresetSelect,
       appSettings.meetingAnalysisProfiles,
       MEETING_ANALYSIS_MODEL_PRESETS
+    );
+    loadMeetingAnalysisProfileDraft(
+      selectedProfileModel(meetingAnalysisModelPresetSelect, meetingAnalysisModelInput)
+        || activeMeetingAnalysisModelDraft
+        || "gpt-5.4-mini"
     );
     const latency = Number.isFinite(result.latencyMs) ? ` · ${result.latencyMs}ms` : "";
     setOpenAiCatalogStatus(`已获取 ${models.length} 个模型${latency}`);
@@ -2338,8 +2413,11 @@ async function testConnection() {
       if (!window.mimoInput.meetingLiveTestConnection) throw new Error("当前版本不支持会议实时模型连接测试。");
       const result = await window.mimoInput.meetingLiveTestConnection({ modelId });
       if (!result?.ok) throw new Error(result?.error?.message || "会议实时模型连接测试失败。");
-      if (result.modelId !== modelId || result.scope !== "meeting-preview") throw new Error("会议模型测试结果不匹配。");
-      setStatus("ready", "会议实时连接可用", `${modelId}：鉴权与任务建立成功，未测试音频识别。`);
+      if (result.modelId !== modelId || !["meeting-preview", "meeting-batch"].includes(result.scope)) {
+        throw new Error("会议模型测试结果不匹配。");
+      }
+      setStatus("ready", result.scope === "meeting-batch" ? "MiMo 分段模型可用" : "会议实时连接可用",
+        `${modelId}：连接配置完整，未测试音频识别。`);
     } else {
       const checks = await window.mimoInput.testConnection();
       const detail = checks.map((check) => `${check.name}：${check.detail}`).join("；");
@@ -2407,6 +2485,18 @@ meetingAnalysisModelInput.addEventListener("input", () => handleMeetingCustomPro
 meetingAnalysisProviderSelect.addEventListener("change", () => {
   meetingAnalysisCustomConnectionFields.hidden = meetingAnalysisProviderSelect.value !== "custom";
 });
+for (const input of [
+  meetingAnalysisContextInput,
+  meetingAnalysisMaxOutputInput,
+  meetingAnalysisReasoningInput,
+  meetingAnalysisTimeoutInput
+]) {
+  input?.addEventListener("input", () => {
+    if (meetingAnalysisCapabilityHint) {
+      meetingAnalysisCapabilityHint.textContent = "参数已修改；保存后会作为此模型的手工配置，不再被自动预设覆盖。";
+    }
+  });
+}
 for (const button of settingsTabButtons) {
   button.addEventListener("click", () => setSettingsTab(button.dataset.settingsTab));
 }

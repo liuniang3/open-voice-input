@@ -8,6 +8,13 @@ const { isSupportedAliMeetingModel } = require("../../providers/asr/ali-meeting-
 const { buildTextCleanupMessages, parseAndValidateCleanupResponse } = require("../../providers/cleaner/text-cleanup-method");
 const { resolveProviderConnection } = require("../../settings/provider-connections");
 const DEFAULT_LIVE_MODEL = "qwen-audio-3.0-asr-flash-streaming";
+const MIMO_BATCH_MODEL = "mimo-v2.5-asr";
+
+function meetingTransportFor(modelId) {
+  if (isSupportedAliMeetingModel(modelId)) return "ali-streaming";
+  if (modelId === MIMO_BATCH_MODEL) return "mimo-batch";
+  return null;
+}
 
 function previewProfileFor(settings, modelId = DEFAULT_LIVE_MODEL) {
   if (!isSupportedAliMeetingModel(modelId)) {
@@ -137,7 +144,9 @@ module.exports = {
   transcriber,
   cleaner,
   previewProfileFor,
+  meetingTransportFor,
   DEFAULT_LIVE_MODEL,
+  MIMO_BATCH_MODEL,
   languageModel,
   isSupportedAliMeetingModel
 };

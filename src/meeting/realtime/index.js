@@ -4,7 +4,16 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { RATE, HEADER_BYTES, normalizeChunk, ensureWave, writePcm, repairWave, readMixed } = require("./audio");
 const { atomicWrite, readJson, reserveMarkdown, markdown } = require("./storage");
-const { profileFor, transcriber, cleaner, previewProfileFor, DEFAULT_LIVE_MODEL, languageModel } = require("./providers");
+const {
+  profileFor,
+  transcriber,
+  cleaner,
+  previewProfileFor,
+  meetingTransportFor,
+  DEFAULT_LIVE_MODEL,
+  MIMO_BATCH_MODEL,
+  languageModel
+} = require("./providers");
 const { RAW_TRANSCRIPT_REL } = require("../analysis/constants");
 
 function createRealtimeMeetingService({ captureService, getSettings = () => ({}), defaultDirectory,
@@ -12,7 +21,12 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
   saveIntervalMs = 30000, segmentSeconds = 30, retryBaseMs = 2000, maxAttempts = 3 } = {}) {
   if (!captureService?.store || !defaultDirectory) throw new Error("live_dependencies_missing");
   const store = captureService.store;
-  const segmentFrames = Math.min(30, Math.max(1, segmentSeconds)) * RATE;
+  const boundedInterval = (value, fallback, min, max) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+  };
+  const defaultTranscriptionIntervalSeconds = boundedInterval(segmentSeconds, 30, 1, 30);
+  const defaultSaveIntervalSeconds = boundedInterval(saveIntervalMs / 1000, 30, 0.01, 300);
   let state = null;
   let sessionDir = "";
   let request = null;
@@ -93,7 +107,9 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       sessionId: state.sessionId, title: state.title, status: state.status, recording: state.recording,
       paused: Boolean(state.paused), previewText: state.previewText || "", previewStatus: state.previewStatus || "idle",
       finalizationPending: Boolean(state.finalizationPending),
-      modelId: state.modelId, captureMode: state.captureMode, startedAtMs: state.startedAtMs,
+      modelId: state.modelId, transport: state.transport, captureMode: state.captureMode, startedAtMs: state.startedAtMs,
+      transcriptionIntervalSeconds: state.transcriptionIntervalSeconds,
+      saveIntervalSeconds: state.saveIntervalSeconds,
       durationMs: Math.round(Math.max(0, ...Object.values(state.tracks).map(t => t.frames)) * 1000 / RATE),
       rawText: state.segments.filter(s => s.status === "completed").map(s => s.text).filter(Boolean).join("\n\n"),
       correctedText: state.correctedText || "", markdownPath: state.markdownPath,
@@ -266,6 +282,12 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
 
   function queueSegments(final) {
     if (isStreaming()) return;
+    const segmentFrames = boundedInterval(
+      state.transcriptionIntervalSeconds,
+      defaultTranscriptionIntervalSeconds,
+      1,
+      30
+    ) * RATE;
     const lengths = Object.values(state.tracks).map(t => t.frames);
     // A silent system endpoint may produce no buffers. Allow a two-second arrival margin,
     // then mix absent source samples as silence so microphone ASR continues to progress.
@@ -359,7 +381,13 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         if (lifecycle?.status === "faulted") void stop().catch(() => {});
       } else runWorker();
     }, pumpIntervalMs);
-    saveTimer = setInterval(() => { void saveMarkdown().catch(() => {}); }, saveIntervalMs);
+    const currentSaveIntervalMs = boundedInterval(
+      state?.saveIntervalSeconds,
+      defaultSaveIntervalSeconds,
+      0.01,
+      300
+    ) * 1000;
+    saveTimer = setInterval(() => { void saveMarkdown().catch(() => {}); }, currentSaveIntervalMs);
     pumpTimer.unref?.(); saveTimer.unref?.();
   }
 
@@ -380,11 +408,16 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       await saveTail.catch(() => {});
       await persistTail;
       const settings = structuredClone(getSettings());
-      const modelId = options.modelId || (transcribeImpl ? settings.meetingRealtimeModel || "mimo-v2.5-asr" : settings.meetingRealtimeModel || DEFAULT_LIVE_MODEL);
-      const streaming = Boolean(previewStreamImpl) || !transcribeImpl;
-      const profile = streaming ? (previewStreamImpl ? { provider: "aliyun-streaming", model: modelId } : previewProfileFor(settings, modelId)) : { provider: "mimo", modelId };
+      const modelId = options.modelId || (transcribeImpl ? settings.meetingRealtimeModel || MIMO_BATCH_MODEL : settings.meetingRealtimeModel || DEFAULT_LIVE_MODEL);
+      const transport = previewStreamImpl ? "ali-streaming"
+        : transcribeImpl ? "mimo-batch" : meetingTransportFor(modelId);
+      if (!transport) throw Object.assign(new Error("所选模型不支持会议转写"), { code: "live_model_unsupported" });
+      const streaming = transport === "ali-streaming";
+      const profile = streaming
+        ? (previewStreamImpl ? { provider: "aliyun-streaming", model: modelId } : previewProfileFor(settings, modelId))
+        : (transcribeImpl ? { provider: "mimo", modelId } : profileFor(settings, modelId));
       liveProfile = streaming ? profile : null;
-      request = streaming ? null : transcribeImpl;
+      request = streaming ? null : transcribeImpl || transcriber(profile);
       await preview?.shutdown(); preview = null;
       closing = false;
       await store.init();
@@ -395,7 +428,19 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         defaultDirectory, created.sessionId, { reuseExisting: true });
       state = { schema: "meeting_live_v1", sessionId: created.sessionId, title: options.title || "会议实时转录",
         startedAtMs: now(), status: "starting", recording: false, modelId, provider: profile.provider,
-        transport: streaming ? "ali-streaming" : "batch", paused: false,
+        transport, paused: false,
+        transcriptionIntervalSeconds: boundedInterval(
+          options.transcriptionIntervalSeconds ?? settings.meetingTranscriptionIntervalSeconds,
+          defaultTranscriptionIntervalSeconds,
+          1,
+          30
+        ),
+        saveIntervalSeconds: boundedInterval(
+          options.saveIntervalSeconds ?? settings.meetingAutosaveIntervalSeconds,
+          defaultSaveIntervalSeconds,
+          0.01,
+          300
+        ),
         captureMode: ["microphone", "system"].includes(options.captureMode) ? options.captureMode : "dual",
         markdownPath, audioPaths: [], tracks: {}, segments: [], error: null, cleanupStatus: "idle" };
       for (const track of state.captureMode === "dual" ? ["microphone", "system"] : [state.captureMode]) {
@@ -524,6 +569,19 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       const saved = await store.readSession(id);
       sessionDir = saved.sessionDir;
       state = await readJson(stateFile());
+      state.transport ||= meetingTransportFor(state.modelId) || "mimo-batch";
+      state.transcriptionIntervalSeconds = boundedInterval(
+        state.transcriptionIntervalSeconds,
+        defaultTranscriptionIntervalSeconds,
+        1,
+        30
+      );
+      state.saveIntervalSeconds = boundedInterval(
+        state.saveIntervalSeconds,
+        defaultSaveIntervalSeconds,
+        0.01,
+        300
+      );
       const interrupted = state.recording || ["starting", "stopping"].includes(state.status);
       state.recording = false;
       state.paused = false;

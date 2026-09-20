@@ -1,6 +1,6 @@
 # Open Voice Input
 
-The current development version supports Windows/macOS and a **live meeting** workflow: Alibaba `qwen-audio-3.0-asr-flash-streaming` by default, or `fun-asr-realtime`, with separate provisional and confirmed text. Choose microphone, system audio, or both; use a floating window and pause/resume while keeping full local audio and independent Markdown autosave every 30 seconds. After stopping, optionally review the complete audio with MiMo, reconcile using an independently configured LLM, and separately generate detailed notes with a mindmap. See [meeting behavior, outputs and recovery](docs/MEETING_REALTIME.md).
+The current development version supports Windows/macOS and a **live meeting** workflow: Alibaba `qwen-audio-3.0-asr-flash-streaming` by default, or `fun-asr-realtime`, with separate provisional and confirmed text. When Alibaba is unavailable, `mimo-v2.5-asr` provides non-realtime segmented transcription as a fallback. Choose microphone, system audio, or both; use a floating window and pause/resume while keeping full local audio. Transcription and Markdown autosave intervals are configured independently. After stopping, optionally review the complete audio with MiMo, reconcile using an independently configured LLM, and separately generate detailed notes with a mindmap. See [meeting behavior, outputs and recovery](docs/MEETING_REALTIME.md).
 
 macOS native capture uses AVAudioEngine for microphone audio and ScreenCaptureKit for system audio (macOS 13+). System-only capture neither opens the microphone nor requests microphone permission; screen/system-audio permission is still required. Accessibility permission applies to automatic paste. Apple Silicon and Intel build jobs are provided, but this update has no macOS hardware-validation claim. `npm run dist:mac` requires a Mac with Xcode Command Line Tools; Windows uses `npm run dist`.
 
@@ -12,8 +12,8 @@ Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 
 ## Current Release Highlights
 
-- Live meetings use Alibaba Streaming or Fun-ASR realtime; optional MiMo full-audio review, LLM reconciliation, and separate summary/mindmap generation run only after recording stops.
-- Meeting capture supports microphone-only, dual-track and genuine system-only modes, with floating/compact views, optional always-on-top, pause/resume, full WAV archives and 30-second Markdown autosave.
+- Live meetings default to Alibaba Streaming or Fun-ASR realtime and can switch to segmented non-realtime `mimo-v2.5-asr` when Alibaba is unavailable. Optional MiMo full-audio review, LLM reconciliation, and separate summary/mindmap generation run only after recording stops.
+- Meeting capture supports microphone-only, dual-track and genuine system-only modes, with floating/compact views, optional always-on-top, pause/resume, full WAV archives, and independently configurable transcription and Markdown autosave intervals.
 - The first stage is now a pluggable ASR layer, tuned most heavily for the dedicated `mimo-v2.5-asr` model and also supporting Qwen3-ASR and Fun-ASR.
 - Short-dictation Qwen preview now defaults to `qwen-audio-3.0-asr-flash-streaming`; Fun-ASR also provides WebSocket preview. MiMo uses periodic partial-audio preview, and a failed realtime stream falls back to non-realtime transcription of the complete recording.
 - `Stable` mode sends raw ASR text to a MiMo or OpenAI-compatible small model for filler removal, repetition cleanup, and punctuation. `Fast` mode performs ASR only.
@@ -29,7 +29,7 @@ Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 
 ## Recommended Setup
 
-For **live meetings**, select `qwen-audio-3.0-asr-flash-streaming` or `fun-asr-realtime` and configure the shared Alibaba root URL and key once. The app derives the required compatible, REST and `/api-ws/v1/inference` endpoints from that connection. Optional post-recording review uses the shared regular MiMo connection. The reconciliation/summary model uses its own provider family connection.
+For **live meetings**, normally select `qwen-audio-3.0-asr-flash-streaming` or `fun-asr-realtime` and configure the shared Alibaba root URL and key once. The app derives the required compatible, REST and `/api-ws/v1/inference` endpoints from that connection. If Alibaba is unavailable, select `mimo-v2.5-asr` for segmented non-realtime transcription through the shared regular MiMo connection. The reconciliation/summary model uses its own provider family connection.
 
 For **short dictation**, the project is tuned most heavily around the dedicated `mimo-v2.5-asr` model and the regular MiMo API endpoint. Qwen3-ASR and Fun-ASR are also supported. This short-dictation recommendation does not change the live-meeting streaming default.
 
@@ -170,10 +170,10 @@ Default short-dictation hotkey: `Ctrl+Alt+M`. Default long-form transcription ho
 
 ## Live Meeting Workflow
 
-1. Configure the selected Alibaba streaming model, then open the meeting workspace and choose the audio source and Markdown destination.
-2. Start recording. Provisional text may change; confirmed sentences remain ordered. Markdown saves every 30 seconds independently of ASR responses, and each selected track retains its complete audio.
+1. Configure the selected Alibaba streaming model, or configure `mimo-v2.5-asr` as a fallback, then open the meeting workspace and choose the audio source, Markdown destination, transcription interval and autosave interval.
+2. Start recording. Alibaba mode shows revisable provisional text and ordered confirmed sentences; MiMo mode submits non-realtime segments at the selected interval. Markdown saves on its independent interval without waiting for ASR responses, and each selected track retains its complete audio.
 3. Switch to the floating or compact view, optionally pin it on top, and return to the detailed view as needed. Pause/resume controls the same session; paused source frames are not saved as recorded speech. Pause markers remain in the native journal, and the session can be stopped while paused.
-4. Stop and wait for audio finalization and streaming completion. Retry any reported transcription gaps from the retained archive. Stopping does not automatically invoke MiMo or an LLM.
+4. Stop and wait for audio finalization and completion of streaming or segmented tasks. Retry any reported transcription gaps from the retained archive. Stopping does not automatically invoke post-recording review or an LLM.
 5. Optionally enable **MiMo audio review**, select its ASR profile, and run **reconciliation** with a separately selected LLM. Review covers the full saved audio in bounded segments. Without review, the LLM reconciles the live transcript alone. Meaningful repetition and unresolved disagreements must remain visible; originals are retained.
 6. Separately run **Generate summary** for detailed notes and a hierarchical mindmap. It uses the completed reconciliation when available, otherwise the original transcript; reconciliation does not automatically generate a summary.
 

@@ -3,9 +3,11 @@
 (function installLiveMeetingUi(root) {
   const DEFAULT_MODEL = "qwen-audio-3.0-asr-flash-streaming";
   const REVIEW_MODEL = "mimo-v2.5-asr";
-  const LIVE_MODELS = [DEFAULT_MODEL, "fun-asr-realtime"];
+  const BATCH_MODEL = "mimo-v2.5-asr";
+  const LIVE_MODELS = [DEFAULT_MODEL, "fun-asr-realtime", BATCH_MODEL];
   const supportedModel = (model) => typeof model === "string" && model === model.trim()
-    && /^(?:qwen-audio-3\.0-asr-flash-streaming|fun-asr-realtime)(?:-\d{4}-\d{2}-\d{2})?$/.test(model);
+    && (model === BATCH_MODEL || /^(?:qwen-audio-3\.0-asr-flash-streaming|fun-asr-realtime)(?:-\d{4}-\d{2}-\d{2})?$/.test(model));
+  const batchModel = (model) => model === BATCH_MODEL;
   const STATUS_LABELS = {
     idle: "就绪", starting: "正在启动", recording: "实时转录中", stopping: "停止收尾中",
     paused: "已暂停", completed: "已完成", needs_retry: "有待重试片段", interrupted: "会话已中断", failed: "会话失败"
@@ -75,10 +77,11 @@
           if (/^mimo-.*asr/i.test(id) && (!profile?.provider || profile.provider === "mimo")) reviewers.add(id);
         }
       }
-      // Credentials resolve in MAIN by exact model ID; saved batch profiles are never live presets.
+      // Credentials resolve in MAIN by exact model ID; only the explicit MiMo fallback may use batch transport here.
       const chosen = supportedModel(settings.meetingRealtimeModel) ? settings.meetingRealtimeModel : DEFAULT_MODEL;
       options($("liveModel"), [
-        ...modelIds.map((id) => [id, id === DEFAULT_MODEL ? "阿里云 Qwen 实时语音" : "阿里云 Fun-ASR 实时语音"]),
+        ...modelIds.map((id) => [id, id === DEFAULT_MODEL ? "阿里云 Qwen 实时语音"
+          : id === BATCH_MODEL ? "MiMo V2.5 ASR（非实时分段备用）" : "阿里云 Fun-ASR 实时语音"]),
         ["__custom__", "自定义实时模型 ID"]
       ], chosen);
       setModel(active(dto) ? dto.modelId || chosen : chosen);
@@ -88,6 +91,10 @@
       options($("liveReviewModel"), [...reviewers].map((id) => [id, id]), REVIEW_MODEL);
       destination = String(settings.meetingRealtimeDestination || "");
       $("liveCaptureMode").value = ["system", "microphone", "dual"].includes(settings.meetingCaptureMode) ? settings.meetingCaptureMode : "dual";
+      $("liveTranscriptionInterval").value = [10, 15, 20, 30].includes(Number(settings.meetingTranscriptionIntervalSeconds))
+        ? String(settings.meetingTranscriptionIntervalSeconds) : "30";
+      $("liveSaveInterval").value = [10, 15, 30, 60, 120].includes(Number(settings.meetingAutosaveIntervalSeconds))
+        ? String(settings.meetingAutosaveIntervalSeconds) : "30";
       settingsReady = true;
     }
 
@@ -308,9 +315,12 @@
         .slice(seconds >= 3600 ? 0 : 1).map((v) => String(v).padStart(2, "0")).join(":");
       $("liveElapsedLabel").textContent = started || dto.durationMs != null || dto.elapsedMs != null ? "录制时长" : "本页计时";
       const saved = timestamp(dto.lastSavedAt);
-      const overdue = dto.recording && ((saved && now() - saved > 45000) || (!saved && observedAt && now() - observedAt > 45000));
+      const saveInterval = Number(dto.saveIntervalSeconds) || Number($("liveSaveInterval").value) || 30;
+      const overdueAfterMs = Math.max(15000, saveInterval * 1500);
+      const overdue = dto.recording && ((saved && now() - saved > overdueAfterMs) || (!saved && observedAt && now() - observedAt > overdueAfterMs));
       $("liveSaved").dataset.kind = overdue ? "warning" : saved ? "saved" : "idle";
-      $("liveSaved").textContent = "每 30 秒自动保存 · " + (saved
+      const saveLabel = saveInterval >= 60 && saveInterval % 60 === 0 ? (saveInterval / 60) + " 分钟" : saveInterval + " 秒";
+      $("liveSaved").textContent = "每 " + saveLabel + " 自动保存 · " + (saved
         ? `最近保存 ${new Date(saved).toLocaleTimeString("zh-CN", { hour12: false })}` : "尚未保存")
         + (overdue ? " · 保存确认延迟" : "");
       $("liveSaved").title = saved ? new Date(saved).toLocaleString("zh-CN") : "等待后端保存确认";
@@ -333,13 +343,17 @@
       $("livePause").disabled = !(dto.recording || isPaused) || ["starting", "stopping"].includes(dto.status)
         || busy.has("pause") || busy.has("stop") || !can(isPaused ? "meetingLiveResume" : "meetingLivePause");
       $("livePause").textContent = busy.has("pause") ? "正在切换…" : isPaused ? "继续录制" : "暂停";
-      $("liveStart").textContent = busy.has("start") ? "正在开始…" : "开始实时转录";
+      $("liveStart").textContent = busy.has("start") ? "正在开始…"
+        : batchModel(selectedModel()) ? "开始分段转录" : "开始实时转录";
       $("liveStop").textContent = stopFailed ? "重试停止并保存" : busy.has("stop") || dto.status === "stopping" ? "正在停止并保存…" : "停止并保存";
-      for (const id of ["liveTitle", "liveModel", "liveCustomModel", "liveCaptureMode", "liveChooseDestination", "liveDefaultDestination"]) $(id).disabled = locked;
+      for (const id of ["liveTitle", "liveModel", "liveCustomModel", "liveCaptureMode", "liveTranscriptionInterval", "liveSaveInterval", "liveChooseDestination", "liveDefaultDestination"]) $(id).disabled = locked;
       $("liveChooseDestination").disabled ||= !can("meetingLiveChooseDestination");
       $("liveDefaultDestination").disabled ||= !destination;
       $("liveCustomModelField").hidden = $("liveModel").value !== "__custom__";
+      $("liveTranscriptionIntervalField").hidden = !batchModel(selectedModel());
+      $("liveTranscriptionInterval").disabled = locked || !batchModel(selectedModel());
       $("liveStatus").textContent = loaded ? isPaused ? "已暂停" : STATUS_LABELS[dto.status] : "等待连接";
+      if (dto.status === "recording" && batchModel(dto.modelId || selectedModel())) $("liveStatus").textContent = "分段转录中";
       if (dto.status === "stopping" && !dto.recording) $("liveStatus").textContent = "录音已停止 · 识别收尾中";
       $("liveStatus").dataset.kind = isPaused ? "paused" : dto.status;
       $("liveSessionTitle").textContent = dto.title || "实时会议";
@@ -393,9 +407,13 @@
         });
       }
       transcript("liveRaw", dto.rawText, "尚无转写内容");
-      transcript("livePreview", dto.previewText, isPaused ? "录制已暂停" : dto.status === "stopping" ? "正在确认末尾转写…" : "正在聆听…");
+      const isBatch = batchModel(selectedModel());
+      transcript("livePreview", dto.previewText,
+        isPaused ? "录制已暂停" : dto.status === "stopping" ? "正在确认末尾转写…" : isBatch
+          ? "录音持续保存，每 " + $("liveTranscriptionInterval").value + " 秒提交一段 MiMo 转写…" : "正在聆听…");
       $("livePreviewSection").hidden = !isActive && !dto.previewText;
-      $("livePreviewStatus").textContent = isPaused ? "已暂停" : ({ connecting: "实时连接中", listening: "正在聆听", streaming: "实时草稿", draft: "实时草稿", reconnecting: "正在重连", draining: "正在确认末尾转写", retrying: "正在补转写", needs_retry: "部分转写待重试", closed: "实时连接已关闭", failed: "实时连接失败", unavailable: "实时预览不可用", completed: "本段已确认" })[dto.previewStatus] || "实时草稿";
+      $("livePreviewStatus").textContent = isPaused ? "已暂停" : isBatch ? "非实时分段转录"
+        : ({ connecting: "实时连接中", listening: "正在聆听", streaming: "实时草稿", draft: "实时草稿", reconnecting: "正在重连", draining: "正在确认末尾转写", retrying: "正在补转写", needs_retry: "部分转写待重试", closed: "实时连接已关闭", failed: "实时连接失败", unavailable: "实时预览不可用", completed: "本段已确认" })[dto.previewStatus] || "实时草稿";
       $("livePreviewSection").dataset.kind = dto.previewStatus || "idle";
       transcript("liveCorrected", dto.correctedText, "尚无校订文本");
       transcript("liveReviewed", dto.reviewedText, "尚无复核文本");
@@ -494,10 +512,16 @@
       if ($("liveStart").disabled) return;
       void action("start", async () => {
         const modelId = selectedModel();
-        await invoke("saveSettings", { meetingRealtimeModel: modelId });
+        const transcriptionIntervalSeconds = Number($("liveTranscriptionInterval").value) || 30;
+        const saveIntervalSeconds = Number($("liveSaveInterval").value) || 30;
+        await invoke("saveSettings", { meetingRealtimeModel: modelId,
+          meetingTranscriptionIntervalSeconds: transcriptionIntervalSeconds,
+          meetingAutosaveIntervalSeconds: saveIntervalSeconds });
         if (active(dto)) return;
         return invoke("meetingLiveStart", {
-          title: $("liveTitle").value.trim(), modelId, provider: "aliyun-streaming",
+          title: $("liveTitle").value.trim(), modelId,
+          provider: batchModel(modelId) ? "mimo" : "aliyun-streaming",
+          transcriptionIntervalSeconds, saveIntervalSeconds,
           captureMode: $("liveCaptureMode").value,
           ...(destination ? { destinationPath: destination } : {})
         });
@@ -557,9 +581,18 @@
       if (!supportedModel(selectedModel()) || active(dto)) return;
       void action("model", () => invoke("saveSettings", { meetingRealtimeModel: selectedModel() }));
     }
+    function saveIntervals() {
+      if (!settingsReady || active(dto)) return;
+      void invoke("saveSettings", {
+        meetingTranscriptionIntervalSeconds: Number($("liveTranscriptionInterval").value) || 30,
+        meetingAutosaveIntervalSeconds: Number($("liveSaveInterval").value) || 30
+      }).catch(error => { errorText = error.message; render(); });
+    }
     $("liveModel").addEventListener("change", saveModel);
     $("liveCustomModel").addEventListener("change", saveModel);
     $("liveCustomModel").addEventListener("input", render);
+    $("liveTranscriptionInterval").addEventListener("change", saveIntervals);
+    $("liveSaveInterval").addEventListener("change", saveIntervals);
     $("liveRefresh").addEventListener("click", () => { void open(); });
     $("liveMeetingTab").addEventListener("click", () => showHistory(false));
     $("liveHistoryTab").addEventListener("click", () => showHistory(true));

@@ -349,14 +349,15 @@
             </section>
             <section class="settings-group">
               <div class="section-title">
-                <strong>会议原文（Qwen）</strong>
-                <span>麦克风与基础模式；统一使用阿里云连接。</span>
+                <strong>会议转录模型</strong>
+                <span>阿里模型提供实时预览；MiMo 使用非实时分段转写作为备用。</span>
               </div>
               <label class="field">
-                <span>会议 Qwen 模型</span>
+                <span>默认会议识别模型</span>
                 <select id="meetingQwenModelPresetSelect">
                   <option value="qwen-audio-3.0-asr-flash-streaming">Qwen Audio 3.0 实时语音</option>
                   <option value="fun-asr-realtime">Fun-ASR 实时语音</option>
+                  <option value="mimo-v2.5-asr">MiMo V2.5 ASR（非实时分段备用）</option>
                   <option value="__custom__">日期版本模型</option>
                 </select>
               </label>
@@ -528,9 +529,10 @@
                 </label>
                 <label class="field">
                   <span>超时（ms）</span>
-                  <input id="meetingAnalysisTimeoutInput" type="number" min="5000" step="1000" placeholder="120000" />
+                  <input id="meetingAnalysisTimeoutInput" type="number" min="5000" step="1000" placeholder="180000" />
                 </label>
               </div>
+              <small id="meetingAnalysisCapabilityHint" class="model-catalog-status" aria-live="polite"></small>
             </section>
           </div>
 
@@ -713,7 +715,7 @@
             </label>
             <label class="field">
               <span>识别模型</span>
-              <select id="liveModel" aria-label="实时识别模型"><option value="qwen-audio-3.0-asr-flash-streaming">阿里云 Qwen 实时语音</option><option value="fun-asr-realtime">阿里云 Fun-ASR 实时语音</option><option value="__custom__">日期版本模型 ID</option></select>
+              <select id="liveModel" aria-label="会议识别模型"><option value="qwen-audio-3.0-asr-flash-streaming">阿里云 Qwen 实时语音</option><option value="fun-asr-realtime">阿里云 Fun-ASR 实时语音</option><option value="mimo-v2.5-asr">MiMo V2.5 ASR（非实时分段备用）</option><option value="__custom__">日期版本模型 ID</option></select>
             </label>
             <label id="liveCustomModelField" class="field" hidden>
               <span>日期版本模型 ID</span>
@@ -722,6 +724,14 @@
             <label class="field">
               <span>音源</span>
               <select id="liveCaptureMode"><option value="dual">麦克风 + 系统声音</option><option value="system">仅系统声音</option><option value="microphone">仅麦克风</option></select>
+            </label>
+            <label id="liveTranscriptionIntervalField" class="field">
+              <span>分段转录间隔</span>
+              <select id="liveTranscriptionInterval"><option value="10">10 秒</option><option value="15">15 秒</option><option value="20">20 秒</option><option value="30" selected>30 秒</option></select>
+            </label>
+            <label class="field">
+              <span>Markdown 自动保存</span>
+              <select id="liveSaveInterval"><option value="10">10 秒</option><option value="15">15 秒</option><option value="30" selected>30 秒</option><option value="60">60 秒</option><option value="120">2 分钟</option></select>
             </label>
           </div>
           <div class="live-destination">

@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const {
   MAX_MODELS,
+  extractModelCatalog,
   extractModelIds,
   listProviderModels,
   modelCatalogEndpoint
@@ -19,6 +20,17 @@ assert.deepEqual(extractModelIds({ models: [{ name: "model-b" }, "model-a", { id
   "model-b"
 ]);
 assert.equal(extractModelIds(Array.from({ length: MAX_MODELS + 10 }, (_, index) => `m-${index}`)).length, MAX_MODELS);
+assert.deepEqual(extractModelIds({ data: [{ id: "__proto__" }, { id: "safe-model" }] }), ["safe-model"]);
+const catalog = extractModelCatalog({ data: [
+  { id: "provider-model", context_window: 256000, max_output_tokens: 24000 },
+  { id: "grok-4.5" },
+  "unknown-model"
+] });
+assert.equal(catalog.capabilities["provider-model"].contextWindow, 256000);
+assert.equal(catalog.capabilities["provider-model"].maxOutput, 24000);
+assert.equal(catalog.capabilities["provider-model"].capabilitySource, "provider");
+assert.equal(catalog.capabilities["grok-4.5"].contextWindow, 500000);
+assert.equal(catalog.capabilities["unknown-model"].contextWindow, 128000);
 
 async function main() {
   const calls = [];
@@ -35,12 +47,19 @@ async function main() {
         ok: true,
         status: 200,
         headers: { get: () => null },
-        text: async () => JSON.stringify({ data: [{ id: "gpt-5.5" }, { id: "gpt-5.4-mini" }] })
+        text: async () => JSON.stringify({
+          data: [
+            { id: "gpt-5.5" },
+            { id: "gpt-5.4-mini", context_length: 260000, top_provider: { max_completion_tokens: 30000 } }
+          ]
+        })
       };
     }
   });
   assert.deepEqual(result.models, ["gpt-5.4-mini", "gpt-5.5"]);
   assert.equal(result.count, 2);
+  assert.equal(result.capabilities["gpt-5.4-mini"].contextWindow, 260000);
+  assert.equal(result.capabilities["gpt-5.4-mini"].maxOutput, 30000);
   assert.equal(calls[0].url, "https://gateway.example/v1/models");
   assert.equal(calls[0].options.method, "GET");
   assert.equal(calls[0].options.headers.Authorization, "Bearer fixture-secret");

@@ -6,7 +6,7 @@ const os = require("node:os");
 const { createSessionStore } = require("../src/meeting/session-store");
 const { createRealtimeMeetingService } = require("../src/meeting/realtime");
 const { RATE, HEADER_BYTES, wavHeader, normalizeChunk } = require("../src/meeting/realtime/audio");
-const { profileFor, transcriber, cleaner } = require("../src/meeting/realtime/providers");
+const { profileFor, transcriber, cleaner, meetingTransportFor } = require("../src/meeting/realtime/providers");
 const { RAW_TRANSCRIPT_REL } = require("../src/meeting/analysis/constants");
 const format = { sampleRate: RATE, channels: 1, bitsPerSample: 16, formatTag: 1, blockAlign: 2 };
 
@@ -58,6 +58,59 @@ async function main() {
       const doc = JSON.parse(await fs.readFile(path.join(x.store.sessionsRoot, dto.sessionId, RAW_TRANSCRIPT_REL)));
       assert.equal(doc.items.length, 3); assert.equal(doc.diarization, false);
     } finally { await x.api.shutdown(); }
+  });
+  await test("MiMo fallback transport honors per-session transcription and autosave intervals", async () => {
+    assert.equal(meetingTransportFor("mimo-v2.5-asr"), "mimo-batch");
+    assert.equal(meetingTransportFor("qwen-audio-3.0-asr-flash-streaming"), "ali-streaming");
+    assert.equal(meetingTransportFor("qwen3-asr-flash"), null);
+    const x = await setup();
+    try {
+      await x.api.start({ captureMode: "microphone", modelId: "mimo-v2.5-asr",
+        transcriptionIntervalSeconds: 2, saveIntervalSeconds: 0.02 });
+      assert.equal(x.api.status().transport, "mimo-batch");
+      assert.equal(x.api.status().transcriptionIntervalSeconds, 2);
+      assert.equal(x.api.status().saveIntervalSeconds, 0.02);
+      await x.add("microphone", RATE * 3);
+      await x.api.flush();
+      await x.api.waitForIdle();
+      assert.deepEqual(x.calls, [0]);
+      await x.api.stop();
+      await x.api.waitForIdle();
+      assert.deepEqual(x.calls, [0, 1]);
+    } finally { await x.api.shutdown(); }
+  });
+  await test("production meeting routing creates the MiMo provider for the batch fallback", async () => {
+    const originalFetch = global.fetch;
+    const requests = [];
+    global.fetch = async (_url, options) => {
+      requests.push(JSON.parse(options.body));
+      return { ok: true, text: async () => JSON.stringify({
+        choices: [{ message: { content: "MiMo meeting segment" }, finish_reason: "stop" }]
+      }) };
+    };
+    const x = await setup({
+      transcribeImpl: undefined,
+      getSettings: () => ({
+        meetingRealtimeModel: "mimo-v2.5-asr",
+        meetingFileAsrProfiles: {
+          "mimo-v2.5-asr": { provider: "mimo", apiKey: "fixture", baseUrl: "https://example.invalid/v1" }
+        }
+      })
+    });
+    try {
+      await x.api.start({ captureMode: "microphone", modelId: "mimo-v2.5-asr",
+        transcriptionIntervalSeconds: 5 });
+      await x.add("microphone", RATE);
+      await x.api.stop();
+      await x.api.waitForIdle();
+      assert.equal(x.api.status().transport, "mimo-batch");
+      assert.equal(x.api.status().rawText, "MiMo meeting segment");
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].model, "mimo-v2.5-asr");
+    } finally {
+      await x.api.shutdown();
+      global.fetch = originalFetch;
+    }
   });
   await test("existing note and external edits preserved", async () => {
     const x = await setup();

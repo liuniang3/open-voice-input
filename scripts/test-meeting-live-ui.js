@@ -110,7 +110,7 @@ test("view-only open is single-flight; close unsubscribes and reopen reloads", a
   f.ui.close();
 });
 
-test("only streaming transports appear as live models; exact and YYYY-MM-DD IDs match transport", async () => {
+test("streaming transports and the MiMo batch fallback appear; invalid models stay blocked", async () => {
   const f = fixture();
   f.setSettings({ asrProfiles: {
     "custom-batch": { provider: "qwen3-asr" }, "fun-asr": { provider: "fun-asr" },
@@ -118,9 +118,9 @@ test("only streaming transports appear as live models; exact and YYYY-MM-DD IDs 
   } });
   await f.ui.open();
   const ids = f.$("liveModel").children.map((o) => o.value);
-  assert.deepEqual(ids, ["qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "__custom__"]);
+  assert.deepEqual(ids, ["qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "mimo-v2.5-asr", "__custom__"]);
   f.$("liveModel").value = "__custom__";
-  for (const model of ["mimo-v2.5-asr", "qwen3-asr-flash", "custom-batch", "qwen-filetrans", "fun-asr-realtime-2026", "qwen-audio-3.0-asr-flash-streaming-2026", "fun-asr-realtime-2026-9-18"]) {
+  for (const model of ["qwen3-asr-flash", "custom-batch", "qwen-filetrans", "fun-asr-realtime-2026", "qwen-audio-3.0-asr-flash-streaming-2026", "fun-asr-realtime-2026-9-18"]) {
     f.$("liveCustomModel").value = model;
     f.$("liveModel").dispatch("change");
     assert.equal(f.$("liveCustomModelField").hidden, false);
@@ -140,6 +140,18 @@ test("only streaming transports appear as live models; exact and YYYY-MM-DD IDs 
   await f.click("liveStart");
   assert.equal(f.last("meetingLiveStart").args[0].provider, "aliyun-streaming");
   assert.equal(f.last("meetingLiveStart").args[0].modelId, "fun-asr-realtime");
+  f.push({ status: "idle", recording: false, recoverableSessions: [] });
+  f.$("liveModel").value = "mimo-v2.5-asr";
+  f.$("liveModel").dispatch("change");
+  await tick();
+  assert.equal(f.$("liveTranscriptionIntervalField").hidden, false);
+  f.$("liveTranscriptionInterval").value = "15";
+  f.$("liveSaveInterval").value = "60";
+  await f.click("liveStart");
+  assert.deepEqual(f.last("meetingLiveStart").args[0], {
+    title: "", modelId: "mimo-v2.5-asr", provider: "mimo", captureMode: "dual",
+    transcriptionIntervalSeconds: 15, saveIntervalSeconds: 60
+  });
 });
 
 test("start payload has no credentials; duplicate clicks do not duplicate start", async () => {
@@ -152,7 +164,8 @@ test("start payload has no credentials; duplicate clicks do not duplicate start"
   await f.click("liveStart");
   await f.click("liveStart");
   assert.equal(f.count("meetingLiveStart"), 1);
-  assert.deepEqual(f.last("meetingLiveStart").args, [{ title: "项目例会", modelId: "qwen-audio-3.0-asr-flash-streaming", provider: "aliyun-streaming", captureMode: "microphone" }]);
+  assert.deepEqual(f.last("meetingLiveStart").args, [{ title: "项目例会", modelId: "qwen-audio-3.0-asr-flash-streaming",
+    provider: "aliyun-streaming", captureMode: "microphone", transcriptionIntervalSeconds: 30, saveIntervalSeconds: 30 }]);
   start.resolve({ ok: true, ...completed(), status: "recording", recording: true });
   await tick();
   assert.equal(f.$("liveStop").disabled, false);
@@ -453,6 +466,28 @@ async function verifyBrowser(page, screenshotDirectory) {
   assert.equal(await page.title(), "会议实时转录");
   assert.equal(await page.locator("#liveStart").isEnabled(), true);
   assert.equal(await page.evaluate(() => window.mockCalls.filter((c) => c.name === "meetingLiveStart").length), 0);
+  await page.locator("#liveModel").selectOption("mimo-v2.5-asr");
+  await page.waitForFunction(() => document.getElementById("liveTranscriptionIntervalField").hidden === false);
+  assert.equal(await page.locator("#liveStart").textContent(), "开始分段转录");
+  for (const size of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(size);
+    const layout = await page.evaluate(() => {
+      const panel = document.getElementById("liveMeetingPanel");
+      const visible = [...panel.querySelectorAll("button, input, select")].filter((el) => el.getClientRects().length);
+      return {
+        overflow: visible.filter((el) => {
+          const rect = el.getBoundingClientRect();
+          return rect.left < -1 || rect.right > innerWidth + 1;
+        }).map((el) => el.id),
+        width: document.documentElement.scrollWidth,
+        viewport: innerWidth
+      };
+    });
+    assert.deepEqual(layout.overflow, [], `MiMo controls overflow at ${size.width}`);
+    assert(layout.width <= layout.viewport + 1, `MiMo page overflow at ${size.width}`);
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  if (screenshotDirectory) await page.screenshot({ path: path.join(screenshotDirectory, "meeting-live-mimo-1280.png") });
   await page.evaluate(() => window.mockPush({ recoverableSessions: [{ sessionId: "recovered", title: "中断会议", status: "interrupted", startedAtMs: Date.now() - 60000 }] }));
   await page.locator("#liveRecoverSession").selectOption("recovered");
   await page.locator("#liveRecover").click();

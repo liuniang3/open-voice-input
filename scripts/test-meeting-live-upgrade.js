@@ -36,7 +36,7 @@ test("streaming preset, meeting profiles and independent cleaner/reviewer IDs ca
   assert.equal(f.count("meetingLiveSummarize"), 0);
 });
 
-test("batch profiles stay in review; meeting analysis takes priority over dictation cleanup", async () => {
+test("MiMo batch fallback stays selectable; meeting analysis takes priority over dictation cleanup", async () => {
   const f = fixture();
   f.setSettings({ meetingRealtimeModel: "mimo-v2.5-asr", cleanerModel: "dictation-cleaner",
     meetingAnalysisModel: "meeting-analysis", meetingRealtimeProfiles: { "mimo-only-live-asr": { provider: "mimo" } },
@@ -44,8 +44,10 @@ test("batch profiles stay in review; meeting analysis takes priority over dictat
     meetingFileAsrProfiles: { "mimo-file-asr": { provider: "mimo" } }
   });
   await f.ui.open();
-  assert.equal(f.$("liveModel").value, "qwen-audio-3.0-asr-flash-streaming");
-  assert.deepEqual(f.$("liveModel").children.map(o => o.value), ["qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "__custom__"]);
+  assert.equal(f.$("liveModel").value, "mimo-v2.5-asr");
+  assert.deepEqual(f.$("liveModel").children.map(o => o.value),
+    ["qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "mimo-v2.5-asr", "__custom__"]);
+  assert.equal(f.$("liveTranscriptionIntervalField").hidden, false);
   assert.deepEqual(f.$("liveReviewModel").children.map(o => o.value), ["mimo-v2.5-asr", "mimo-file-asr", "mimo-custom-asr"]);
   assert.equal(f.$("liveCleanerModel").value, "meeting-analysis");
 });

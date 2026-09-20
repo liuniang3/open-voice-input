@@ -234,24 +234,25 @@ test("live meeting defaults and destinations do not borrow active provider crede
   assert.equal(saved.meetingRealtimeModel, undefined);
 });
 
-test("meeting live model contract matches transport and excludes batch presets", () => {
-  const supported = [
+test("meeting model contract keeps streaming transports and the MiMo batch fallback isolated", () => {
+  const streaming = [
     "qwen-audio-3.0-asr-flash-streaming",
     "fun-asr-realtime",
     "qwen-audio-3.0-asr-flash-streaming-2026-09-18",
     "fun-asr-realtime-2026-09-18"
   ];
+  const supported = [...streaming, "mimo-v2.5-asr"];
   const rejected = [
-    "mimo-v2.5-asr",
     "qwen3-asr-flash",
     "qwen3-asr-flash-filetrans",
     "fun-asr-realtime-latest",
     "fun-asr-realtime-2026-9-18",
     " fun-asr-realtime"
   ];
-  supported.forEach(model => assert.equal(isSupportedAliMeetingModel(model), true, model));
+  streaming.forEach(model => assert.equal(isSupportedAliMeetingModel(model), true, model));
+  assert.equal(isSupportedAliMeetingModel("mimo-v2.5-asr"), false);
   rejected.forEach(model => assert.equal(isSupportedAliMeetingModel(model), false, model));
-  assert.deepEqual([...MEETING_QWEN_PRESETS], supported.slice(0, 2));
+  assert.deepEqual([...MEETING_QWEN_PRESETS], ["qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "mimo-v2.5-asr"]);
   for (const model of supported) {
     assert.equal(ensureConnectionProfiles({ _connectionProfilesMigrated: true, meetingRealtimeModel: model }).meetingRealtimeModel, model);
   }
@@ -259,6 +260,14 @@ test("meeting live model contract matches transport and excludes batch presets",
     assert.equal(ensureConnectionProfiles({ _connectionProfilesMigrated: true, meetingRealtimeModel: model }).meetingRealtimeModel,
       "qwen-audio-3.0-asr-flash-streaming");
   }
+  const intervals = ensureConnectionProfiles({ _connectionProfilesMigrated: true,
+    meetingTranscriptionIntervalSeconds: 15, meetingAutosaveIntervalSeconds: 120 });
+  assert.equal(intervals.meetingTranscriptionIntervalSeconds, 15);
+  assert.equal(intervals.meetingAutosaveIntervalSeconds, 120);
+  const invalidIntervals = ensureConnectionProfiles({ _connectionProfilesMigrated: true,
+    meetingTranscriptionIntervalSeconds: 1, meetingAutosaveIntervalSeconds: 999 });
+  assert.equal(invalidIntervals.meetingTranscriptionIntervalSeconds, 30);
+  assert.equal(invalidIntervals.meetingAutosaveIntervalSeconds, 30);
 });
 
 test("settings UI has unified provider connections and model-only vendor controls", () => {
@@ -297,9 +306,12 @@ test("settings UI has unified provider connections and model-only vendor control
   const meetingPreviewPresets = html.match(/<select id="meetingQwenModelPresetSelect">([\s\S]*?)<\/select>/)?.[1] || "";
   assert.match(meetingPreviewPresets, /value="qwen-audio-3\.0-asr-flash-streaming"/);
   assert.match(meetingPreviewPresets, /value="fun-asr-realtime"/);
+  assert.match(meetingPreviewPresets, /value="mimo-v2\.5-asr"/);
   assert.doesNotMatch(meetingPreviewPresets, /value="qwen3-asr-flash-realtime/);
   assert.match(html, /id="meetingFunAsrModelPresetSelect"/);
   assert.match(html, /id="meetingAnalysisModelPresetSelect"/);
+  assert.match(html, /id="meetingAnalysisCapabilityHint"/);
+  assert.match(saveJs, /openaiModelCapabilities:\s*appSettings\.openaiModelCapabilities/);
 });
 
 function deferred() {

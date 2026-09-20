@@ -1,10 +1,12 @@
 "use strict";
 
 const { PROVIDER_FAMILIES, normalizeProviderConnection } = require("../settings/provider-connections");
+const { resolveModelCapability } = require("../settings/model-capabilities");
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_MODELS = 1000;
+const UNSAFE_MODEL_IDS = new Set(["__proto__", "prototype", "constructor"]);
 
 function modelCatalogEndpoint(baseUrl) {
   const raw = String(baseUrl || "").trim();
@@ -57,25 +59,79 @@ async function readTextLimited(response, maxBytes = MAX_RESPONSE_BYTES) {
   }
 }
 
-function extractModelIds(body) {
-  const rows = Array.isArray(body)
+function modelRows(body) {
+  return Array.isArray(body)
     ? body
     : Array.isArray(body?.data)
       ? body.data
       : Array.isArray(body?.models)
         ? body.models
         : [];
-  const ids = [];
-  const seen = new Set();
+}
+
+function valueAtPath(value, path) {
+  let current = value;
+  for (const part of path) {
+    if (!current || typeof current !== "object") return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+function firstPositiveInteger(row, paths) {
+  for (const path of paths) {
+    const parsed = Number(valueAtPath(row, path));
+    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+  }
+  return undefined;
+}
+
+function extractProviderCapability(row) {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+  const contextWindow = firstPositiveInteger(row, [
+    ["context_window"], ["context_length"], ["max_context_window"], ["max_model_len"],
+    ["capabilities", "context_window"], ["capabilities", "context_length"],
+    ["limits", "context_window"], ["limits", "context_length"],
+    ["top_provider", "context_length"], ["architecture", "context_length"]
+  ]);
+  const maxOutput = firstPositiveInteger(row, [
+    ["max_output_tokens"], ["max_completion_tokens"], ["output_token_limit"],
+    ["capabilities", "max_output_tokens"], ["capabilities", "max_completion_tokens"],
+    ["limits", "max_output_tokens"], ["limits", "max_completion_tokens"],
+    ["top_provider", "max_completion_tokens"]
+  ]);
+  const reasoning = String(
+    valueAtPath(row, ["default_reasoning_effort"])
+      ?? valueAtPath(row, ["reasoning_effort"])
+      ?? valueAtPath(row, ["capabilities", "reasoning", "default"])
+      ?? ""
+  ).trim();
+  return contextWindow || maxOutput || reasoning ? { contextWindow, maxOutput, reasoning } : null;
+}
+
+function extractModelCatalog(body) {
+  const rows = modelRows(body);
+  const byId = new Map();
   for (const row of rows) {
     const raw = typeof row === "string" ? row : row?.id ?? row?.name;
     const id = String(raw || "").trim();
-    if (!id || id.length > 256 || /[\u0000-\u001f\u007f]/.test(id) || seen.has(id)) continue;
-    seen.add(id);
-    ids.push(id);
-    if (ids.length >= MAX_MODELS) break;
+    if (!id || id.length > 256 || /[\u0000-\u001f\u007f]/.test(id) || UNSAFE_MODEL_IDS.has(id)) continue;
+    const capability = extractProviderCapability(row);
+    if (byId.has(id)) {
+      if (!byId.get(id) && capability) byId.set(id, capability);
+      continue;
+    }
+    byId.set(id, capability);
+    if (byId.size >= MAX_MODELS) break;
   }
-  return ids.sort((left, right) => left.localeCompare(right, "en", { numeric: true }));
+  const models = [...byId.keys()].sort((left, right) => left.localeCompare(right, "en", { numeric: true }));
+  const capabilities = {};
+  for (const id of models) capabilities[id] = resolveModelCapability(id, byId.get(id));
+  return { models, capabilities };
+}
+
+function extractModelIds(body) {
+  return extractModelCatalog(body).models;
 }
 
 async function listProviderModels({ settings, provider, fetchImpl = null } = {}) {
@@ -116,13 +172,13 @@ async function listProviderModels({ settings, provider, fetchImpl = null } = {})
         code: "provider_model_catalog_invalid_json"
       });
     }
-    const models = extractModelIds(body);
+    const { models, capabilities } = extractModelCatalog(body);
     if (!models.length) {
       throw Object.assign(new Error("接口已连接，但没有返回可用的模型 ID。"), {
         code: "provider_model_catalog_empty"
       });
     }
-    return { ok: true, provider, models, count: models.length, latencyMs: Date.now() - startedAt };
+    return { ok: true, provider, models, capabilities, count: models.length, latencyMs: Date.now() - startedAt };
   } catch (error) {
     if (timedOut) {
       throw Object.assign(new Error("获取模型列表超时（30 秒）。"), { code: "provider_model_catalog_timeout" });
@@ -139,7 +195,10 @@ async function listProviderModels({ settings, provider, fetchImpl = null } = {})
 module.exports = {
   MAX_MODELS,
   MAX_RESPONSE_BYTES,
+  UNSAFE_MODEL_IDS,
+  extractModelCatalog,
   extractModelIds,
+  extractProviderCapability,
   listProviderModels,
   modelCatalogEndpoint,
   readTextLimited
