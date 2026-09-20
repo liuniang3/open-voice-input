@@ -22,7 +22,7 @@ class FakeUpdater extends EventEmitter {
   async downloadUpdate() {
     this.downloads++;
     this.emit("download-progress", { percent: 37.5, bytesPerSecond: 1024, transferred: 3, total: 8 });
-    this.emit("update-downloaded", { version: "0.4.0" });
+    this.emit("update-downloaded", { version: "0.4.0", downloadedFile: "/safe/cache/update.zip" });
   }
   quitAndInstall(...args) { this.installs.push(args); }
 }
@@ -67,6 +67,53 @@ async function test(name, fn) {
     assert.equal(updater.channel, "latest-arm64");
     assert.equal(updater.allowDowngrade, false, "channel setter must not enable downgrades");
     assert.equal(updater.feed.channel, "latest-arm64");
+  });
+
+  await test("unsigned macOS opens the verified local package instead of invoking Squirrel", async () => {
+    const updater = new FakeUpdater();
+    const opened = [];
+    const service = createUpdateService({ autoUpdater: updater, currentVersion: "0.3.1", isPackaged: true,
+      platform: "darwin", arch: "arm64", automaticInstall: false,
+      openDownloadedFile: async file => opened.push(file) });
+    await service.check();
+    const downloaded = await service.download();
+    assert.equal(downloaded.installMode, "manual");
+    assert.equal("downloadedFile" in downloaded, false, "local cache paths must not cross IPC");
+    const status = await service.install();
+    assert.equal(status.status, "manual_install");
+    assert.equal(status.downloaded, true);
+    assert.deepEqual(opened, ["/safe/cache/update.zip"]);
+    assert.equal(updater.installs.length, 0);
+  });
+
+  await test("a macOS signature rejection falls back to the downloaded package", async () => {
+    const updater = new FakeUpdater();
+    const service = createUpdateService({ autoUpdater: updater, currentVersion: "0.3.1", isPackaged: true,
+      platform: "darwin", arch: "x64", automaticInstall: true, openDownloadedFile: async () => {} });
+    await service.check();
+    await service.download();
+    updater.emit("error", new Error("Code signature at URL did not pass validation"));
+    const status = service.status();
+    assert.equal(status.status, "downloaded");
+    assert.equal(status.installMode, "manual");
+    assert.equal(status.error, null);
+  });
+
+  await test("missing macOS package path remains downloadable", async () => {
+    const updater = new FakeUpdater();
+    updater.downloadUpdate = async function downloadWithoutLocalPath() {
+      this.downloads++;
+      this.emit("update-downloaded", { version: "0.4.0", downloadedFile: "relative/update.zip" });
+    };
+    const service = createUpdateService({ autoUpdater: updater, currentVersion: "0.3.1", isPackaged: true,
+      platform: "darwin", arch: "arm64", automaticInstall: false, openDownloadedFile: async () => {} });
+    await service.check();
+    await service.download();
+    const status = await service.install();
+    assert.equal(status.status, "error");
+    assert.equal(status.error.code, "update_package_missing");
+    assert.equal(status.downloaded, false);
+    assert.equal(status.progress, null);
   });
 
   await test("development builds never contact GitHub", async () => {

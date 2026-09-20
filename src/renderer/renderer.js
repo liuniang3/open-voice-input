@@ -1093,6 +1093,7 @@ function renderUpdateStatus(next) {
     downloading: "正在下载",
     downloaded: "等待安装",
     installing: "正在重启",
+    manual_install: "请手动替换",
     error: "更新失败",
     unsupported: "当前不可用"
   };
@@ -1104,6 +1105,7 @@ function renderUpdateStatus(next) {
     : status === "available" ? `发现 v${next.availableVersion || "新版本"}`
       : status === "downloading" ? `正在下载 v${next.availableVersion || "新版本"}`
         : status === "downloaded" ? `v${next.availableVersion || "新版本"} 已下载`
+          : status === "manual_install" ? "安装包已在 Finder 中打开"
           : status === "installing" ? "正在退出并安装更新"
             : status === "checking" ? "正在检查 GitHub Releases"
               : status === "error" ? "更新未完成"
@@ -1111,11 +1113,14 @@ function renderUpdateStatus(next) {
                   : "检查 GitHub Releases 获取新版本";
   updateStatusDetail.textContent = status === "error" ? next.error?.message || "更新失败，当前版本未修改。"
     : status === "downloading" ? `${Math.round(next.progress?.percent || 0)}% · ${formatUpdateRate(next.progress?.bytesPerSecond)}`
-      : status === "downloaded" ? "可以立即重启安装；录音或处理任务运行时不会开始安装。"
+      : status === "downloaded" ? next.installMode === "manual"
+        ? "点击下方按钮打开安装包；解压后将应用替换到 Applications。"
+        : "可以立即重启安装；录音或处理任务运行时不会开始安装。"
+        : status === "manual_install" ? "解压 ZIP 后，将 Open Voice Input 拖入 Applications 并选择替换。"
         : status === "available" ? [next.releaseName, next.releaseDate].filter(Boolean).join(" · ") || "可在应用内下载。"
           : status === "unsupported" ? "开发模式不会连接更新服务，请在正式安装包中使用。"
             : "不会上传 API 配置、录音或转录内容。";
-  updateProgress.hidden = !["downloading", "downloaded"].includes(status);
+  updateProgress.hidden = !["downloading", "downloaded", "manual_install"].includes(status);
   updateProgress.value = Math.max(0, Math.min(100, Number(next.progress?.percent) || 0));
   updateCheckBtn.disabled = busy;
   updateCheckBtn.textContent = status === "checking" ? "正在检查…" : "检查更新";
@@ -1123,8 +1128,13 @@ function renderUpdateStatus(next) {
   updateDownloadBtn.disabled = busy;
   updateInstallBtn.hidden = !next.downloaded;
   updateInstallBtn.disabled = status === "installing";
+  updateInstallBtn.textContent = next.installMode === "manual"
+    ? status === "manual_install" ? "再次打开安装包" : "打开安装包"
+    : "重启并安装";
   updatePlatformNote.textContent = next.platform === "darwin"
-    ? "macOS 自动安装需要签名发布包；未签名测试包会保留当前版本并报告签名错误。"
+    ? next.installMode === "manual"
+      ? "当前 macOS 构建未使用 Developer ID 签名，因此系统不允许静默替换；安装包会在本机打开，不会跳转 GitHub。"
+      : "此 macOS 构建已签名，可在应用内自动安装更新。"
     : "Windows 安装版会在下载完成后退出并运行安装程序。";
 }
 

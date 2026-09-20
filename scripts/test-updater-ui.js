@@ -29,6 +29,9 @@ assert.doesNotMatch(preload, /openExternal|shell\./, "renderer bridge must not e
 assert.match(main, /updateAutoCheck:\s*true/);
 assert.match(main, /setInterval\(check,\s*6\s*\*\s*60\s*\*\s*60\s*\*\s*1000\)/);
 assert.match(main, /captureOwner[\s\S]*livePostprocessBusy/, "install must be gated by active capture and processing");
+assert.match(main, /macReleaseCanAutoInstall\(\)/, "macOS updates must detect Developer ID signing");
+assert.match(main, /openDownloadedFile:[\s\S]*shell\.openPath/, "unsigned macOS updates must open the local package");
+assert.match(renderer, /installMode\s*===\s*["']manual["']/, "updater UI must explain manual macOS installation");
 
 assert.equal(pkg.dependencies["electron-updater"], "6.8.9");
 assert.deepEqual(pkg.build.publish, { provider: "github", owner: "liuniang3", repo: "open-voice-input" });
@@ -39,6 +42,7 @@ for (const artifactName of [pkg.build.nsis.artifactName, pkg.build.portable.arti
 assert.match(updater, /owner:\s*"liuniang3"/);
 assert.match(updater, /repo:\s*"open-voice-input"/);
 assert.doesNotMatch(updater, /shell|openExternal/, "update service must not send users to a browser");
+assert.doesNotMatch(updater, /github\.com\//, "manual installation must use the verified local package");
 
 for (const asset of ["dist/latest.yml", "dist/*.exe.blockmap", "dist/latest-*-mac.yml", "dist/*.zip.blockmap"]) {
   assert.ok(workflow.includes(asset), `release workflow must publish ${asset}`);

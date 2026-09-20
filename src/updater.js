@@ -1,6 +1,7 @@
 "use strict";
 
 const { EventEmitter } = require("node:events");
+const path = require("node:path");
 
 const UPDATE_REPOSITORY = Object.freeze({
   provider: "github",
@@ -27,7 +28,13 @@ function safeUpdateError(error) {
     return { code: "update_integrity_failed", message: "更新文件校验失败，已停止安装。" };
   }
   if (message.includes("signature") || message.includes("code sign") || message.includes("codesign")) {
-    return { code: "update_signature_required", message: "此构建缺少系统要求的应用签名，无法自动安装。" };
+    return { code: "update_signature_required", message: "系统拒绝自动替换此应用；可以改为打开已下载的安装包。" };
+  }
+  if (code === "update_package_missing") {
+    return { code, message: "已下载的更新安装包不可用，请重新下载。" };
+  }
+  if (code === "update_package_open_failed") {
+    return { code, message: "无法打开已下载的安装包，请稍后重试。" };
   }
   if (code.includes("HTTP") || message.includes("network") || message.includes("timed out")
     || message.includes("timeout") || message.includes("enotfound") || message.includes("econn")) {
@@ -52,6 +59,8 @@ function createUpdateService({
   platform = process.platform,
   arch = process.arch,
   beforeInstall = async () => {},
+  automaticInstall = true,
+  openDownloadedFile = null,
   onStatus = () => {},
   logger = () => {}
 } = {}) {
@@ -64,6 +73,8 @@ function createUpdateService({
   let checkPromise = null;
   let downloadPromise = null;
   let installPromise = null;
+  let downloadedFile = "";
+  let installMode = platform === "darwin" && !automaticInstall ? "manual" : "automatic";
   let state = {
     status: supported ? "idle" : "unsupported",
     currentVersion,
@@ -76,7 +87,8 @@ function createUpdateService({
     supported,
     platform,
     arch,
-    channel
+    channel,
+    installMode
   };
 
   const snapshot = () => structuredClone(state);
@@ -90,6 +102,15 @@ function createUpdateService({
   const fail = (error) => {
     const safe = safeUpdateError(error);
     logger("updater: failed", safe.code);
+    if (safe.code === "update_signature_required" && platform === "darwin" && downloadedFile
+      && typeof openDownloadedFile === "function") {
+      installMode = "manual";
+      return publish({ status: "downloaded", downloaded: true, installMode, error: null });
+    }
+    if (safe.code === "update_package_missing") {
+      downloadedFile = "";
+      return publish({ status: "error", downloaded: false, progress: null, error: safe });
+    }
     return publish({ status: "error", error: safe });
   };
 
@@ -121,9 +142,11 @@ function createUpdateService({
   }));
   autoUpdater.on("update-downloaded", (info) => {
     const clean = publicInfo(info);
+    const candidate = typeof info?.downloadedFile === "string" ? info.downloadedFile : "";
+    downloadedFile = candidate && path.isAbsolute(candidate) && /\.(?:zip|dmg|pkg)$/i.test(candidate) ? candidate : "";
     publish({ status: "downloaded", availableVersion: clean.version || state.availableVersion,
       releaseName: clean.releaseName || state.releaseName, releaseDate: clean.releaseDate || state.releaseDate,
-      downloaded: true, progress: { ...(state.progress || {}), percent: 100 }, error: null });
+      downloaded: true, progress: { ...(state.progress || {}), percent: 100 }, installMode, error: null });
   });
   // electron-updater emits errors even when the initiating promise also rejects.
   autoUpdater.on("error", (error) => fail(error));
@@ -163,6 +186,20 @@ function createUpdateService({
     installPromise = Promise.resolve()
       .then(() => beforeInstall())
       .then(() => {
+        if (installMode === "manual") {
+          if (!downloadedFile) {
+            throw Object.assign(new Error("downloaded update package unavailable"), { code: "update_package_missing" });
+          }
+          if (typeof openDownloadedFile !== "function") {
+            throw Object.assign(new Error("downloaded update package cannot be opened"), { code: "update_package_open_failed" });
+          }
+          return Promise.resolve(openDownloadedFile(downloadedFile)).then(() => publish({
+            status: "manual_install",
+            downloaded: true,
+            installMode,
+            error: null
+          }));
+        }
         publish({ status: "installing", error: null });
         autoUpdater.quitAndInstall(false, true);
         return snapshot();

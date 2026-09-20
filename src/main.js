@@ -13,7 +13,7 @@ const {
   shell,
   Tray
 } = require("electron");
-const { execFile, execFileSync, spawn } = require("node:child_process");
+const { execFile, execFileSync, spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const os = require("node:os");
@@ -1125,6 +1125,24 @@ function updateInstallBlocked() {
     || live?.recording || live?.paused || live?.status === "stopping");
 }
 
+function macReleaseCanAutoInstall() {
+  if (os.platform() !== "darwin") return true;
+  if (!app.isPackaged) return false;
+  let current = path.resolve(process.execPath);
+  while (path.dirname(current) !== current && path.extname(current).toLowerCase() !== ".app") {
+    current = path.dirname(current);
+  }
+  if (path.extname(current).toLowerCase() !== ".app") return false;
+  const checked = spawnSync("/usr/bin/codesign", ["-dv", "--verbose=4", current], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const details = `${checked.stdout || ""}\n${checked.stderr || ""}`;
+  return checked.status === 0
+    && /^Authority=Developer ID Application:/im.test(details)
+    && /^TeamIdentifier=(?!not set$)\S+/im.test(details);
+}
+
 function getUpdateService() {
   if (updateService) return updateService;
   const { autoUpdater } = require("electron-updater");
@@ -1135,6 +1153,12 @@ function getUpdateService() {
     isPackaged: app.isPackaged,
     platform: os.platform(),
     arch: process.arch,
+    automaticInstall: macReleaseCanAutoInstall(),
+    openDownloadedFile: async (downloadedFile) => {
+      const openError = await shell.openPath(downloadedFile);
+      if (openError) throw Object.assign(new Error("open downloaded update failed"), { code: "update_package_open_failed" });
+      shell.showItemInFolder(downloadedFile);
+    },
     beforeInstall: async () => {
       if (updateInstallBlocked() || meetingQuitCleanupStarted) throw liveError("update_busy");
     },

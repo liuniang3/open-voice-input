@@ -829,7 +829,8 @@ footer {
 }
 
 .update-state-badge[data-kind="available"],
-.update-state-badge[data-kind="downloaded"] {
+.update-state-badge[data-kind="downloaded"],
+.update-state-badge[data-kind="manual_install"] {
   border-color: rgba(26, 122, 92, 0.42);
   background: rgba(26, 122, 92, 0.11);
   color: #145f48;
