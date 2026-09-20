@@ -65,6 +65,38 @@ async function main() {
   assert.equal(calls[0].options.headers.Authorization, "Bearer fixture-secret");
   assert.doesNotMatch(JSON.stringify(result), /fixture-secret/);
 
+  calls.length = 0;
+  const goResult = await listProviderModels({
+    provider: "opencode-go",
+    settings: {
+      providerConnections: {
+        "opencode-go": { apiKey: "fixture-go", baseUrl: "https://opencode.ai/zen/go/v1" }
+      }
+    },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () => JSON.stringify({ data: [
+          { id: "glm-5.2" },
+          { id: "mimo-v2.5" },
+          { id: "deepseek-v4-pro" },
+          { id: "deepseek-v4.1-flash" }
+        ] })
+      };
+    }
+  });
+  assert.deepEqual(goResult.models, ["deepseek-v4-pro", "deepseek-v4.1-flash", "glm-5.2", "mimo-v2.5"]);
+  assert.equal(goResult.capabilities["deepseek-v4-pro"].contextWindow, 1000000);
+  assert.equal(goResult.capabilities["deepseek-v4-pro"].maxOutput, 384000);
+  assert.equal(goResult.capabilities["deepseek-v4.1-flash"].maxOutput, 384000);
+  assert.equal(calls[0].url, "https://opencode.ai/zen/go/v1/models");
+  assert.equal(calls[0].options.headers.Authorization, "Bearer fixture-go");
+  assert.match(calls[0].options.headers["User-Agent"], /^open-voice-input\//);
+  assert.match(calls[0].options.headers["x-opencode-session"], /^models-/);
+
   await assert.rejects(
     () => listProviderModels({ provider: "openai", settings: { providerConnections: { openai: {} } } }),
     error => error.code === "provider_credentials_missing"

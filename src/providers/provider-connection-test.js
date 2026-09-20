@@ -2,6 +2,7 @@
 
 const { createMimoClient } = require("./mimo-client");
 const { createOpenAiCompatibleClient } = require("./openai-compatible-client");
+const { createOpenCodeGoClient, createOpenCodeGoSessionId, normalizeOpenCodeGoModel } = require("./opencode-go-client");
 const {
   API_STYLES,
   PROVIDER_FAMILIES,
@@ -15,6 +16,20 @@ function textModelFor(settings, family) {
   const candidates = [settings?.meetingAnalysisModel, settings?.cleanerModel];
   if (family === PROVIDER_FAMILIES.MIMO) {
     return candidates.find(model => /^mimo-/i.test(String(model || "")) && !/-asr(?:-|$)/i.test(model)) || "mimo-v2.5";
+  }
+  if (family === PROVIDER_FAMILIES.OPENCODE_GO) {
+    const selections = [
+      [settings?.meetingAnalysisModel, settings?.meetingAnalysisProfiles?.[settings?.meetingAnalysisModel]],
+      [settings?.cleanerModel, settings?.cleanerProfiles?.[settings?.cleanerModel]]
+    ];
+    const selected = selections.find(([, profile]) =>
+      [profile?.provider, profile?.providerFamily].includes(PROVIDER_FAMILIES.OPENCODE_GO));
+    const catalog = Array.isArray(settings?.openCodeGoModelCatalog)
+      ? settings.openCodeGoModelCatalog.map(normalizeOpenCodeGoModel)
+      : [];
+    const preferred = ["glm-5.2", "qwen3.8-flash", "mimo-v2.5"]
+      .find(model => catalog.includes(model));
+    return normalizeOpenCodeGoModel(selected?.[0] || preferred || catalog[0] || "glm-5.2");
   }
   return candidates.find(model => /^(?:gpt|chatgpt|o[134](?:-|$))/i.test(String(model || ""))) || "gpt-5.4-mini";
 }
@@ -54,6 +69,24 @@ async function testProviderConnection({ settings, provider, fetchImpl = null } =
         content: [{ type: "input_audio", input_audio: { data: TEST_AUDIO_URL } }]
       }
     ], { maxTokens: 32 });
+  } else if (provider === PROVIDER_FAMILIES.OPENCODE_GO) {
+    const client = createOpenCodeGoClient({
+      apiKey: connection.apiKey,
+      baseUrl: connection.baseUrl,
+      model: textModelFor(settings, provider),
+      requestTimeoutMs: 30000,
+      sessionId: createOpenCodeGoSessionId("connection-test"),
+      fetchImpl
+    });
+    const result = await client.requestChat([
+      { role: "system", content: "Reply with OK only." },
+      { role: "user", content: "OK" }
+    ], { maxTokens: 128 });
+    if (!result.content || result.finishReason && result.finishReason !== "stop") {
+      throw Object.assign(new Error("OpenCode Go 已连接，但测试模型未返回完整正文。"), {
+        code: "provider_empty_response"
+      });
+    }
   } else {
     const client = createOpenAiCompatibleClient({
       apiKey: connection.apiKey,

@@ -3,7 +3,8 @@
 const PROVIDER_FAMILIES = Object.freeze({
   MIMO: "mimo",
   ALIYUN: "aliyun",
-  OPENAI: "openai"
+  OPENAI: "openai",
+  OPENCODE_GO: "opencode-go"
 });
 
 const API_STYLES = Object.freeze({
@@ -14,7 +15,8 @@ const API_STYLES = Object.freeze({
 const DEFAULT_CONNECTIONS = Object.freeze({
   mimo: Object.freeze({ baseUrl: "https://api.xiaomimimo.com/v1", apiStyle: API_STYLES.CHAT_COMPLETIONS }),
   aliyun: Object.freeze({ baseUrl: "https://dashscope.aliyuncs.com", apiStyle: API_STYLES.CHAT_COMPLETIONS }),
-  openai: Object.freeze({ baseUrl: "https://api.openai.com/v1", apiStyle: API_STYLES.RESPONSES })
+  openai: Object.freeze({ baseUrl: "https://api.openai.com/v1", apiStyle: API_STYLES.RESPONSES }),
+  "opencode-go": Object.freeze({ baseUrl: "https://opencode.ai/zen/go/v1", apiStyle: API_STYLES.CHAT_COMPLETIONS })
 });
 
 function trimStr(value) {
@@ -42,6 +44,8 @@ function providerFamilyFor(modelId, provider = "") {
     return PROVIDER_FAMILIES.ALIYUN;
   }
   if (["openai", "gpt"].includes(kind)) return PROVIDER_FAMILIES.OPENAI;
+  if (["opencode-go", "opencode_go", "opencodego"].includes(kind)) return PROVIDER_FAMILIES.OPENCODE_GO;
+  if (model.startsWith("opencode-go/")) return PROVIDER_FAMILIES.OPENCODE_GO;
   if (/^mimo(?:-|$)/.test(model)) return PROVIDER_FAMILIES.MIMO;
   if (/(?:^|[-_.])(qwen3?|fun-asr)(?:[-_.]|$)/.test(model)) return PROVIDER_FAMILIES.ALIYUN;
   if (/^(?:gpt|chatgpt)(?:-|$)/.test(model) || /^o[134](?:-|$)/.test(model)) return PROVIDER_FAMILIES.OPENAI;

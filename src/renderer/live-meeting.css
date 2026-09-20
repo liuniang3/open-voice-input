@@ -1,7 +1,7 @@
-/* Realtime owns the primary view; history keeps its existing internal layout. */
+/* Realtime owns the meeting view. Historical sessions open inside this surface. */
 body.meeting-mode .meeting-panel {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   background: linear-gradient(125deg, rgba(255, 255, 255, .76), rgba(230, 243, 245, .52) 65%, rgba(251, 237, 235, .4));
   --ovi-text: #203238;
   --ovi-muted: #52666d;
@@ -19,27 +19,6 @@ body.meeting-mode #meetingBtn { display: none; }
 body.meeting-mode .topbar > div:first-child { min-width: 0; }
 body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
 
-.live-navigation {
-  display: flex;
-  gap: 20px;
-  padding: 0 18px;
-  border-bottom: 1px solid var(--ovi-border);
-}
-
-.live-navigation button {
-  min-height: 42px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-  color: var(--ovi-muted);
-}
-
-.live-navigation button[aria-selected="true"] {
-  color: var(--ovi-primary);
-  border-bottom-color: var(--ovi-primary);
-}
-
 .live-meeting {
   display: flex;
   flex-direction: column;
@@ -54,7 +33,7 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
 .live-meeting > :not(.live-results) { flex: 0 0 auto; }
 .live-meeting .field { margin: 0; min-width: 0; gap: 5px; }
 .live-meeting :is(input, select) { width: 100%; min-width: 0; }
-.live-meeting :is(button, input, select, pre), .live-navigation button {
+.live-meeting :is(button, input, select, pre) {
   -webkit-app-region: no-drag;
   letter-spacing: 0;
 }
@@ -68,6 +47,67 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
 .live-eyebrow { color: var(--ovi-muted); font-size: 11px; }
 .live-window-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .live-window-tools button { font-size: 12px; }
+.live-history-toggle span {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: rgba(20, 124, 131, .12);
+  color: var(--ovi-primary);
+  font-variant-numeric: tabular-nums;
+}
+.live-history-browser {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--ovi-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .68);
+  box-shadow: 0 14px 34px rgba(31, 71, 83, .09);
+  backdrop-filter: blur(18px) saturate(1.15);
+}
+.live-history-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.live-history-heading > div:first-child { display: grid; gap: 4px; min-width: 0; }
+.live-history-heading strong { font-size: 15px; }
+.live-history-heading span { color: var(--ovi-muted); font-size: 12px; line-height: 1.6; }
+.live-history-actions { display: flex; align-items: center; gap: 8px; flex: 0 1 470px; }
+.live-history-search { flex: 1 1 260px; min-width: 160px; }
+.live-history-search input { min-height: 36px; }
+#liveHistoryClose { width: 36px; min-width: 36px; padding: 0; font-size: 21px; line-height: 1; }
+.live-history-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 9px;
+  max-height: 330px;
+  overflow: auto;
+  padding: 1px 3px 3px 1px;
+}
+.live-meeting .live-history-item {
+  display: grid;
+  gap: 6px;
+  height: auto;
+  min-height: 76px;
+  min-width: 0;
+  padding: 11px 12px;
+  border-color: var(--ovi-border);
+  border-radius: 7px;
+  overflow: visible;
+  white-space: normal;
+  text-align: left;
+  color: var(--ovi-text);
+  background: rgba(247, 251, 251, .84);
+}
+.live-meeting .live-history-item:hover:not(:disabled) { border-color: rgba(20, 124, 131, .42); }
+.live-meeting .live-history-item[aria-selected="true"] { border-color: rgba(20, 124, 131, .55); background: rgba(222, 242, 241, .8); }
+.live-history-item-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+.live-history-item-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.live-history-item-head time { flex: 0 0 auto; color: var(--ovi-muted); font-size: 10px; }
+.live-history-item-meta, .live-history-item-states { overflow-wrap: anywhere; color: var(--ovi-muted); font-size: 11px; line-height: 1.45; }
+.live-history-item-states { color: #417078; }
+.live-history-empty { margin: 4px 0; color: var(--ovi-muted); font-size: 13px; text-align: center; }
 .live-meeting .live-check { display: inline-flex; align-items: center; gap: 7px; flex: 0 1 auto; font-size: 13px; white-space: nowrap; }
 .live-meeting .live-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--ovi-primary); }
 .live-transport { padding: 12px 0; border-block: 1px solid var(--ovi-border); }
@@ -76,7 +116,7 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
 #liveStatus[data-kind="paused"] { color: #825010; background: #fff0ce; }
 #liveStatus[data-kind="failed"] { color: #943a30; background: #ffe3e0; }
 .live-meeting :is(button, input, select, pre):focus-visible,
-.live-navigation button:focus-visible { outline: 2px solid var(--ovi-primary); outline-offset: 2px; }
+.live-history-item:focus-visible { outline: 2px solid var(--ovi-primary); outline-offset: 2px; }
 
 .live-setup { display: grid; grid-template-columns: minmax(160px, 1.3fr) repeat(2, minmax(160px, 1fr)); gap: 12px; }
 .live-setup:has(#liveCustomModelField:not([hidden])) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -149,13 +189,13 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
 .live-cleanup { border-top: 1px solid var(--ovi-border); padding-top: 10px; font-size: 12px; }
 .live-cleanup .field { flex: 1 1 180px; max-width: 300px; }
 .live-cleaned-path { flex: 1 0 100%; overflow-wrap: anywhere; color: var(--ovi-muted); }
-.meeting-history { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; overflow: hidden; }
-.meeting-history .meeting-sidebar-actions { grid-template-columns: 1fr; }
+.legacy-meeting-workbench { display: none !important; }
 
 /* These are presentation states only; the native window owns recording. */
 body.meeting-mode:has(.live-floating) .topbar { display: none; }
 body.meeting-mode .meeting-panel.live-floating { grid-template-rows: minmax(0, 1fr); }
-.live-floating .live-navigation,
+.live-floating .live-history-browser,
+.live-floating .live-history-toggle,
 .live-floating .live-setup,
 .live-floating .live-destination,
 .live-floating .live-outputs { display: none; }
@@ -202,7 +242,8 @@ body.meeting-mode .meeting-panel.live-floating { grid-template-rows: minmax(0, 1
   .live-results:has(#liveReviewedSection:not([hidden])):has(#liveCorrectedSection:not([hidden])) { grid-template-columns: minmax(0, 1fr); flex-basis: 440px; }
   .live-floating .live-results.has-corrected { flex-basis: 0; }
   .live-summary-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
-  .meeting-history { grid-template-columns: 180px minmax(0, 1fr); }
+  .live-history-heading { flex-direction: column; }
+  .live-history-actions { flex: 0 0 auto; width: 100%; }
 }
 
 @media (max-width: 480px) {
@@ -212,7 +253,8 @@ body.meeting-mode .meeting-panel.live-floating { grid-template-rows: minmax(0, 1
   .live-title-field { grid-column: auto; }
   .live-clock { margin-left: 0; }
   .live-destination button { flex: 1 1 auto; }
-  .meeting-history { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
-  .meeting-history .meeting-sidebar { max-height: 180px; }
-  .meeting-history .meeting-main { overflow: visible; }
+  .live-history-actions { flex-wrap: wrap; }
+  .live-history-search { flex-basis: 100%; }
+  .live-history-list { grid-template-columns: minmax(0, 1fr); max-height: 420px; }
+  .live-history-item-head { align-items: flex-start; flex-direction: column; gap: 3px; }
 }

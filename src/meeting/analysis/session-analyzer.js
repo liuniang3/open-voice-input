@@ -127,13 +127,17 @@ function createMeetingSessionAnalyzer({
       const client = createChatClient(creds);
       return (messages, opts) => client.requestChat(messages, opts);
     }
+    const isOpenCodeGo = creds.providerFamily === "opencode-go" || creds.provider === "opencode-go";
     const { createOpenAiCompatibleClient } = require("../../providers/openai-compatible-client");
-    const client = createOpenAiCompatibleClient({
+    const { createOpenCodeGoClient, createOpenCodeGoSessionId } = require("../../providers/opencode-go-client");
+    const createClient = isOpenCodeGo ? createOpenCodeGoClient : createOpenAiCompatibleClient;
+    const client = createClient({
       apiKey: creds.apiKey,
       baseUrl: creds.baseUrl,
       model: creds.modelId,
       apiStyle: creds.apiStyle,
-      requestTimeoutMs: creds.timeoutMs
+      requestTimeoutMs: creds.timeoutMs,
+      ...(isOpenCodeGo ? { sessionId: createOpenCodeGoSessionId("meeting") } : {})
     });
     return (messages, opts) => client.requestChat(messages, opts);
   }

@@ -102,6 +102,15 @@ function defaultAsrProfile(model) {
 
 function defaultCleanerProfile(model) {
   const id = trimStr(model) || "mimo-v2.5";
+  if (providerFamilyFor(id) === PROVIDER_FAMILIES.OPENCODE_GO) {
+    return {
+      provider: PROVIDER_FAMILIES.OPENCODE_GO,
+      providerFamily: PROVIDER_FAMILIES.OPENCODE_GO,
+      baseUrl: DEFAULT_CONNECTIONS[PROVIDER_FAMILIES.OPENCODE_GO].baseUrl,
+      apiKey: "",
+      apiStyle: API_STYLES.CHAT_COMPLETIONS
+    };
+  }
   if (id === "mimo-v2.5" || id === "mimo-v2.5-pro") {
     return { provider: "mimo", baseUrl: MIMO_BASE_URL, apiKey: "", apiStyle: API_STYLES.CHAT_COMPLETIONS };
   }
@@ -175,12 +184,18 @@ function defaultMeetingFunProfile(model) {
 function defaultMeetingAnalysisProfile(model) {
   const id = trimStr(model) || "gpt-5.4-mini";
   const isMimo = id === "mimo-v2.5" || id === "mimo-v2.5-pro";
+  const isOpenCodeGo = providerFamilyFor(id) === PROVIDER_FAMILIES.OPENCODE_GO;
   const capability = resolveModelCapability(id);
   return {
-    provider: isMimo ? "mimo" : "openai-compatible",
-    baseUrl: isMimo ? MIMO_BASE_URL : "https://api.openai.com/v1",
+    provider: isMimo ? "mimo" : isOpenCodeGo ? PROVIDER_FAMILIES.OPENCODE_GO : "openai-compatible",
+    ...(isOpenCodeGo ? { providerFamily: PROVIDER_FAMILIES.OPENCODE_GO } : {}),
+    baseUrl: isMimo
+      ? MIMO_BASE_URL
+      : isOpenCodeGo
+        ? DEFAULT_CONNECTIONS[PROVIDER_FAMILIES.OPENCODE_GO].baseUrl
+        : "https://api.openai.com/v1",
     apiKey: "",
-    apiStyle: isMimo ? API_STYLES.CHAT_COMPLETIONS : (
+    apiStyle: isMimo || isOpenCodeGo ? API_STYLES.CHAT_COMPLETIONS : (
       providerFamilyFor(id) === PROVIDER_FAMILIES.OPENAI ? API_STYLES.RESPONSES : API_STYLES.CHAT_COMPLETIONS
     ),
     model: id,
@@ -199,16 +214,28 @@ function ensureProfilesMap(value) {
 }
 
 function ensureMeetingAnalysisCapabilities(settings) {
-  const savedCapabilities = ensureProfilesMap(settings.openaiModelCapabilities);
-  const catalogCapabilities = {};
   const unsafeModelIds = new Set(["__proto__", "prototype", "constructor"]);
-  const catalogModels = Array.isArray(settings.openaiModelCatalog) ? settings.openaiModelCatalog : [];
-  for (const modelId of catalogModels.slice(0, 1000)) {
-    const id = trimStr(modelId);
-    if (!id || id.length > 256 || unsafeModelIds.has(id)) continue;
-    catalogCapabilities[id] = resolveModelCapability(id, savedCapabilities[id]);
-  }
-  settings.openaiModelCapabilities = catalogCapabilities;
+  const normalizeCatalogCapabilities = (modelsValue, capabilitiesValue) => {
+    const savedCapabilities = ensureProfilesMap(capabilitiesValue);
+    const catalogCapabilities = {};
+    const catalogModels = Array.isArray(modelsValue) ? modelsValue : [];
+    for (const modelId of catalogModels.slice(0, 1000)) {
+      const id = trimStr(modelId);
+      if (!id || id.length > 256 || unsafeModelIds.has(id)) continue;
+      catalogCapabilities[id] = resolveModelCapability(id, savedCapabilities[id]);
+    }
+    return catalogCapabilities;
+  };
+  const openAiCapabilities = normalizeCatalogCapabilities(
+    settings.openaiModelCatalog,
+    settings.openaiModelCapabilities
+  );
+  const openCodeGoCapabilities = normalizeCatalogCapabilities(
+    settings.openCodeGoModelCatalog,
+    settings.openCodeGoModelCapabilities
+  );
+  settings.openaiModelCapabilities = openAiCapabilities;
+  settings.openCodeGoModelCapabilities = openCodeGoCapabilities;
   const modelIds = new Set([
     ...MEETING_ANALYSIS_PRESETS,
     ...Object.keys(settings.meetingAnalysisProfiles || {}),
@@ -219,11 +246,11 @@ function ensureMeetingAnalysisCapabilities(settings) {
     if (!id) continue;
     const existing = settings.meetingAnalysisProfiles[id];
     const base = existing || defaultMeetingAnalysisProfile(id);
-    settings.meetingAnalysisProfiles[id] = capabilityForProfile(
-      id,
-      base,
-      catalogCapabilities[id]
-    );
+    const family = providerFamilyFor(id, base.providerFamily || base.provider);
+    const catalogCapability = family === PROVIDER_FAMILIES.OPENCODE_GO
+      ? openCodeGoCapabilities[id]
+      : openAiCapabilities[id];
+    settings.meetingAnalysisProfiles[id] = capabilityForProfile(id, base, catalogCapability);
   }
 }
 

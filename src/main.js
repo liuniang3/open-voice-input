@@ -215,11 +215,20 @@ const DEFAULT_SETTINGS = {
       baseUrl: "https://api.openai.com/v1",
       apiKey: "",
       apiStyle: "responses"
+    },
+    "opencode-go": {
+      provider: "opencode-go",
+      baseUrl: "https://opencode.ai/zen/go/v1",
+      apiKey: "",
+      apiStyle: "chat-completions"
     }
   },
   openaiModelCatalog: [],
   openaiModelCapabilities: {},
   openaiModelCatalogUpdatedAt: "",
+  openCodeGoModelCatalog: [],
+  openCodeGoModelCapabilities: {},
+  openCodeGoModelCatalogUpdatedAt: "",
   // Meeting-scoped model choices and non-provider storage settings.
   meetingMicrophoneDeviceId: "",
   meetingSystemDeviceId: "",
@@ -400,7 +409,7 @@ function liveIpcError(error) {
     live_review_failed: "音频复核失败，原始文本与音频已保留。",
     live_summary_failed: "总结失败，已有文本与音频已保留。",
     live_connection_failed: "实时模型连接测试失败，请检查该模型的凭据、地域地址和网络。",
-    window_mode_unavailable: "请先打开会议工作台。",
+    window_mode_unavailable: "请先打开会议实时转录。",
     app_quitting: "应用正在退出，请稍后重新打开。",
     microphone_permission: "请在系统设置中允许麦克风访问后重试。",
     screen_permission: "请在系统设置中允许屏幕与系统音频录制，或改用仅麦克风模式。",
@@ -486,8 +495,10 @@ function liveDto(value = {}) {
     } : {})
   } : null;
   dto.recoverableSessions = Array.isArray(value.recoverableSessions) ? value.recoverableSessions.map((item) =>
-    Object.fromEntries(Object.entries(pickMeetingFields(item, ["sessionId", "title", "status", "startedAtMs"]))
-      .filter(([, field]) => typeof field === "string" || typeof field === "number"))) : [];
+    Object.fromEntries(Object.entries(pickMeetingFields(item, [
+      "sessionId", "title", "status", "startedAtMs", "durationMs", "modelId",
+      "hasTranscript", "hasCorrection", "hasSummary"
+    ])).filter(([, field]) => ["string", "number", "boolean"].includes(typeof field)))) : [];
   dto.window = { ...liveWindowFlags };
   dto.error = value.error ? liveIpcError(value.error).error : null;
   const remember = (file) => {
@@ -623,6 +634,22 @@ function recoverLiveMeeting(payload = {}) {
     throw liveError("invalid_payload");
   }
   liveRecoveryPromise = Promise.resolve().then(() => getRealtimeMeeting().recover(input))
+    .finally(() => { liveRecoveryPromise = null; });
+  return liveRecoveryPromise;
+}
+
+function openLiveMeetingHistory(payload = {}) {
+  if (livePostprocessBusy()) throw liveError("live_busy");
+  if (captureOwner || liveStartPromise || liveStopPromise || liveActionPromise || liveControlPromise
+    || realtimeMeeting?.status().recording || realtimeMeeting?.status().paused || realtimeMeeting?.status().status === "stopping") {
+    throw liveError("capture_busy");
+  }
+  if (liveRecoveryPromise) return liveRecoveryPromise;
+  const input = pickMeetingFields(payload, ["sessionId"]);
+  if (typeof input.sessionId !== "string" || !input.sessionId || input.sessionId.length > 256) {
+    throw liveError("invalid_payload");
+  }
+  liveRecoveryPromise = Promise.resolve().then(() => getRealtimeMeeting().openHistory(input))
     .finally(() => { liveRecoveryPromise = null; });
   return liveRecoveryPromise;
 }
@@ -807,6 +834,7 @@ function createWindow() {
     show: false,
     frame: false,
     thickFrame: isWindows,
+    movable: true,
     alwaysOnTop: true,
     resizable: false,
     skipTaskbar: os.platform() !== "darwin",
@@ -1582,7 +1610,6 @@ function createTray() {
     { label: "检查更新", click: showUpdateSettings },
     { label: "文件转写", click: showFileTranscriptionWorkspace },
     { label: "开始实时会议转写", click: showAndStartLiveMeeting },
-    { label: "打开会议工作台", click: showMeetingWorkspace },
     { label: "开始录音", click: showAndStart },
     { label: "重试上一次转写", click: retryLastVoiceRequest },
     { label: "隐藏", click: () => hideWindow() },
@@ -1606,8 +1633,7 @@ function configureApplicationMenu() {
     ] },
     { role: "editMenu" },
     { label: "会议", submenu: [
-      { label: "开始实时会议转写", click: showAndStartLiveMeeting },
-      { label: "打开会议工作台", click: showMeetingWorkspace }
+      { label: "开始实时会议转写", click: showAndStartLiveMeeting }
     ] },
     { role: "windowMenu" }
   ]));
@@ -1903,6 +1929,8 @@ function registerLiveIpc(channel, handler) {
 }
 
 registerLiveIpc("meeting:live:status", () => liveDto(getRealtimeMeeting().status()));
+registerLiveIpc("meeting:live:history", async () => liveDto(await getRealtimeMeeting().listHistory()));
+registerLiveIpc("meeting:live:open-session", async (payload) => liveDto(await openLiveMeetingHistory(payload)));
 registerLiveIpc("meeting:live:start", async (payload) => liveDto(await startLiveMeeting(payload)));
 registerLiveIpc("meeting:live:stop", async () => {
   if (captureOwner && captureOwner !== "live") throw liveError("capture_busy");

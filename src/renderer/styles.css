@@ -203,6 +203,51 @@ body.recording-mode .pulse {
   -webkit-app-region: drag;
 }
 
+.topbar,
+body.recording-active .recording-chrome,
+.live-floating .live-heading {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* macOS three-finger dragging uses the same native hit-test regions as a
+   title-bar drag. Extend each custom title bar through its transparent inset. */
+html[data-platform="darwin"] .topbar,
+html[data-platform="darwin"] body.recording-active .recording-chrome,
+html[data-platform="darwin"] .live-floating .live-heading {
+  position: relative;
+  -webkit-app-region: drag;
+}
+
+html[data-platform="darwin"] .topbar::before,
+html[data-platform="darwin"] body.recording-active .recording-chrome::before,
+html[data-platform="darwin"] .live-floating .live-heading::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 14px;
+  -webkit-app-region: drag;
+}
+
+html[data-platform="darwin"] .topbar::before {
+  top: -14px;
+}
+
+html[data-platform="darwin"] body.recording-active .recording-chrome::before {
+  top: -9px;
+  height: 9px;
+}
+
+html[data-platform="darwin"] .live-floating .live-heading::before {
+  top: -12px;
+  height: 12px;
+}
+
+html[data-platform="darwin"] :is(button, input, textarea, select, a, [contenteditable="true"]) {
+  -webkit-app-region: no-drag;
+}
+
 .topbar > div:first-child {
   min-width: 0;
   -webkit-app-region: drag;

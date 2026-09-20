@@ -3,6 +3,7 @@
 const { createMimoClient } = require("../../providers/mimo-client");
 const { createMimoAsrProvider } = require("../../providers/asr/mimo-asr-provider");
 const { createOpenAiCompatibleClient } = require("../../providers/openai-compatible-client");
+const { createOpenCodeGoClient, createOpenCodeGoSessionId } = require("../../providers/opencode-go-client");
 const { createQwen3AsrProvider } = require("../../providers/asr/qwen3-asr-provider");
 const { isSupportedAliMeetingModel } = require("../../providers/asr/ali-meeting-stream");
 const { buildTextCleanupMessages, parseAndValidateCleanupResponse } = require("../../providers/cleaner/text-cleanup-method");
@@ -42,7 +43,13 @@ function previewProfileFor(settings, modelId = DEFAULT_LIVE_MODEL) {
 function languageModel(profile) {
   const client = profile.provider === "mimo"
     ? createMimoClient({ getSettings: () => ({ ...profile, model: profile.modelId }), useEnvironmentFallback: false })
-    : createOpenAiCompatibleClient({ ...profile, model: profile.modelId });
+    : profile.provider === "opencode-go"
+      ? createOpenCodeGoClient({
+          ...profile,
+          model: profile.modelId,
+          sessionId: createOpenCodeGoSessionId("meeting-live")
+        })
+      : createOpenAiCompatibleClient({ ...profile, model: profile.modelId });
   return async ({ messages, signal, maxTokens = 8192 }) => {
     const response = await client.requestChat(messages, { signal, maxTokens });
     if (response.finishReason && response.finishReason !== "stop") throw Object.assign(new Error("Incomplete model response"), { code: "analysis_response_incomplete" });
@@ -130,10 +137,19 @@ function transcriber(profile) {
 function cleaner(profile) {
   const client = profile.provider === "mimo"
     ? createMimoClient({ getSettings: () => ({ ...profile, model: profile.modelId }), useEnvironmentFallback: false })
-    : createOpenAiCompatibleClient({ ...profile, model: profile.modelId });
+    : profile.provider === "opencode-go"
+      ? createOpenCodeGoClient({
+          ...profile,
+          model: profile.modelId,
+          sessionId: createOpenCodeGoSessionId("meeting-cleanup")
+        })
+      : createOpenAiCompatibleClient({ ...profile, model: profile.modelId });
   return async (text, signal) => {
-    const response = await client.requestChat(buildTextCleanupMessages(text), { maxTokens: 8192, model: profile.modelId, signal });
-    const cleaned = parseAndValidateCleanupResponse(response.content, text);
+    const response = await client.requestChat(
+      buildTextCleanupMessages(text, "", { policy: "conservative" }),
+      { maxTokens: 8192, model: profile.modelId, signal }
+    );
+    const cleaned = parseAndValidateCleanupResponse(response.content, text, { policy: "conservative" });
     if (!cleaned && text.trim()) throw Object.assign(new Error("清理结果未通过原文保留校验；原文保持不变"), { code: "live_cleanup_validation_failed" });
     return cleaned;
   };

@@ -289,7 +289,7 @@ function createAnalysisPipeline({
       templateRequested: templateRequest || "auto",
       modelId: profile.modelId,
       profile: {
-        provider: "openai-compatible",
+        provider: profile.providerFamily || profile.provider || "openai-compatible",
         modelId: profile.modelId,
         contextWindowTokens: profile.contextWindowTokens,
         maxOutputTokens: profile.maxOutputTokens,

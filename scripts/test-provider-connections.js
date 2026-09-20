@@ -115,4 +115,40 @@ test("GPT analysis receives Responses style while an unrelated compatible model 
   assert.equal(other.apiStyle, "chat-completions");
 });
 
+test("OpenCode Go credentials remain isolated for cleanup and meeting analysis", () => {
+  const settings = ensureConnectionProfiles({
+    _connectionProfilesMigrated: true,
+    _providerConnectionsMigrated: true,
+    providerConnections: {
+      mimo: { apiKey: "fixture-mimo", baseUrl: "https://api.xiaomimimo.com/v1" },
+      openai: { apiKey: "fixture-openai", baseUrl: "https://api.openai.com/v1", apiStyle: "responses" },
+      "opencode-go": {
+        apiKey: "fixture-go",
+        baseUrl: "https://opencode.ai/zen/go/v1",
+        apiStyle: "chat-completions"
+      }
+    },
+    cleanerModel: "mimo-v2.5",
+    cleanerProfiles: {
+      "mimo-v2.5": { provider: "opencode-go", providerFamily: "opencode-go" }
+    },
+    meetingAnalysisModel: "glm-5.2",
+    meetingAnalysisProfiles: {
+      "glm-5.2": { provider: "opencode-go", providerFamily: "opencode-go" }
+    }
+  });
+  assert.equal(settings.cleanerProvider, "opencode-go");
+  assert.equal(settings.cleanerApiKey, "fixture-go");
+  assert.equal(settings.cleanerProfiles["mimo-v2.5"].apiKey, "fixture-go");
+  const analysis = resolveMeetingAnalysisCredentials({ env: {}, settings });
+  assert.equal(analysis.providerFamily, "opencode-go");
+  assert.equal(analysis.apiKey, "fixture-go");
+  assert.equal(analysis.baseUrl, "https://opencode.ai/zen/go/v1");
+  assert.equal(analysis.apiStyle, "chat-completions");
+  const liveSummary = profileFor(settings, "glm-5.2", true, {});
+  assert.equal(liveSummary.provider, "opencode-go");
+  assert.equal(liveSummary.apiKey, "fixture-go");
+  assert.equal(liveSummary.baseUrl, "https://opencode.ai/zen/go/v1");
+});
+
 console.log("provider connection tests passed");

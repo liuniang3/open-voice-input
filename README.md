@@ -2,9 +2,9 @@
 
 The current development version supports Windows/macOS and a **live meeting** workflow: Alibaba `qwen-audio-3.0-asr-flash-streaming` by default, or `fun-asr-realtime`, with separate provisional and confirmed text. When Alibaba is unavailable, `mimo-v2.5-asr` provides non-realtime segmented transcription as a fallback. Choose microphone, system audio, or both; use a floating window and pause/resume while keeping full local audio. Transcription and Markdown autosave intervals are configured independently. After stopping, optionally review the complete audio with MiMo, reconcile using an independently configured LLM, and separately generate detailed notes with a mindmap. See [meeting behavior, outputs and recovery](docs/MEETING_REALTIME.md).
 
-macOS native capture uses AVAudioEngine for microphone audio and ScreenCaptureKit for system audio (macOS 13+). System-only capture neither opens the microphone nor requests microphone permission; screen/system-audio permission is still required. Accessibility permission applies to automatic paste. Apple Silicon and Intel build jobs are provided, but this update has no macOS hardware-validation claim. `npm run dist:mac` requires a Mac with Xcode Command Line Tools; Windows uses `npm run dist`.
+macOS native capture uses AVAudioEngine for microphone audio and ScreenCaptureKit for system audio (macOS 13+). System-only capture neither opens the microphone nor requests microphone permission; screen/system-audio permission is still required. Accessibility permission applies to automatic paste. The frameless main header, short-dictation overlay, and floating meeting header expose native draggable regions compatible with macOS three-finger drag when enabled in System Settings. Apple Silicon and Intel build jobs are provided, but this update has no macOS hardware validation for capture, paste, or trackpad gestures. `npm run dist:mac` requires a Mac with Xcode Command Line Tools; Windows uses `npm run dist`.
 
-Desktop voice input assistant with pluggable ASR providers and optional LLM text cleanup.
+Desktop voice input assistant with pluggable ASR providers and optional context-aware LLM rewriting.
 
 Open Voice Input is an Electron MVP for global dictation and persistent meeting transcription. It is not a Windows IME driver. Short dictation records speech, transcribes it through the selected provider, optionally cleans the raw transcript, and pastes it into the previously focused app. Live meetings keep their own recording state, archives and results.
 
@@ -13,12 +13,13 @@ Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 ## Current Release Highlights
 
 - Live meetings default to Alibaba Streaming or Fun-ASR realtime and can switch to segmented non-realtime `mimo-v2.5-asr` when Alibaba is unavailable. Optional MiMo full-audio review, LLM reconciliation, and separate summary/mindmap generation run only after recording stops.
+- Meeting navigation is unified under Live Meeting. Its searchable History browser reopens prior live sessions for MiMo review, reconciliation, or summary; browsing local history does not automatically call ASR.
 - Meeting capture supports microphone-only, dual-track and genuine system-only modes, with floating/compact views, optional always-on-top, pause/resume, full WAV archives, and independently configurable transcription and Markdown autosave intervals.
 - The first stage is now a pluggable ASR layer, tuned most heavily for the dedicated `mimo-v2.5-asr` model and also supporting Qwen3-ASR and Fun-ASR.
 - Short-dictation Qwen preview now defaults to `qwen-audio-3.0-asr-flash-streaming`; Fun-ASR also provides WebSocket preview. MiMo uses periodic partial-audio preview, and a failed realtime stream falls back to non-realtime transcription of the complete recording.
-- `Stable` mode sends raw ASR text to a MiMo or OpenAI-compatible small model for filler removal, repetition cleanup, and punctuation. `Fast` mode performs ASR only.
+- `Stable` mode sends raw ASR text to MiMo, OpenAI, an OpenAI-compatible endpoint, or the experimental OpenCode Go provider to turn it into a clear, coherent paragraph while preserving the speaker's intent. `Fast` mode performs ASR only.
 - Settings now live in the frameless main UI, with a dedicated Provider Connections tab instead of a separate native Windows settings window.
-- MiMo models share one MiMo connection, Qwen/Fun-ASR models share one Alibaba connection, and GPT models share one OpenAI connection. The OpenAI URL may be a custom gateway such as NowCoding and supports either Responses or Chat Completions. Unrelated providers such as Grok or GLM retain independent model connections.
+- MiMo models share one MiMo connection, Qwen/Fun-ASR models share one Alibaba connection, GPT models share one OpenAI connection, and OpenCode Go has an isolated connection and model catalog. The OpenAI URL may be a custom gateway such as NowCoding and supports either Responses or Chat Completions.
 - API key fields include local show/hide and copy controls. Keys remain in `%APPDATA%\\open-voice-input\\settings.json` and are excluded from builds and Git.
 - Recordings are normalized to 16 kHz mono 16-bit PCM WAV. Long recordings are segmented according to the active ASR provider, transcribed and cached early, then joined in order when recording stops.
 - An independent file transcription workspace can import audio or video, select its ASR model, generate corrected text and a structured summary, and export Markdown, TXT, or Word.
@@ -33,7 +34,7 @@ For **live meetings**, normally select `qwen-audio-3.0-asr-flash-streaming` or `
 
 For **short dictation**, the project is tuned most heavily around the dedicated `mimo-v2.5-asr` model and the regular MiMo API endpoint. Qwen3-ASR and Fun-ASR are also supported. This short-dictation recommendation does not change the live-meeting streaming default.
 
-For the second-stage text cleanup step, a small chat model is usually enough. GPT-5.4 mini or another low-cost OpenAI-compatible small model is a good fit for removing filler words, merging repeated fragments, and adding punctuation after the raw transcript has already been produced.
+For the second-stage rewrite step, a small chat model is usually enough. GPT-5.4 mini or another low-cost OpenAI-compatible model can remove disfluencies and organize the raw transcript into a coherent paragraph without changing its intent.
 
 ## Features
 
@@ -42,15 +43,14 @@ For the second-stage text cleanup step, a small chat model is usually enough. GP
 - Tray menu for settings
 - Configurable microphone, two independent global hotkeys, shared vendor connections, and independent custom-model profiles
 - ASR providers: MiMo-V2.5-ASR, Qwen3-ASR, and Fun-ASR
-- Cleanup providers: MiMo chat cleanup and OpenAI-compatible chat cleanup
+- Cleanup providers: MiMo, OpenAI-compatible, and experimental OpenCode Go chat cleanup
 - `Fast` mode: ASR only, lower latency
-- `Stable` mode: ASR first, then LLM cleanup for filler words, repeated fragments, and punctuation
+- `Stable` mode: ASR first, then context-aware LLM rewriting for clear expression
 - Clipboard paste into the previous focused app
 - Provider-aware long-recording segmentation with one final cleanup pass after all ASR segments are joined
-- Local cleanup fallback for common filler words, repeated fragments, and prompt-leak style outputs
+- Local validation and raw-transcript fallback for unsupported rewrites, prompt leaks, and provider failures
 - **Independent file transcription**: open it from the tray or main UI, import audio/video, choose an ASR model, run raw transcript → correction → structured summary, and export Markdown, TXT, or Word.
-- **Meeting workbench media import** (WAV and common audio/video via bundled FFmpeg): stream-copies the source only, extracts the **first audio stream**, builds a local 16 kHz mono archive, and requires an explicit “generate transcript” step. **Basic mode needs no OSS.** Default Qwen no-bucket ASR does **not** invent multi-speaker diarization.
-- **Optional enhanced meeting transcription**: workbench “enhanced” mode uploads the system track to private OSS and runs Fun-ASR diarization (32/48/64 kbps); Settings configure Fun/OSS with separate connection tests. See [docs/MEETING_STAGE_4C.md](docs/MEETING_STAGE_4C.md).
+- **Live meeting history**: search and reopen prior live sessions, including their transcript, full audio, review, reconciliation, and summary outputs. The legacy meeting workbench entry and speaker-diarization settings are currently unavailable.
 
 **Media import limits:** first audio track only; not all codecs/containers are verified; long real-world videos are not claimed tested. The Windows installer/portable build includes **one** FFmpeg binary (~80 MB extra). FFmpeg is **FFmpeg 6.1.1** (gyan.dev essentials GPL build) via build-time `ffmpeg-static@5.3.0` — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [docs/FFMPEG_MEDIA_IMPORT.md](docs/FFMPEG_MEDIA_IMPORT.md).
 
@@ -191,8 +191,9 @@ Cleanup providers:
 
 - `MiMo`: text cleanup through MiMo chat, with MiMo V2.5 and MiMo V2.5 Pro presets.
 - `OpenAI-compatible`: text cleanup through any compatible chat endpoint, with GPT-5.4 mini and Grok 4.5 presets plus a custom model ID option.
+- `OpenCode Go (experimental)`: an isolated Chat Completions connection at `https://opencode.ai/zen/go/v1`, with automatic model retrieval. It can be selected for Stable-mode cleanup and for meeting correction/summary. Requests include the required dedicated user agent and a stable session ID for each meeting analysis run.
 
-GPT-5.4 mini is the current overall recommendation. MiMo ASR/cleanup/review models use the single MiMo connection; Qwen and Fun-ASR use the single Alibaba connection; GPT cleanup and analysis models use the single OpenAI connection. The OpenAI connection can point at the official service or a compatible gateway and can use Responses or Chat Completions. Grok, GLM and other unrelated compatible models keep independent URL/key profiles so credentials never cross provider families.
+GPT-5.4 mini is the current overall recommendation. MiMo ASR/cleanup/review models use the single MiMo connection; Qwen and Fun-ASR use the single Alibaba connection; GPT cleanup and analysis models use the single OpenAI connection. OpenCode Go credentials and its fetched model list never cross into those families, including when it exposes a model ID such as `mimo-v2.5` or `glm-5.2`. OpenCode Go officially targets coding-agent traffic, so non-code cleanup and meeting-summary requests may be rate-limited or rejected; the app keeps raw text and retry data when that happens.
 
 ## Short Dictation Modes
 
@@ -201,9 +202,9 @@ GPT-5.4 mini is the current overall recommendation. MiMo ASR/cleanup/review mode
 `Stable` mode performs two steps:
 
 1. ASR provider returns raw transcript text.
-2. Cleanup provider uses a conservative deletion-span method to remove only clear fillers, stutters, false starts, and accidental duplicates, then adjusts punctuation.
+2. The rewrite model interprets the current transcript, removes fillers, stutters, false starts and accidental duplicates, and may improve punctuation, sentence order and phrasing to produce one coherent paragraph.
 
-The cleaner is forbidden from paraphrasing, expanding, reordering, or summarizing. A local validator also requires the cleaned content to follow the original character order and retain enough of the source. Invalid JSON, unsafe edits, or cleanup request failures fall back to the raw ASR transcript instead of failing an already successful ASR result.
+The model may paraphrase spoken language without reproducing every word, but it must preserve every substantive intention and must not add facts, answer a dictated question, or explain its work. A local validator checks source grounding, excessive deletion or expansion, numbers and technical identifiers, meta-responses, and strict JSON formatting. Invalid or unsafe results fall back to the raw ASR transcript instead of failing an already successful ASR result.
 
 Each recording uses a settings snapshot captured at recording start, so changing settings while a recording is processing affects only the next recording.
 
@@ -221,26 +222,25 @@ Runtime logs are written to:
 %APPDATA%\open-voice-input\open-voice-input.log
 ```
 
-## Meeting workbench (current)
+## Live meeting workflow (current)
 
-The historical workbench remains available alongside the [live meeting workflow](docs/MEETING_REALTIME.md). Native capture supports microphone, system-only and dual-track modes; Windows uses endpoint-mix WASAPI loopback and macOS uses ScreenCaptureKit display-filter audio. Capture details: [docs/MEETING_STAGE_0B.md](docs/MEETING_STAGE_0B.md). Enhanced diarization: [docs/MEETING_STAGE_4C.md](docs/MEETING_STAGE_4C.md).
+Meeting features now share the [live meeting workflow](docs/MEETING_REALTIME.md). Native capture supports microphone, system-only and dual-track modes; Windows uses endpoint-mix WASAPI loopback and macOS uses ScreenCaptureKit display-filter audio. The live page includes searchable local history for reopening transcripts, full audio, and derived outputs. The former Meeting History/Workbench entry is no longer exposed.
 
-**Implemented:** L0 capture and session recovery; **basic** transcription (Qwen no-bucket, without OSS; audio still goes to ASR); optional **speaker separation** (system track → private OSS + Fun-ASR); correction/summary; media import (first audio track); export/playback/speaker display names; Settings Fun/OSS fields and connection tests. Live `fun-asr-realtime` does not require this OSS workflow and does not add speaker labels.
+**Implemented:** cross-platform native capture; Alibaba realtime or MiMo segmented transcription; complete audio, Markdown autosave, and retry checkpoints; local history browsing; explicit MiMo full-audio review, LLM reconciliation, structured summary, and mindmap generation. Opening history never reruns ASR automatically.
 
 **Current limits:**
 
-- **Basic** does not multi-speaker diarize (system side is often `remote_unknown`).
-- **Speaker separation** needs Fun-ASR + OSS; only the system track uses Fun; mic stays on Qwen.
-- Media import uses the **first audio track** only; not all codecs/long videos are claimed verified.
+- Speaker diarization and speaker labels are currently not exposed; dual track distinguishes only microphone and system-audio sources.
+- Media import belongs to the independent File Transcription workspace. It uses the **first audio track** only; not all codecs/long videos are claimed verified.
 - **Not done:** AEC, process-level loopback isolation, real multi-hour Tencent Meeting coexistence gate, L1 HQ conversion.
 - DRM may silence the system track; capture may include this app’s own audio.
 
 ```powershell
 npm run build:helper
 npm run check:helper
-npm run test:meeting
-npm run test:meeting:ui
-npm run test:meeting:4c
+npm run test:meeting:live
+npm run test:meeting:live:ui
+npm run test:all
 ```
 
 ## Known Limits
@@ -248,8 +248,8 @@ npm run test:meeting:4c
 - This is not a real Windows IME driver. It uses clipboard paste and may be blocked or delayed by some target apps.
 - Focus restoration and paste behavior can vary by target app, elevated windows, remote desktops, browser security behavior, and Windows input policy.
 - Realtime ASR quality depends on microphone choice, network latency, provider behavior, and model version.
-- If the ASR step mishears speech, the cleanup step can only clean the mistaken text; it cannot recover unheard content.
-- A cleanup model may still confuse meaningful repetition with a stutter or conservatively retain a self-correction. The local repetition regex is disabled, and the minimal-edit prompt plus output validator reduce damage, but text alone cannot resolve every semantic ambiguity.
+- If the ASR step mishears speech, the rewrite step can only organize the mistaken text; it cannot recover unheard content.
+- A rewrite model may still misunderstand references, ambiguity, or deliberate repetition. The local repetition regex is disabled, and the semantic-rewrite prompt plus output validator constrain omissions and unsupported expansion, but text alone cannot resolve every ambiguity.
 - In-app updates are available in packaged builds. Windows releases remain unsigned and may trigger SmartScreen. macOS uses separate Intel/Apple Silicon channels. Current unsigned macOS builds download and open the verified ZIP inside the app for manual replacement in `Applications`, without sending the user to GitHub; Developer ID-signed and notarized builds automatically enable restart-and-install.
 - Meeting: basic has no multi-speaker split; enhanced needs Fun+OSS; first-track import; no AEC / no multi-hour acceptance claim (see above and docs/MEETING_STAGE_4C.md).
 

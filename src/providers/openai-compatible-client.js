@@ -25,6 +25,7 @@ function createOpenAiCompatibleClient({
   requestTimeoutMs = 60000,
   headerName = "Authorization",
   headerValuePrefix = "Bearer ",
+  extraHeaders = null,
   fetchImpl = null
 }) {
   const fetchFn = fetchImpl || globalThis.fetch.bind(globalThis);
@@ -56,7 +57,12 @@ function createOpenAiCompatibleClient({
    * Caller abort => error.code = "aborted"
    * Internal timer => timeout error (not aborted)
    */
-  async function requestChat(messages, { extraBody = {}, maxTokens = 1024, signal = null } = {}) {
+  async function requestChat(messages, {
+    extraBody = {},
+    maxTokens = 1024,
+    signal = null,
+    requestHeaders = null
+  } = {}) {
     if (signal?.aborted) {
       const err = new Error("aborted");
       err.code = "aborted";
@@ -82,8 +88,11 @@ function createOpenAiCompatibleClient({
       controller.abort();
     }, limit);
 
+    const configuredHeaders = resolveMaybeFunction(extraHeaders);
     const headers = {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      ...(configuredHeaders && typeof configuredHeaders === "object" ? configuredHeaders : {}),
+      ...(requestHeaders && typeof requestHeaders === "object" ? requestHeaders : {})
     };
     headers[headerName] = `${headerValuePrefix}${resolvedApiKey}`;
 

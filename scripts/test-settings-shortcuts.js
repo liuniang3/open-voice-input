@@ -294,7 +294,9 @@ test("settings UI has unified provider connections and model-only vendor control
   assert.match(js, /testProviderConnection\(\{ provider \}\)/);
   assert.doesNotMatch(saveJs, /asrBaseUrl:\s*|asrApiKey:\s*|meetingQwenBaseUrl:\s*|meetingQwenApiKey:\s*/);
   assert.match(html, /id="meetingHotkeyInput"/);
-  assert.match(html, /id="meetingBtn"[\s\S]*会议工作台/);
+  assert.match(html, /id="meetingBtn"[\s\S]*会议实时转录/);
+  assert.doesNotMatch(html, /id="liveHistoryTab"|id="liveMeetingTab"/);
+  assert.match(html, /id="legacyMeetingHistoryPanel"[^>]*inert[^>]*hidden/);
   assert.match(html, /id="asrRealtimeModelPresetSelect"/);
   assert.match(html, /value="mimo-v2\.5-asr"/);
   assert.match(html, /value="qwen-audio-3\.0-asr-flash-streaming"/);
@@ -349,6 +351,8 @@ function mainHarness(platform = "darwin") {
       return state;
     },
     recover: async (input) => { events.push("recover"); controls.recoveryInput = input; return state; },
+    listHistory: async () => { controls.historyListed = (controls.historyListed || 0) + 1; return state; },
+    openHistory: async (input) => { controls.historyInput = input; Object.assign(state, { sessionId: input.sessionId, status: "completed", recording: false }); return state; },
     retry: async (input) => { controls.retryInput = input; return state; },
     cleanup: async (input) => { controls.cleanupInput = input; return state; },
     shutdown: async () => { events.push("live-shutdown"); await controls.shutdownGate?.promise; events.push("live-written"); }

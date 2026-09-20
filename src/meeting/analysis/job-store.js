@@ -147,7 +147,7 @@ function createAnalysisJobStore({ sessionDir } = {}) {
       modelId: job.modelId,
       profile: job.profile
         ? {
-            provider: "openai-compatible",
+            provider: job.profile.provider || "openai-compatible",
             modelId: job.modelId || job.profile.modelId || null,
             contextWindowTokens: job.profile.contextWindowTokens,
             maxOutputTokens: job.profile.maxOutputTokens,

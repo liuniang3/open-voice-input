@@ -67,7 +67,7 @@
           <button type="button" class="settings-tab is-active" role="tab" aria-selected="true" data-settings-tab="general">常规</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="connections">供应商连接</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="asr">语音识别</button>
-          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="cleaner">文本清理</button>
+          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="cleaner">表达整理</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="meeting">会议</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="updates">关于与更新</button>
         </nav>
@@ -84,7 +84,7 @@
                 <div class="mode-toggle" role="group" aria-label="转写模式">
                   <button id="stableModeBtn" type="button" class="mode-button" data-mode="stable">
                     <strong>稳定</strong>
-                    <span>先识别再清理</span>
+                    <span>先识别再整理</span>
                   </button>
                   <button id="fastModeBtn" type="button" class="mode-button" data-mode="fast">
                     <strong>快速</strong>
@@ -101,7 +101,7 @@
               <label class="field">
                 <span>开始会议实时转录快捷键</span>
                 <input id="meetingHotkeyInput" type="text" placeholder="CommandOrControl+Alt+Shift+M" autocomplete="off" />
-                <small id="meetingHotkeyHint" class="hotkey-hint" hidden>快捷键打开会议工作台并开始实时转录；录制中仅置前。Esc 取消修改。</small>
+                <small id="meetingHotkeyHint" class="hotkey-hint" hidden>快捷键打开会议实时转录并开始录制；录制中仅置前。Esc 取消修改。</small>
                 <small id="meetingHotkeyStatus" class="hotkey-hint" aria-live="polite"></small>
               </label>
             </section>
@@ -200,6 +200,31 @@
                 <span class="provider-test-result" data-provider-model-status="openai" aria-live="polite"></span>
               </div>
             </section>
+
+            <section class="settings-group provider-connection-group" aria-labelledby="openCodeGoConnectionTitle">
+              <div class="section-title">
+                <strong id="openCodeGoConnectionTitle">OpenCode Go（实验性）</strong>
+                <span id="openCodeGoConnectionDescription">用于稳定模式表达整理和会议校订/总结；该服务主要面向 coding agent，非代码任务可能受限。</span>
+              </div>
+              <label class="field">
+                <span>OpenCode Go Base URL</span>
+                <input id="openCodeGoBaseUrlInput" type="url" placeholder="https://opencode.ai/zen/go/v1" autocomplete="off" aria-describedby="openCodeGoConnectionDescription" />
+              </label>
+              <div class="field">
+                <label for="openCodeGoApiKeyInput">OpenCode Go API Key</label>
+                <div class="secret-control">
+                  <input id="openCodeGoApiKeyInput" type="password" placeholder="仅 OpenCode Go 模型使用" autocomplete="off" aria-describedby="openCodeGoConnectionDescription" />
+                  <button type="button" class="secret-action" data-secret-toggle="openCodeGoApiKeyInput" title="显示或隐藏 OpenCode Go API Key">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="openCodeGoApiKeyInput" title="复制 OpenCode Go API Key">复制</button>
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button type="button" data-provider-connection-test="opencode-go">测试 OpenCode Go</button>
+                <span class="provider-test-result" data-provider-test-result="opencode-go" aria-live="polite"></span>
+                <button type="button" data-provider-model-refresh="opencode-go">获取模型列表</button>
+                <span class="provider-test-result" data-provider-model-status="opencode-go" aria-live="polite"></span>
+              </div>
+            </section>
           </div>
 
           <div class="settings-tab-panel" role="tabpanel" data-settings-panel="asr" hidden>
@@ -270,12 +295,12 @@
           <div class="settings-tab-panel" role="tabpanel" data-settings-panel="cleaner" hidden>
             <section class="settings-group">
               <div class="section-title">
-                <strong>第二步：文本清理</strong>
-                <span>GPT 与 MiMo 使用供应商连接；其他模型可使用自定义兼容接口。</span>
+                <strong>第二步：表达整理</strong>
+                <span>理解本次转写语境，保留原意并整理成清晰、连贯、可直接使用的段落。</span>
               </div>
               <div class="provider-grid">
                 <div class="field">
-                  <label for="cleanerModelPresetSelect">文本清理模型</label>
+                  <label for="cleanerModelPresetSelect">表达整理模型</label>
                   <div class="model-select-control">
                     <select id="cleanerModelPresetSelect">
                       <option value="gpt-5.4-mini">GPT-5.4 mini（推荐）</option>
@@ -284,15 +309,16 @@
                       <option value="mimo-v2.5-pro">MiMo V2.5 Pro</option>
                       <option value="__custom__">自定义模型</option>
                     </select>
-                    <button type="button" class="model-refresh-btn" data-provider-model-refresh="openai" title="从 OpenAI 接口获取模型列表">获取模型</button>
+                    <button type="button" class="model-refresh-btn" data-provider-model-refresh="cleaner" title="从当前供应商接口获取模型列表">获取模型</button>
                   </div>
-                  <small class="model-catalog-status" data-provider-model-status="openai" aria-live="polite"></small>
+                  <small class="model-catalog-status" data-provider-model-status="cleaner" aria-live="polite"></small>
                 </div>
                 <label class="field">
                   <span>连接类型</span>
                   <select id="cleanerProviderSelect">
                     <option value="openai-compatible">OpenAI</option>
                     <option value="mimo">MiMo</option>
+                    <option value="opencode-go">OpenCode Go（实验性）</option>
                     <option value="custom">自定义兼容接口</option>
                   </select>
                 </label>
@@ -320,7 +346,7 @@
           </div>
 
           <div class="settings-tab-panel" role="tabpanel" data-settings-panel="meeting" hidden>
-            <section class="settings-group">
+            <section class="settings-group legacy-meeting-settings" hidden>
               <div class="section-title">
                 <strong>默认处理</strong>
                 <span>基础不上传；增强上传系统轨到 OSS 做说话人分离。</span>
@@ -397,7 +423,7 @@
               </label>
               <p class="settings-note">导入完成后点击“生成原文”，会使用这里选择的模型；完成后可继续“校订并总结”。</p>
             </section>
-            <section class="settings-group">
+            <section class="settings-group legacy-meeting-settings" hidden>
               <div class="section-title">
                 <strong>增强 · Fun-ASR</strong>
                 <span>仅增强模式系统轨；统一使用阿里云连接。</span>
@@ -419,7 +445,7 @@
                 <span id="meetingFunTestResult" class="meeting-test-result" aria-live="polite"></span>
               </div>
             </section>
-            <section class="settings-group">
+            <section class="settings-group legacy-meeting-settings" hidden>
               <div class="section-title">
                 <strong>增强 · OSS</strong>
                 <span>私有对象上传；成功后删除。凭证仅运行时。</span>
@@ -481,15 +507,16 @@
                     <option value="mimo-v2.5-pro">MiMo V2.5 Pro</option>
                     <option value="__custom__">自定义模型</option>
                   </select>
-                  <button type="button" class="model-refresh-btn" data-provider-model-refresh="openai" title="从 OpenAI 接口获取模型列表">获取模型</button>
-                </div>
-                <small class="model-catalog-status" data-provider-model-status="openai" aria-live="polite"></small>
+                    <button type="button" class="model-refresh-btn" data-provider-model-refresh="analysis" title="从当前供应商接口获取模型列表">获取模型</button>
+                  </div>
+                <small class="model-catalog-status" data-provider-model-status="analysis" aria-live="polite"></small>
               </div>
               <label class="field">
                 <span>连接类型</span>
                 <select id="meetingAnalysisProviderSelect">
                   <option value="openai-compatible">OpenAI</option>
                   <option value="mimo">MiMo</option>
+                  <option value="opencode-go">OpenCode Go（实验性）</option>
                   <option value="custom">自定义兼容接口</option>
                 </select>
               </label>
@@ -694,20 +721,32 @@
       </section>
 
       <section id="meetingPanel" class="meeting-panel" hidden aria-label="会议实时转录">
-        <nav class="live-navigation" role="tablist" aria-label="会议视图">
-          <button id="liveMeetingTab" type="button" role="tab" aria-selected="true" aria-controls="liveMeetingPanel">实时转录</button>
-          <button id="liveHistoryTab" type="button" role="tab" aria-selected="false" aria-controls="meetingHistoryPanel" tabindex="-1">会议历史</button>
-        </nav>
-        <section id="liveMeetingPanel" class="live-meeting" role="tabpanel" aria-labelledby="liveMeetingTab">
+        <section id="liveMeetingPanel" class="live-meeting">
           <header class="live-heading">
-            <div><span class="live-eyebrow">会议工作台</span><h2 id="liveSessionTitle">实时会议</h2></div>
+            <div><span class="live-eyebrow">会议实时转录</span><h2 id="liveSessionTitle">实时会议</h2></div>
             <div class="live-window-tools" role="group" aria-label="窗口控制">
+              <button id="liveHistoryToggle" class="live-history-toggle" type="button" aria-expanded="false" aria-controls="liveHistoryBrowser">历史记录 <span id="liveHistoryCount">0</span></button>
               <button id="liveFloat" type="button" title="切换到悬浮窗" hidden>悬浮窗</button>
               <label id="livePinField" class="live-check" hidden><input id="liveAlwaysOnTop" type="checkbox" />置顶</label>
               <button id="liveCompact" type="button" aria-pressed="false" hidden>精简</button>
               <button id="liveDetail" type="button" title="返回详细视图" hidden>返回详细</button>
             </div>
           </header>
+          <section id="liveHistoryBrowser" class="live-history-browser" aria-labelledby="liveHistoryHeading" hidden>
+            <header class="live-history-heading">
+              <div>
+                <strong id="liveHistoryHeading">历史记录</strong>
+                <span>选择以前的实时会议后，可查看原文和音频，并重新执行 MiMo 复核、校订或摘要。</span>
+              </div>
+              <div class="live-history-actions">
+                <label class="live-history-search"><span class="sr-only">搜索历史记录</span><input id="liveHistorySearch" type="search" placeholder="搜索标题、模型或日期" autocomplete="off" /></label>
+                <button id="liveHistoryRefresh" type="button">刷新</button>
+                <button id="liveHistoryClose" type="button" title="关闭历史记录" aria-label="关闭历史记录">×</button>
+              </div>
+            </header>
+            <div id="liveHistoryList" class="live-history-list" role="listbox" aria-label="实时会议历史"></div>
+            <p id="liveHistoryEmpty" class="live-history-empty">暂无实时会议记录。</p>
+          </section>
           <div class="live-setup">
             <label class="field live-title-field">
               <span>会议标题</span>
@@ -754,8 +793,6 @@
             <p id="liveError" class="live-error" role="alert" hidden></p>
             <button id="liveRefresh" type="button">刷新状态</button>
             <button id="liveRetry" type="button" disabled>重试未完成片段</button>
-            <label class="field live-recover-field"><span class="sr-only">可恢复的会话</span><select id="liveRecoverSession" aria-label="可恢复的会话"><option value="">最近会话</option></select></label>
-            <button id="liveRecover" type="button" disabled>恢复中断会话</button>
           </div>
           <div class="live-outputs" aria-label="会议输出">
             <button id="liveOpenMarkdown" type="button" disabled>打开原文 Markdown</button>
@@ -800,7 +837,7 @@
             </div>
           </section>
         </section>
-        <div id="meetingHistoryPanel" class="meeting-history" role="tabpanel" aria-labelledby="liveHistoryTab" hidden>
+        <div id="legacyMeetingHistoryPanel" class="meeting-history legacy-meeting-workbench" aria-hidden="true" inert hidden>
         <aside class="meeting-sidebar">
           <div class="meeting-sidebar-actions">
             <button type="button" id="meetingNewSessionBtn" class="primary legacy-capture-controls" title="新建会话" hidden>新建</button>

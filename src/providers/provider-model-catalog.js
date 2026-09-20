@@ -2,6 +2,10 @@
 
 const { PROVIDER_FAMILIES, normalizeProviderConnection } = require("../settings/provider-connections");
 const { resolveModelCapability } = require("../settings/model-capabilities");
+const {
+  OPENCODE_GO_USER_AGENT,
+  createOpenCodeGoSessionId
+} = require("./opencode-go-client");
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -14,10 +18,10 @@ function modelCatalogEndpoint(baseUrl) {
   try {
     url = new URL(raw);
   } catch {
-    throw Object.assign(new Error("OpenAI Base URL 无效。"), { code: "provider_base_url_invalid" });
+    throw Object.assign(new Error("供应商 Base URL 无效。"), { code: "provider_base_url_invalid" });
   }
   if (!/^https?:$/.test(url.protocol)) {
-    throw Object.assign(new Error("OpenAI Base URL 必须使用 HTTP 或 HTTPS。"), { code: "provider_base_url_invalid" });
+    throw Object.assign(new Error("供应商 Base URL 必须使用 HTTP 或 HTTPS。"), { code: "provider_base_url_invalid" });
   }
   url.hash = "";
   url.search = "";
@@ -135,14 +139,15 @@ function extractModelIds(body) {
 }
 
 async function listProviderModels({ settings, provider, fetchImpl = null } = {}) {
-  if (provider !== PROVIDER_FAMILIES.OPENAI) {
-    throw Object.assign(new Error("仅 OpenAI 兼容连接支持自动获取模型列表。"), {
+  if (![PROVIDER_FAMILIES.OPENAI, PROVIDER_FAMILIES.OPENCODE_GO].includes(provider)) {
+    throw Object.assign(new Error("该供应商连接暂不支持自动获取模型列表。"), {
       code: "provider_model_catalog_not_supported"
     });
   }
   const connection = normalizeProviderConnection(provider, settings?.providerConnections?.[provider]);
   if (!connection.apiKey) {
-    throw Object.assign(new Error("请先保存 OpenAI API Key。"), { code: "provider_credentials_missing" });
+    const label = provider === PROVIDER_FAMILIES.OPENCODE_GO ? "OpenCode Go" : "OpenAI";
+    throw Object.assign(new Error(`请先保存 ${label} API Key。`), { code: "provider_credentials_missing" });
   }
 
   const controller = new AbortController();
@@ -156,7 +161,14 @@ async function listProviderModels({ settings, provider, fetchImpl = null } = {})
     const response = await (fetchImpl || globalThis.fetch.bind(globalThis))(modelCatalogEndpoint(connection.baseUrl), {
       method: "GET",
       signal: controller.signal,
-      headers: { Authorization: `Bearer ${connection.apiKey}`, Accept: "application/json" }
+      headers: {
+        Authorization: `Bearer ${connection.apiKey}`,
+        Accept: "application/json",
+        ...(provider === PROVIDER_FAMILIES.OPENCODE_GO ? {
+          "User-Agent": OPENCODE_GO_USER_AGENT,
+          "x-opencode-session": createOpenCodeGoSessionId("models")
+        } : {})
+      }
     });
     if (!response.ok) {
       throw Object.assign(new Error(`获取模型列表失败（HTTP ${response.status}）。`), {

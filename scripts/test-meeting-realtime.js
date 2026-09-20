@@ -59,6 +59,38 @@ async function main() {
       assert.equal(doc.items.length, 3); assert.equal(doc.diarization, false);
     } finally { await x.api.shutdown(); }
   });
+  await test("history metadata and local reopening do not contact ASR", async () => {
+    const x = await setup();
+    try {
+      await x.api.start({ captureMode: "microphone", modelId: "mimo-v2.5-asr" });
+      await x.add("microphone", RATE + 200);
+      await x.api.stop(); await x.api.waitForIdle();
+      const firstId = x.api.status().sessionId;
+      const callsAfterFirst = x.calls.length;
+      await x.api.start({ captureMode: "microphone", modelId: "mimo-v2.5-asr" });
+      await x.add("microphone", RATE * 2);
+      await x.api.stop(); await x.api.waitForIdle();
+      const callsBeforeHistory = x.calls.length;
+      const listed = await x.api.listHistory();
+      assert.equal(listed.recoverableSessions.length, 2);
+      const first = listed.recoverableSessions.find(item => item.sessionId === firstId);
+      assert.equal(first.modelId, "mimo-v2.5-asr");
+      assert.equal(first.hasTranscript, true);
+      assert.equal(first.hasCorrection, false);
+      assert.ok(first.durationMs >= 1000);
+      const opened = await x.api.openHistory({ sessionId: firstId });
+      assert.equal(opened.sessionId, firstId);
+      assert.equal(opened.rawText, "Original 0.\n\nOriginal 1.");
+      assert.equal(x.calls.length, callsBeforeHistory, "opening history must not invoke ASR");
+      assert.ok(callsBeforeHistory > callsAfterFirst);
+      await x.api.cleanup({ sessionId: firstId, modelId: "fixture" });
+      await x.api.waitForIdle();
+      assert.equal(x.api.status().cleanupStatus, "completed");
+      assert.equal(x.calls.length, callsBeforeHistory, "cleaning saved text must not invoke ASR");
+      const refreshed = await x.api.listHistory();
+      assert.equal(refreshed.recoverableSessions.find(item => item.sessionId === firstId).hasCorrection, true);
+    } finally { await x.api.shutdown(); }
+  });
   await test("MiMo fallback transport honors per-session transcription and autosave intervals", async () => {
     assert.equal(meetingTransportFor("mimo-v2.5-asr"), "mimo-batch");
     assert.equal(meetingTransportFor("qwen-audio-3.0-asr-flash-streaming"), "ali-streaming");

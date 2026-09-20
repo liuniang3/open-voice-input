@@ -549,55 +549,99 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     for (const name of names) {
       if (!/^[A-Za-z0-9._-]+$/.test(name)) continue;
       const s = await readJson(path.join(store.sessionsRoot, name, "realtime", "state.json")).catch(() => null);
-      if (s?.schema === "meeting_live_v1") list.push({ sessionId: name, title: s.title, status: s.recording ? "interrupted" : s.status, startedAtMs: s.startedAtMs });
+      if (s?.schema !== "meeting_live_v1") continue;
+      const durationFrames = Math.max(0, ...Object.values(s.tracks || {}).map(track => Number(track?.frames) || 0));
+      list.push({
+        sessionId: name,
+        title: String(s.title || "会议实时转录").slice(0, 200),
+        status: s.recording ? "interrupted" : s.status,
+        startedAtMs: Number(s.startedAtMs) || 0,
+        durationMs: Math.round(durationFrames * 1000 / RATE),
+        modelId: String(s.modelId || "").slice(0, 256),
+        hasTranscript: Array.isArray(s.segments) && s.segments.some(segment => segment?.status === "completed" && String(segment.text || "").trim()),
+        hasCorrection: Boolean(String(s.correctedText || "").trim()),
+        hasSummary: Boolean(s.summary)
+      });
     }
     history = list.sort((a, b) => b.startedAtMs - a.startedAtMs);
+  }
+
+  async function prepareSessionSwitch() {
+    clearInterval(pumpTimer); clearInterval(saveTimer);
+    if (pumpPromise) await pumpPromise;
+    await saveTail.catch(() => {});
+    await persistTail;
+    await preview?.shutdown();
+    preview = null;
+    liveProfile = null;
+  }
+
+  async function loadHistorySession(id) {
+    const saved = await store.readSession(id);
+    sessionDir = saved.sessionDir;
+    const loaded = await readJson(stateFile());
+    if (loaded?.schema !== "meeting_live_v1" || !Array.isArray(loaded.segments)
+      || !loaded.tracks || typeof loaded.tracks !== "object") throw new Error("live_session_invalid");
+    state = loaded;
+    state.sessionId = id;
+    state.transport ||= meetingTransportFor(state.modelId) || "mimo-batch";
+    state.transcriptionIntervalSeconds = boundedInterval(
+      state.transcriptionIntervalSeconds,
+      defaultTranscriptionIntervalSeconds,
+      1,
+      30
+    );
+    state.saveIntervalSeconds = boundedInterval(
+      state.saveIntervalSeconds,
+      defaultSaveIntervalSeconds,
+      0.01,
+      300
+    );
+    const interrupted = state.recording || ["starting", "stopping"].includes(state.status);
+    state.recording = false;
+    state.paused = false;
+    if (interrupted) state.status = "interrupted";
+    if (state.cleanupStatus === "running") state.cleanupStatus = "failed";
+    if (state.postprocessStatus === "running") state.postprocessStatus = "failed";
+    for (const segment of state.segments) if (segment.status === "running") segment.status = "pending";
+    for (const [track, value] of Object.entries(state.tracks)) {
+      if (!["microphone", "system"].includes(track)) throw new Error("live_track_invalid");
+      value.path = path.join(sessionDir, "realtime", `${track}-complete.wav`);
+      await ensureWave(value.path);
+      await repairWave(value.path);
+    }
+    state.audioPaths = Object.values(state.tracks).map(track => track.path);
+    request = null;
+    if (isStreaming()) createPreview();
+  }
+
+  async function listHistory() {
+    await refreshHistory();
+    return status();
+  }
+
+  async function openHistory({ sessionId } = {}) {
+    if (state?.recording || workerPromise || cleanupPromise || transitionPromise) return status();
+    return transition(async () => {
+      await prepareSessionSwitch();
+      await refreshHistory();
+      const id = String(sessionId || "");
+      if (!id || !history.some(item => item.sessionId === id)) throw new Error("live_session_invalid");
+      await loadHistorySession(id);
+      emit();
+      return status();
+    });
   }
 
   async function recover({ sessionId } = {}) {
     if (state?.recording || workerPromise || cleanupPromise || transitionPromise) return status();
     return transition(async () => {
-      clearInterval(pumpTimer); clearInterval(saveTimer);
-      if (pumpPromise) await pumpPromise;
-      await saveTail.catch(() => {});
-      await persistTail;
-      await preview?.shutdown(); preview = null; liveProfile = null;
+      await prepareSessionSwitch();
       await refreshHistory();
       const id = sessionId || history[0]?.sessionId;
       if (!id) return status();
       if (!history.some(s => s.sessionId === id)) throw new Error("live_session_invalid");
-      const saved = await store.readSession(id);
-      sessionDir = saved.sessionDir;
-      state = await readJson(stateFile());
-      state.transport ||= meetingTransportFor(state.modelId) || "mimo-batch";
-      state.transcriptionIntervalSeconds = boundedInterval(
-        state.transcriptionIntervalSeconds,
-        defaultTranscriptionIntervalSeconds,
-        1,
-        30
-      );
-      state.saveIntervalSeconds = boundedInterval(
-        state.saveIntervalSeconds,
-        defaultSaveIntervalSeconds,
-        0.01,
-        300
-      );
-      const interrupted = state.recording || ["starting", "stopping"].includes(state.status);
-      state.recording = false;
-      state.paused = false;
-      if (interrupted) state.status = "interrupted";
-      if (state.cleanupStatus === "running") state.cleanupStatus = "failed";
-      if (state.postprocessStatus === "running") state.postprocessStatus = "failed";
-      for (const segment of state.segments) if (segment.status === "running") segment.status = "pending";
-      for (const [track, t] of Object.entries(state.tracks)) {
-        if (!["microphone", "system"].includes(track)) throw new Error("live_track_invalid");
-        t.path = path.join(sessionDir, "realtime", `${track}-complete.wav`);
-        await ensureWave(t.path);
-        await repairWave(t.path);
-      }
-      state.audioPaths = Object.values(state.tracks).map(t => t.path);
-      request = null;
-      if (isStreaming()) createPreview();
+      await loadHistorySession(id);
       try { await finalize({ recovery: true }); } catch { /* Leave a visible recoverable finalization error. */ }
       emit(); return status();
     });
@@ -801,7 +845,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     if (state) await saveMarkdown({ strict: true });
   }
 
-  return { start, stop, pause, resume, retry, cleanup, summarize, status, recover, shutdown,
+  return { start, stop, pause, resume, retry, cleanup, summarize, status, recover, listHistory, openHistory, shutdown,
     // Deterministic timer-independent regression probes, no IPC exposure.
     flush: async () => { await pump(!state?.recording); await saveMarkdown(); runWorker(); },
     waitForIdle: async () => { await preview?.waitForIdle(); await workerPromise; await cleanupPromise; } };

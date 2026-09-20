@@ -6,8 +6,10 @@ const { createMimoAsrProvider, normalizeMimoAsrModel } = require("./asr/mimo-asr
 const { createQwen3AsrProvider } = require("./asr/qwen3-asr-provider");
 const { createMimoCleanerProvider } = require("./cleaner/mimo-cleaner-provider");
 const { createOpenAiCompatibleCleanerProvider } = require("./cleaner/openai-compatible-cleaner-provider");
+const { createOpenCodeGoCleanerProvider } = require("./cleaner/opencode-go-cleaner-provider");
 const { createMimoClient } = require("./mimo-client");
 const { createOpenAiCompatibleClient, normalizeBaseUrl } = require("./openai-compatible-client");
+const { createOpenCodeGoClient } = require("./opencode-go-client");
 const { resolveProviderConnection } = require("../settings/provider-connections");
 
 const QWEN_ASR_OPENAI_MODEL = "qwen3-asr-flash";
@@ -66,6 +68,12 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     apiStyle: resolveCleanerApiStyle,
     requestTimeoutMs: resolveRequestTimeoutMs
   });
+  const openCodeGoCleanerClient = createOpenCodeGoClient({
+    apiKey: resolveCleanerApiKey,
+    baseUrl: resolveCleanerBaseUrl,
+    model: resolveCleanerModel,
+    requestTimeoutMs: resolveRequestTimeoutMs
+  });
   const asrProviders = providerOverrides.asrProviders || {
     mimo: createMimoAsrProvider({
       client: mimoClient,
@@ -109,7 +117,8 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   };
   const cleanerProviders = providerOverrides.cleanerProviders || {
     mimo: createMimoCleanerProvider({ client: mimoCleanerClient, getModel: resolveCleanerModel }),
-    "openai-compatible": createOpenAiCompatibleCleanerProvider({ client: openAiCleanerClient })
+    "openai-compatible": createOpenAiCompatibleCleanerProvider({ client: openAiCleanerClient }),
+    "opencode-go": createOpenCodeGoCleanerProvider({ client: openCodeGoCleanerClient })
   };
 
   function normalizeTranscriptionMode(mode) {
@@ -215,7 +224,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     });
 
     checks.push({
-      name: "文本清理",
+      name: "表达整理",
       ok: settings.transcriptionMode === "fast" || Boolean(resolveCleanerApiKey()),
       detail: settings.transcriptionMode === "fast"
         ? "快速模式不调用二次清理"
@@ -253,7 +262,9 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
         { role: "system", content: "Return exactly {\"text\":\"ok\"}." },
         { role: "user", content: "ok" }
       ];
-      if (["openai", "openai-compatible"].includes(settings.cleanerProvider)) {
+      if (settings.cleanerProvider === "opencode-go") {
+        await openCodeGoCleanerClient.requestChat(messages, { maxTokens: 32 });
+      } else if (["openai", "openai-compatible"].includes(settings.cleanerProvider)) {
         await openAiCleanerClient.requestChat(messages, { maxTokens: 32 });
       } else {
         await mimoCleanerClient.requestChat(messages, { maxTokens: 32, model: resolveCleanerModel() });
@@ -381,9 +392,9 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   }
 
   function resolveActiveCleanerBaseUrl(settings) {
-    return ["openai", "openai-compatible"].includes(settings.cleanerProvider)
-      ? resolveCleanerBaseUrl()
-      : mimoCleanerClient.resolveBaseUrl(mimoCleanerClient.resolveApiKey());
+    return settings.cleanerProvider === "mimo"
+      ? mimoCleanerClient.resolveBaseUrl(mimoCleanerClient.resolveApiKey())
+      : resolveCleanerBaseUrl();
   }
 
   function resolveCleanerModel() {

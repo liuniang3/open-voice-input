@@ -32,6 +32,8 @@ const aliyunApiKeyInput = document.getElementById("aliyunApiKeyInput");
 const openaiBaseUrlInput = document.getElementById("openaiBaseUrlInput");
 const openaiApiKeyInput = document.getElementById("openaiApiKeyInput");
 const openaiApiStyleSelect = document.getElementById("openaiApiStyleSelect");
+const openCodeGoBaseUrlInput = document.getElementById("openCodeGoBaseUrlInput");
+const openCodeGoApiKeyInput = document.getElementById("openCodeGoApiKeyInput");
 const providerConnectionTestButtons = [...document.querySelectorAll("[data-provider-connection-test]")];
 const providerModelRefreshButtons = [...document.querySelectorAll("[data-provider-model-refresh]")];
 const providerModelStatusElements = [...document.querySelectorAll("[data-provider-model-status]")];
@@ -158,11 +160,12 @@ const MEETING_ANALYSIS_MODEL_PRESETS = new Set([
   "mimo-v2.5-pro"
 ]);
 const OPENAI_API_STYLES = new Set(["responses", "chat-completions"]);
-const TEXT_PROVIDER_FAMILIES = new Set(["mimo", "openai-compatible", "custom"]);
+const TEXT_PROVIDER_FAMILIES = new Set(["mimo", "openai-compatible", "opencode-go", "custom"]);
 const DEFAULT_PROVIDER_CONNECTIONS = Object.freeze({
   mimo: Object.freeze({ baseUrl: "https://api.xiaomimimo.com/v1", apiKey: "", apiStyle: "chat-completions" }),
   aliyun: Object.freeze({ baseUrl: "https://dashscope.aliyuncs.com", apiKey: "" }),
-  openai: Object.freeze({ baseUrl: "https://api.openai.com/v1", apiKey: "", apiStyle: "responses" })
+  openai: Object.freeze({ baseUrl: "https://api.openai.com/v1", apiKey: "", apiStyle: "responses" }),
+  "opencode-go": Object.freeze({ baseUrl: "https://opencode.ai/zen/go/v1", apiKey: "", apiStyle: "chat-completions" })
 });
 
 function normalizedConnection(value, fallback) {
@@ -194,6 +197,7 @@ function legacyProviderConnection(settings, family) {
     const provider = String(profile?.provider || "").toLowerCase();
     if (family === "mimo") return provider === "mimo" || id.startsWith("mimo-");
     if (family === "aliyun") return /qwen|fun-asr/.test(id) || /qwen|fun-asr|aliyun/.test(provider);
+    if (family === "opencode-go") return provider === "opencode-go" || profile?.providerFamily === "opencode-go";
     return id.startsWith("gpt-");
   });
   const activeModels = family === "aliyun"
@@ -252,6 +256,10 @@ function providerConnectionsForSettings(settings) {
     openai: normalizedConnection(
       Object.hasOwn(saved, "openai") ? saved.openai : legacyProviderConnection(settings, "openai"),
       DEFAULT_PROVIDER_CONNECTIONS.openai
+    ),
+    "opencode-go": normalizedConnection(
+      Object.hasOwn(saved, "opencode-go") ? saved["opencode-go"] : legacyProviderConnection(settings, "opencode-go"),
+      DEFAULT_PROVIDER_CONNECTIONS["opencode-go"]
     )
   };
 }
@@ -265,6 +273,8 @@ function fillProviderConnections() {
   openaiBaseUrlInput.value = connections.openai.baseUrl;
   openaiApiKeyInput.value = connections.openai.apiKey;
   openaiApiStyleSelect.value = connections.openai.apiStyle;
+  openCodeGoBaseUrlInput.value = connections["opencode-go"].baseUrl;
+  openCodeGoApiKeyInput.value = connections["opencode-go"].apiKey;
 }
 
 function collectProviderConnections() {
@@ -284,6 +294,11 @@ function collectProviderConnections() {
       apiStyle: OPENAI_API_STYLES.has(openaiApiStyleSelect.value)
         ? openaiApiStyleSelect.value
         : "responses"
+    },
+    "opencode-go": {
+      baseUrl: openCodeGoBaseUrlInput.value.trim(),
+      apiKey: openCodeGoApiKeyInput.value.trim(),
+      apiStyle: "chat-completions"
     }
   };
 }
@@ -307,6 +322,28 @@ function openAiCatalogModels() {
   return normalizeModelCatalog(appSettings.openaiModelCatalog);
 }
 
+function openCodeGoCatalogModels() {
+  return normalizeModelCatalog(appSettings.openCodeGoModelCatalog);
+}
+
+function catalogProviderForTextFamily(family) {
+  if (family === "openai-compatible") return "openai";
+  if (family === "opencode-go") return "opencode-go";
+  return "";
+}
+
+function providerCatalogModels(provider) {
+  return provider === "opencode-go" ? openCodeGoCatalogModels() : provider === "openai" ? openAiCatalogModels() : [];
+}
+
+function providerCatalogCapabilities(provider) {
+  return provider === "opencode-go"
+    ? appSettings.openCodeGoModelCapabilities || {}
+    : provider === "openai"
+      ? appSettings.openaiModelCapabilities || {}
+      : {};
+}
+
 const GENERIC_ANALYSIS_CAPABILITY = Object.freeze({
   contextWindow: 128000,
   maxOutput: 8192,
@@ -317,9 +354,10 @@ const GENERIC_ANALYSIS_CAPABILITY = Object.freeze({
 });
 
 function meetingAnalysisCapability(model, profile = null) {
+  const provider = catalogProviderForTextFamily(savedTextProviderFamily(model, profile));
   return profile && Number(profile.contextWindow) > 0
     ? profile
-    : appSettings.openaiModelCapabilities?.[String(model || "").trim()] || GENERIC_ANALYSIS_CAPABILITY;
+    : providerCatalogCapabilities(provider)?.[String(model || "").trim()] || GENERIC_ANALYSIS_CAPABILITY;
 }
 
 function analysisCapabilityValues(profile) {
@@ -355,22 +393,47 @@ function isOpenAiCatalogModel(model) {
   return openAiCatalogModels().includes(String(model || "").trim());
 }
 
-function setOpenAiCatalogStatus(text) {
-  for (const element of providerModelStatusElements) element.textContent = text;
+function isProviderCatalogModel(model, provider) {
+  return providerCatalogModels(provider).includes(String(model || "").trim());
 }
 
-function renderOpenAiCatalogStatus() {
-  const count = openAiCatalogModels().length;
-  const updated = String(appSettings.openaiModelCatalogUpdatedAt || "").trim();
+function providerForCatalogScope(scope) {
+  if (["openai", "opencode-go"].includes(scope)) return scope;
+  if (scope === "cleaner") return catalogProviderForTextFamily(cleanerProviderSelect.value);
+  if (scope === "analysis") return catalogProviderForTextFamily(meetingAnalysisProviderSelect.value);
+  return "";
+}
+
+function setProviderCatalogStatus(scope, text) {
+  for (const element of providerModelStatusElements) {
+    if (element.dataset.providerModelStatus === scope) element.textContent = text;
+  }
+}
+
+function providerCatalogStatusText(provider) {
+  if (!provider) return "当前供应商不提供模型目录";
+  const count = providerCatalogModels(provider).length;
+  const updatedKey = provider === "opencode-go" ? "openCodeGoModelCatalogUpdatedAt" : "openaiModelCatalogUpdatedAt";
+  const updated = String(appSettings[updatedKey] || "").trim();
   const updatedAt = updated ? new Date(updated) : null;
   const suffix = updatedAt && Number.isFinite(updatedAt.getTime())
     ? ` · ${updatedAt.toLocaleDateString("zh-CN")}`
     : "";
-  setOpenAiCatalogStatus(count ? `已缓存 ${count} 个模型${suffix}` : "尚未获取模型列表");
+  return count ? `已缓存 ${count} 个模型${suffix}` : "尚未获取模型列表";
+}
+
+function renderProviderCatalogStatuses() {
+  for (const scope of ["openai", "opencode-go", "cleaner", "analysis"]) {
+    const provider = providerForCatalogScope(scope);
+    setProviderCatalogStatus(scope, providerCatalogStatusText(provider));
+    const button = providerModelRefreshButtons.find(item => item.dataset.providerModelRefresh === scope);
+    if (button && ["cleaner", "analysis"].includes(scope)) button.hidden = !provider;
+  }
 }
 
 function defaultTextProviderFamily(model) {
   const value = String(model || "").trim();
+  if (/^opencode-go\//i.test(value)) return "opencode-go";
   if (/^mimo-/i.test(value)) return "mimo";
   if (isOpenAiCatalogModel(value) || /^(?:gpt-|chatgpt-|o[134](?:-|$))/i.test(value)) return "openai-compatible";
   return "custom";
@@ -607,7 +670,7 @@ function handleAsrRealtimeModelPresetChange() {
   renderCustomAsrRealtimeModelField();
 }
 
-function syncSavedModelOptions(select, profiles, presetModels) {
+function syncSavedModelOptions(select, profiles, presetModels, providerFamily = "") {
   const previousValue = select.value;
   for (const option of [...select.querySelectorAll("option[data-saved-model]")]) {
     option.remove();
@@ -624,21 +687,24 @@ function syncSavedModelOptions(select, profiles, presetModels) {
     option.dataset.savedModel = "true";
     select.insertBefore(option, customOption || null);
   }
-  syncOpenAiCatalogOptions(select);
+  syncProviderCatalogOptions(select, providerFamily);
   if ([...select.options].some((option) => option.value === previousValue)) select.value = previousValue;
 }
 
-function syncOpenAiCatalogOptions(select) {
+function syncProviderCatalogOptions(select, providerFamily = "") {
   for (const option of [...select.querySelectorAll("option[data-provider-model]")]) option.remove();
   if (![cleanerModelPresetSelect, meetingAnalysisModelPresetSelect].includes(select)) return;
+  const provider = catalogProviderForTextFamily(providerFamily);
+  if (!provider) return;
   const existing = new Set([...select.options].map((option) => option.value));
   const customOption = [...select.options].find((option) => option.value === CUSTOM_CLEANER_MODEL);
-  for (const model of openAiCatalogModels()) {
+  for (const model of providerCatalogModels(provider)) {
     if (existing.has(model)) continue;
     const option = document.createElement("option");
     option.value = model;
     option.textContent = `${model}（接口）`;
-    option.dataset.providerModel = "openai";
+    option.dataset.providerModel = provider;
+    option.dataset.textProviderFamily = providerFamily;
     select.insertBefore(option, customOption || null);
     existing.add(model);
   }
@@ -733,10 +799,13 @@ function handleAsrProviderChange() {
   }
 }
 
-function fillCleanerModel(model) {
+function fillCleanerModel(model, providerFamilyOverride = "") {
   const value = String(model || "").trim() || "mimo-v2.5";
-  syncSavedModelOptions(cleanerModelPresetSelect, appSettings.cleanerProfiles, CLEANER_MODEL_PRESETS);
-  if (CLEANER_MODEL_PRESETS.has(value) || appSettings.cleanerProfiles?.[value] || isOpenAiCatalogModel(value)) {
+  const profile = appSettings.cleanerProfiles?.[value];
+  const providerFamily = providerFamilyOverride || savedTextProviderFamily(value, profile);
+  syncSavedModelOptions(cleanerModelPresetSelect, appSettings.cleanerProfiles, CLEANER_MODEL_PRESETS, providerFamily);
+  const catalogProvider = catalogProviderForTextFamily(providerFamily);
+  if (CLEANER_MODEL_PRESETS.has(value) || profile || isProviderCatalogModel(value, catalogProvider)) {
     cleanerModelPresetSelect.value = value;
     cleanerModelInput.value = "";
   } else {
@@ -775,7 +844,10 @@ function handleCleanerModelPresetChange() {
     cleanerModelInput.focus();
     return;
   }
-  loadCleanerProfileDraft(model);
+  const option = cleanerModelPresetSelect.selectedOptions?.[0];
+  loadCleanerProfileDraft(model, {
+    providerFamily: option?.dataset.textProviderFamily || cleanerProviderSelect.value
+  });
 }
 
 function cacheCleanerProfileDraft(model, { provider = cleanerProviderSelect.value } = {}) {
@@ -785,7 +857,13 @@ function cacheCleanerProfileDraft(model, { provider = cleanerProviderSelect.valu
   appSettings.cleanerProfiles = {
     ...(appSettings.cleanerProfiles || {}),
     [value]: {
-      provider: providerFamily === "mimo" ? "mimo" : providerFamily === "openai-compatible" ? "openai" : "openai-compatible",
+      provider: providerFamily === "mimo"
+        ? "mimo"
+        : providerFamily === "openai-compatible"
+          ? "openai"
+          : providerFamily === "opencode-go"
+            ? "opencode-go"
+            : "openai-compatible",
       providerFamily,
       ...(providerFamily === "custom" ? {
         baseUrl: cleanerBaseUrlInput.value.trim(),
@@ -795,25 +873,33 @@ function cacheCleanerProfileDraft(model, { provider = cleanerProviderSelect.valu
   };
 }
 
-function loadCleanerProfileDraft(model) {
+function loadCleanerProfileDraft(model, { providerFamily: preferredProviderFamily = "" } = {}) {
   const profile = appSettings.cleanerProfiles?.[model];
-  fillCleanerModel(model);
-  cleanerProviderSelect.value = savedTextProviderFamily(model, profile);
+  const providerFamily = preferredProviderFamily || savedTextProviderFamily(model, profile);
+  cleanerProviderSelect.value = providerFamily;
+  fillCleanerModel(model, providerFamily);
   cleanerBaseUrlInput.value = cleanerProviderSelect.value === "custom" ? profile?.baseUrl || "" : "";
   cleanerApiKeyInput.value = cleanerProviderSelect.value === "custom" ? profile?.apiKey || "" : "";
   renderCleanerConnectionFields();
+  renderProviderCatalogStatuses();
   activeCleanerModelDraft = model;
 }
 
 function handleCleanerProviderChange() {
   renderCleanerConnectionFields();
+  fillCleanerModel(selectedCleanerModel() || activeCleanerModelDraft, cleanerProviderSelect.value);
+  renderProviderCatalogStatuses();
 }
 
-function fillProfileModelSelector({ select, input, customField, model, profiles, presets, fallback }) {
+function fillProfileModelSelector({ select, input, customField, model, profiles, presets, fallback, providerFamily = "" }) {
   const value = String(model || "").trim() || fallback;
-  syncSavedModelOptions(select, profiles, presets);
+  const profileFamily = providerFamily || (select === meetingAnalysisModelPresetSelect
+    ? savedTextProviderFamily(value, profiles?.[value])
+    : "");
+  syncSavedModelOptions(select, profiles, presets, profileFamily);
   input.value = value;
-  const fromCatalog = select === meetingAnalysisModelPresetSelect && isOpenAiCatalogModel(value);
+  const fromCatalog = select === meetingAnalysisModelPresetSelect
+    && isProviderCatalogModel(value, catalogProviderForTextFamily(profileFamily));
   select.value = presets.has(value) || profiles?.[value] || fromCatalog ? value : CUSTOM_ASR_MODEL;
   customField.hidden = select.value !== CUSTOM_ASR_MODEL;
   return value;
@@ -943,7 +1029,13 @@ function cacheMeetingAnalysisProfileDraft(model) {
   appSettings.meetingAnalysisProfiles = {
     ...(appSettings.meetingAnalysisProfiles || {}),
     [value]: {
-      provider: providerFamily === "mimo" ? "mimo" : providerFamily === "openai-compatible" ? "openai" : "openai-compatible",
+      provider: providerFamily === "mimo"
+        ? "mimo"
+        : providerFamily === "openai-compatible"
+          ? "openai"
+          : providerFamily === "opencode-go"
+            ? "opencode-go"
+            : "openai-compatible",
       providerFamily,
       model: value,
       contextWindow: capability.contextWindow,
@@ -961,7 +1053,9 @@ function cacheMeetingAnalysisProfileDraft(model) {
   };
 }
 
-function loadMeetingAnalysisProfileDraft(model) {
+function loadMeetingAnalysisProfileDraft(model, { providerFamily: preferredProviderFamily = "" } = {}) {
+  const savedProfile = appSettings.meetingAnalysisProfiles?.[model];
+  const providerFamily = preferredProviderFamily || savedTextProviderFamily(model, savedProfile);
   const value = fillProfileModelSelector({
     select: meetingAnalysisModelPresetSelect,
     input: meetingAnalysisModelInput,
@@ -969,10 +1063,11 @@ function loadMeetingAnalysisProfileDraft(model) {
     model,
     profiles: appSettings.meetingAnalysisProfiles,
     presets: MEETING_ANALYSIS_MODEL_PRESETS,
-    fallback: "gpt-5.4-mini"
+    fallback: "gpt-5.4-mini",
+    providerFamily
   });
   const profile = meetingAnalysisCapability(value, appSettings.meetingAnalysisProfiles?.[value]);
-  meetingAnalysisProviderSelect.value = savedTextProviderFamily(value, profile);
+  meetingAnalysisProviderSelect.value = providerFamily;
   meetingAnalysisBaseUrlInput.value = meetingAnalysisProviderSelect.value === "custom" ? profile.baseUrl || "" : "";
   meetingAnalysisApiKeyInput.value = meetingAnalysisProviderSelect.value === "custom" ? profile.apiKey || "" : "";
   meetingAnalysisCustomConnectionFields.hidden = meetingAnalysisProviderSelect.value !== "custom";
@@ -982,6 +1077,7 @@ function loadMeetingAnalysisProfileDraft(model) {
   meetingAnalysisTimeoutInput.value = profile.timeoutMs || GENERIC_ANALYSIS_CAPABILITY.timeoutMs;
   activeMeetingAnalysisCapabilityBaseline = analysisCapabilityValues(profile);
   renderMeetingAnalysisCapabilityHint(profile);
+  renderProviderCatalogStatuses();
   activeMeetingAnalysisModelDraft = value;
 }
 
@@ -1052,7 +1148,11 @@ function handleMeetingProfileModelChange(kind) {
     config.setActive("");
     config.input.focus();
   } else {
-    config.load(config.select.value);
+    const option = config.select.selectedOptions?.[0];
+    config.load(config.select.value, {
+      providerFamily: option?.dataset.textProviderFamily
+        || (kind === "analysis" ? meetingAnalysisProviderSelect.value : "")
+    });
   }
 }
 
@@ -1394,7 +1494,7 @@ async function stopRecording() {
   const transcriptionMode = normalizeTranscriptionMode(recordingTranscriptionMode);
   const modeDetail = transcriptionMode === "fast"
     ? "快速模式：仅执行语音识别。"
-    : "稳定模式：先转写，再进行文本清理。";
+    : "稳定模式：先转写，再整理为清晰连贯的段落。";
   setStatus("transcribing", "正在转写", modeDetail);
 
   processorNode?.disconnect();
@@ -1621,7 +1721,7 @@ async function runVoiceRequest(request, { bytes = 0, retry = false, allowActive 
   const transcriptionMode = normalizeTranscriptionMode(request.transcriptionMode);
   const modeDetail = transcriptionMode === "fast"
     ? "快速模式：仅执行语音识别。"
-    : "稳定模式：先转写，再进行文本清理。";
+    : "稳定模式：先转写，再整理为清晰连贯的段落。";
   setStatus("transcribing", retry ? "正在重试" : "正在转写", modeDetail);
 
   try {
@@ -2111,7 +2211,7 @@ async function saveHotkeySetting(kind, hotkey, originalValue, statusElement) {
 
 function fillSettingsForm() {
   fillProviderConnections();
-  renderOpenAiCatalogStatus();
+  renderProviderCatalogStatuses();
   loadAsrProfileDraft(appSettings.asrModel || MIMO_ASR_MODEL);
   loadCleanerProfileDraft(appSettings.cleanerModel || appSettings.model || "mimo-v2.5");
   hotkeyInput.value = appSettings.hotkey || "CommandOrControl+Alt+M";
@@ -2177,7 +2277,7 @@ async function setTranscriptionMode(mode, { silent = false } = {}) {
   setStatus(
     "ready",
     "设置已保存",
-    transcriptionMode === "fast" ? "快速模式只执行语音识别。" : "稳定模式会执行相互隔离的两步处理。"
+    transcriptionMode === "fast" ? "快速模式只执行语音识别。" : "稳定模式会在转写后进行语义整理。"
   );
 }
 
@@ -2234,7 +2334,7 @@ async function saveAllSettings() {
   fillAsrModel(asrModel);
   cacheAsrProfileDraft(asrModel);
   const cleanerModel = selectedCleanerModel();
-  if (!cleanerModel) throw new Error("请填写文本清理模型 ID。");
+  if (!cleanerModel) throw new Error("请填写表达整理模型 ID。");
   cacheCleanerProfileDraft(cleanerModel);
   const meetingQwenModel = selectedProfileModel(meetingQwenModelPresetSelect, meetingQwenModelInput);
   const meetingFileAsrModel = selectedProfileModel(meetingFileAsrModelPresetSelect, meetingFileAsrModelInput);
@@ -2263,6 +2363,9 @@ async function saveAllSettings() {
     openaiModelCatalog: openAiCatalogModels(),
     openaiModelCapabilities: appSettings.openaiModelCapabilities || {},
     openaiModelCatalogUpdatedAt: appSettings.openaiModelCatalogUpdatedAt || "",
+    openCodeGoModelCatalog: openCodeGoCatalogModels(),
+    openCodeGoModelCapabilities: appSettings.openCodeGoModelCapabilities || {},
+    openCodeGoModelCatalogUpdatedAt: appSettings.openCodeGoModelCatalogUpdatedAt || "",
     asrProvider: asrProviderSelect.value,
     asrMode: normalizeAsrMode(asrModeSelect.value),
     asrModel,
@@ -2270,7 +2373,11 @@ async function saveAllSettings() {
     asrLanguage: asrLanguageInput.value.trim(),
     asrEnableItn: asrEnableItnInput.checked,
     asrProfiles: appSettings.asrProfiles || {},
-    cleanerProvider: cleanerProviderSelect.value === "mimo" ? "mimo" : "openai-compatible",
+    cleanerProvider: cleanerProviderSelect.value === "mimo"
+      ? "mimo"
+      : cleanerProviderSelect.value === "opencode-go"
+        ? "opencode-go"
+        : "openai-compatible",
     cleanerProviderFamily: cleanerProviderSelect.value,
     cleanerModel,
     cleanerProfiles: appSettings.cleanerProfiles || {},
@@ -2372,9 +2479,13 @@ async function runProviderConnectionTest(provider, button) {
   }
 }
 
-async function refreshOpenAiModelCatalog() {
-  for (const button of providerModelRefreshButtons) button.disabled = true;
-  setOpenAiCatalogStatus("正在获取模型列表…");
+async function refreshProviderModelCatalog(scope) {
+  const provider = providerForCatalogScope(scope);
+  if (!provider) throw new Error("当前供应商不支持自动获取模型列表。");
+  const relatedButtons = providerModelRefreshButtons.filter(button =>
+    providerForCatalogScope(button.dataset.providerModelRefresh) === provider);
+  for (const button of relatedButtons) button.disabled = true;
+  setProviderCatalogStatus(scope, "正在获取模型列表…");
   try {
     appSettings = await window.mimoInput.saveSettings({
       providerConnections: collectProviderConnections()
@@ -2382,32 +2493,41 @@ async function refreshOpenAiModelCatalog() {
     if (typeof window.mimoInput.listProviderModels !== "function") {
       throw new Error("当前版本暂不支持自动获取模型列表。");
     }
-    const result = await window.mimoInput.listProviderModels({ provider: "openai" });
+    const result = await window.mimoInput.listProviderModels({ provider });
     if (!result?.ok) throw new Error(result?.error?.message || "获取模型列表失败。");
     const models = normalizeModelCatalog(result.models);
     if (!models.length) throw new Error("接口没有返回可用的模型 ID。");
+    const catalogPrefix = provider === "opencode-go" ? "openCodeGo" : "openai";
     appSettings = await window.mimoInput.saveSettings({
-      openaiModelCatalog: models,
-      openaiModelCapabilities: result.capabilities || {},
-      openaiModelCatalogUpdatedAt: new Date().toISOString()
+      [`${catalogPrefix}ModelCatalog`]: models,
+      [`${catalogPrefix}ModelCapabilities`]: result.capabilities || {},
+      [`${catalogPrefix}ModelCatalogUpdatedAt`]: new Date().toISOString()
     });
-    syncSavedModelOptions(cleanerModelPresetSelect, appSettings.cleanerProfiles, CLEANER_MODEL_PRESETS);
+    syncSavedModelOptions(
+      cleanerModelPresetSelect,
+      appSettings.cleanerProfiles,
+      CLEANER_MODEL_PRESETS,
+      cleanerProviderSelect.value
+    );
     syncSavedModelOptions(
       meetingAnalysisModelPresetSelect,
       appSettings.meetingAnalysisProfiles,
-      MEETING_ANALYSIS_MODEL_PRESETS
+      MEETING_ANALYSIS_MODEL_PRESETS,
+      meetingAnalysisProviderSelect.value
     );
     loadMeetingAnalysisProfileDraft(
       selectedProfileModel(meetingAnalysisModelPresetSelect, meetingAnalysisModelInput)
         || activeMeetingAnalysisModelDraft
-        || "gpt-5.4-mini"
+        || "gpt-5.4-mini",
+      { providerFamily: meetingAnalysisProviderSelect.value }
     );
     const latency = Number.isFinite(result.latencyMs) ? ` · ${result.latencyMs}ms` : "";
-    setOpenAiCatalogStatus(`已获取 ${models.length} 个模型${latency}`);
+    setProviderCatalogStatus(scope, `已获取 ${models.length} 个模型${latency}`);
+    renderProviderCatalogStatuses();
   } catch (error) {
-    setOpenAiCatalogStatus(error.message || String(error));
+    setProviderCatalogStatus(scope, error.message || String(error));
   } finally {
-    for (const button of providerModelRefreshButtons) button.disabled = false;
+    for (const button of relatedButtons) button.disabled = false;
   }
 }
 
@@ -2494,6 +2614,12 @@ meetingFunAsrModelInput.addEventListener("input", () => handleMeetingCustomProfi
 meetingAnalysisModelInput.addEventListener("input", () => handleMeetingCustomProfileInput("analysis"));
 meetingAnalysisProviderSelect.addEventListener("change", () => {
   meetingAnalysisCustomConnectionFields.hidden = meetingAnalysisProviderSelect.value !== "custom";
+  loadMeetingAnalysisProfileDraft(
+    selectedProfileModel(meetingAnalysisModelPresetSelect, meetingAnalysisModelInput)
+      || activeMeetingAnalysisModelDraft
+      || "gpt-5.4-mini",
+    { providerFamily: meetingAnalysisProviderSelect.value }
+  );
 });
 for (const input of [
   meetingAnalysisContextInput,
@@ -2525,7 +2651,9 @@ for (const button of providerConnectionTestButtons) {
   });
 }
 for (const button of providerModelRefreshButtons) {
-  button.addEventListener("click", () => refreshOpenAiModelCatalog().catch(() => {}));
+  button.addEventListener("click", () => {
+    refreshProviderModelCatalog(button.dataset.providerModelRefresh).catch(() => {});
+  });
 }
 stableModeBtn.addEventListener("click", () => setTranscriptionMode("stable"));
 fastModeBtn.addEventListener("click", () => setTranscriptionMode("fast"));
@@ -4029,10 +4157,6 @@ function meetingCopyCurrent() {
 
 function bindMeetingUi() {
   if (!meetingPanel) return;
-  document.getElementById("liveHistoryTab")?.addEventListener("click", () => {
-    void openMeetingHistory();
-  });
-  document.getElementById("liveMeetingTab")?.addEventListener("click", stopMeetingPolling);
   document.getElementById("meetingNewSessionBtn")?.addEventListener("click", () => {
     meetingCreateSession().catch((e) => {
       const h = meetingEls().hint;
@@ -4176,7 +4300,7 @@ function bindMeetingUi() {
     });
   }
 meetingBtn?.addEventListener("click", () => {
-    openMeetingWorkspace().catch((e) => setStatus("error", "会议工作台", e.message || String(e)));
+    openMeetingWorkspace().catch((e) => setStatus("error", "会议实时转录", e.message || String(e)));
   });
 
 window.mimoInput.onWindowMaximized?.((maximized) => renderWindowMaximizeButton(maximized));

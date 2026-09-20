@@ -21,16 +21,29 @@ assert.deepEqual(
     reasoning: "",
     timeoutMs: 300000,
     capabilitySource: "official",
-    capabilityRevision: 1
+    capabilityRevision: 2
   }
 );
 assert.equal(resolveModelCapability("vendor/glm-5.2").contextWindow, 1000000);
 assert.equal(resolveModelCapability("grok-4.5").reasoning, "high");
 assert.equal(resolveModelCapability("gpt-5.6-terra").contextWindow, 272000);
 assert.equal(resolveModelCapability("gpt-5.4-mini").contextWindow, 230000);
+for (const model of [
+  "deepseek-v4-pro",
+  "deepseek-v4-flash",
+  "deepseek-v4.1-flash",
+  "deepseek-v4-flash-vision-exp",
+  "deepseek-flash",
+  "opencode-go/deepseek-v4-pro"
+]) {
+  const capability = resolveModelCapability(model);
+  assert.equal(capability.contextWindow, 1000000, model);
+  assert.equal(capability.maxOutput, 384000, model);
+  assert.equal(capability.capabilitySource, "compatibility", model);
+}
 assert.deepEqual(
   resolveModelCapability("new-model-without-preset"),
-  { ...GENERIC_MODEL_CAPABILITY, capabilityRevision: 1 }
+  { ...GENERIC_MODEL_CAPABILITY, capabilityRevision: 2 }
 );
 
 const providerCapability = resolveModelCapability("new-provider-model", {
@@ -123,6 +136,43 @@ assert.equal(cachedCatalog.openaiModelCapabilities["gpt-5.6-terra"].contextWindo
 assert.equal(cachedCatalog.openaiModelCapabilities["gpt-5.6-terra"].capabilitySource, "compatibility");
 assert.equal(cachedCatalog.openaiModelCapabilities["new-catalog-model"].contextWindow, 128000);
 assert.equal(cachedCatalog.openaiModelCapabilities["new-catalog-model"].capabilitySource, "generic");
+
+const openCodeGoCatalog = ensureConnectionProfiles({
+  ...fresh,
+  meetingAnalysisModel: "deepseek-v4-pro",
+  meetingAnalysisProfiles: {
+    ...fresh.meetingAnalysisProfiles,
+    "deepseek-v4-pro": {
+      ...defaultMeetingAnalysisProfile("opencode-go/deepseek-v4-pro"),
+      provider: "opencode-go",
+      providerFamily: "opencode-go",
+      model: "deepseek-v4-pro"
+    }
+  },
+  openCodeGoModelCatalog: ["deepseek-v4-pro", "deepseek-v4.1-flash"],
+  openCodeGoModelCapabilities: {}
+});
+assert.equal(openCodeGoCatalog.openCodeGoModelCapabilities["deepseek-v4-pro"].contextWindow, 1000000);
+assert.equal(openCodeGoCatalog.openCodeGoModelCapabilities["deepseek-v4-pro"].maxOutput, 384000);
+assert.equal(openCodeGoCatalog.openCodeGoModelCapabilities["deepseek-v4.1-flash"].maxOutput, 384000);
+assert.equal(openCodeGoCatalog.meetingAnalysisContextWindow, 1000000);
+assert.equal(openCodeGoCatalog.meetingAnalysisMaxOutput, 384000);
+
+const protectedOpenCodeGoManual = ensureConnectionProfiles({
+  ...openCodeGoCatalog,
+  meetingAnalysisProfiles: {
+    ...openCodeGoCatalog.meetingAnalysisProfiles,
+    "deepseek-v4-pro": {
+      ...openCodeGoCatalog.meetingAnalysisProfiles["deepseek-v4-pro"],
+      contextWindow: 256000,
+      maxOutput: 24000,
+      capabilityManaged: false
+    }
+  }
+});
+assert.equal(protectedOpenCodeGoManual.meetingAnalysisContextWindow, 256000);
+assert.equal(protectedOpenCodeGoManual.meetingAnalysisMaxOutput, 24000);
+assert.equal(protectedOpenCodeGoManual.meetingAnalysisProfiles["deepseek-v4-pro"].capabilitySource, "manual");
 
 const protectedManual = ensureConnectionProfiles({
   ...fetched,

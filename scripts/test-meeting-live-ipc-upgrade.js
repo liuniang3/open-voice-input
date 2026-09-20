@@ -360,6 +360,26 @@ test("DTO whitelists nested fields, derived paths and drops stale update events"
   assert.equal((await h.invoke("meeting:live:status")).summary, null);
 });
 
+test("history IPC lists and opens persisted sessions without starting capture", async () => {
+  const h = mainHarness();
+  Object.assign(h.controls.state, { recoverableSessions: [{
+    sessionId: "history", title: "Previous meeting", status: "completed", startedAtMs: 123,
+    durationMs: 456, modelId: "mimo-v2.5-asr", hasTranscript: true, hasCorrection: false, hasSummary: true,
+    providerResponse: "hidden-secret"
+  }] });
+  const history = await h.invoke("meeting:live:history");
+  assert.equal(history.ok, true);
+  assert.equal(h.controls.historyListed, 1);
+  assert.equal(history.recoverableSessions[0].durationMs, 456);
+  assert.equal(history.recoverableSessions[0].hasSummary, true);
+  assert.doesNotMatch(JSON.stringify(history), /hidden-secret/);
+  const opened = await h.invoke("meeting:live:open-session", { sessionId: "history", apiKey: "ignored" });
+  assert.equal(opened.sessionId, "history");
+  assert.deepEqual(plain(h.controls.historyInput), { sessionId: "history" });
+  assert.equal(h.controls.startCount, 0);
+  assert.equal((await h.invoke("meeting:live:open-session", { sessionId: "" })).error.code, "invalid_payload");
+});
+
 test("summary sections reject malformed nodes and retain legacy markdown fallback", async () => {
   const h = mainHarness();
   const s = h.controls.state;
@@ -388,11 +408,13 @@ test("preload exposes only the new scoped live IPC methods", async () => {
   }) });
   await api.meetingLivePause();
   await api.meetingLiveResume();
+  await api.meetingLiveHistory();
+  await api.meetingLiveOpenSession({ sessionId: "history" });
   await api.meetingLiveSummarize({ sessionId: "s", modelId: "llm" });
   await api.meetingLiveWindow({ floating: true });
   await api.meetingLiveTestConnection({ modelId: MEETING_LIVE_MODEL });
-  assert.deepEqual(calls.map(call => call[0]), ["meeting:live:pause", "meeting:live:resume", "meeting:live:summarize",
-    "meeting:live:window", "meeting:live:test-connection"]);
+  assert.deepEqual(calls.map(call => call[0]), ["meeting:live:pause", "meeting:live:resume", "meeting:live:history",
+    "meeting:live:open-session", "meeting:live:summarize", "meeting:live:window", "meeting:live:test-connection"]);
 });
 
 (async () => {

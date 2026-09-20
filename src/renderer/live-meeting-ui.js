@@ -45,6 +45,9 @@
     let summarySignature = "";
     let audioSignature = "";
     let historySignature = "";
+    let historyItems = [];
+    let historyOpen = false;
+    let historyLoading = false;
     const busy = new Set();
 
     function selectedModel() {
@@ -120,6 +123,8 @@
       }
       // Contract updates are complete DTO snapshots. Never carry outputs into a new session.
       dto = snapshot;
+      if (active(dto)) historyOpen = false;
+      if (Array.isArray(snapshot.recoverableSessions)) historyItems = snapshot.recoverableSessions;
       if (includeWindow && snapshot.window) acceptWindow(snapshot.window);
       loaded = true;
       if (active(dto) && dto.modelId) setModel(dto.modelId);
@@ -154,7 +159,7 @@
       busy.add(name);
       errorText = "";
       // Invalidates status reads that began before this user action.
-      const changesSession = ["start", "stop", "pause", "retry", "recover", "cleanup", "summarize"].includes(name);
+      const changesSession = ["start", "stop", "pause", "retry", "history", "cleanup", "summarize"].includes(name);
       const atRevision = changesSession ? ++revision : revision;
       const atWindowRevision = windowRevision;
       const epoch = generation;
@@ -196,7 +201,7 @@
         if (typeof flags[key] === "boolean") windowFlags[key] = flags[key];
       }
       if (!windowFlags.floating) windowFlags.compact = false;
-      if (windowFlags.floating) showHistory(false);
+      if (windowFlags.floating) setHistoryOpen(false);
       if (previous.floating !== windowFlags.floating || previous.compact !== windowFlags.compact) {
         $("liveMeetingPanel").scrollTop = 0;
       }
@@ -326,6 +331,87 @@
       $("liveSaved").title = saved ? new Date(saved).toLocaleString("zh-CN") : "等待后端保存确认";
     }
 
+    function formatDuration(value) {
+      const seconds = Math.max(0, Math.round((Number(value) || 0) / 1000));
+      if (!seconds) return "不足 1 分钟";
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor(seconds / 60) % 60;
+      return hours ? `${hours} 小时 ${minutes} 分钟` : `${Math.max(1, minutes)} 分钟`;
+    }
+
+    function renderHistory() {
+      $("liveHistoryBrowser").hidden = !historyOpen || windowFlags.floating;
+      $("liveHistoryToggle").setAttribute("aria-expanded", String(historyOpen && !windowFlags.floating));
+      $("liveHistoryCount").textContent = String(historyItems.length);
+      const query = $("liveHistorySearch").value.trim().toLocaleLowerCase("zh-CN");
+      const visible = historyItems.filter((item) => {
+        const date = timestamp(item.startedAtMs) ? new Date(timestamp(item.startedAtMs)).toLocaleString("zh-CN") : "";
+        return !query || [item.title, item.modelId, item.status, date].some(value => String(value || "").toLocaleLowerCase("zh-CN").includes(query));
+      });
+      const signature = JSON.stringify([visible, dto.sessionId, historyLoading, active(dto), busy.size]);
+      if (signature !== historySignature) {
+        historySignature = signature;
+        $("liveHistoryList").replaceChildren();
+        for (const item of visible) {
+          const button = doc.createElement("button");
+          button.type = "button";
+          button.className = "live-history-item";
+          button.setAttribute("role", "option");
+          button.setAttribute("aria-selected", String(item.sessionId === dto.sessionId));
+          button.disabled = active(dto) || historyLoading || busy.size > 0;
+          const head = doc.createElement("span");
+          head.className = "live-history-item-head";
+          const title = doc.createElement("strong");
+          title.textContent = item.title || "未命名会议";
+          const date = doc.createElement("time");
+          date.textContent = timestamp(item.startedAtMs) ? new Date(timestamp(item.startedAtMs)).toLocaleString("zh-CN", { hour12: false }) : "时间未知";
+          head.appendChild(title); head.appendChild(date);
+          const meta = doc.createElement("span");
+          meta.className = "live-history-item-meta";
+          meta.textContent = `${formatDuration(item.durationMs)} · ${item.modelId || "模型未知"}`;
+          const states = doc.createElement("span");
+          states.className = "live-history-item-states";
+          states.textContent = [item.hasTranscript ? "有原文" : "无原文", item.hasCorrection ? "已校订" : "未校订", item.hasSummary ? "有摘要" : "无摘要"].join(" · ");
+          button.appendChild(head); button.appendChild(meta); button.appendChild(states);
+          button.addEventListener("click", () => {
+            if (button.disabled || item.sessionId === dto.sessionId) { setHistoryOpen(false); return; }
+            void action("history", async () => {
+              const result = await invoke("meetingLiveOpenSession", { sessionId: item.sessionId });
+              setHistoryOpen(false);
+              return result;
+            });
+          });
+          $("liveHistoryList").appendChild(button);
+        }
+      }
+      $("liveHistoryEmpty").hidden = historyLoading || visible.length > 0;
+      $("liveHistoryEmpty").textContent = query ? "没有符合条件的历史记录。" : "暂无实时会议记录。";
+      $("liveHistoryRefresh").disabled = historyLoading || active(dto) || busy.size > 0;
+    }
+
+    function setHistoryOpen(value) {
+      historyOpen = Boolean(value) && !windowFlags.floating;
+      renderHistory();
+      if (historyOpen && !historyLoading) void refreshHistory();
+    }
+
+    async function refreshHistory() {
+      if (historyLoading || active(dto)) return;
+      historyLoading = true;
+      errorText = "";
+      renderHistory();
+      try {
+        const result = await invoke("meetingLiveHistory");
+        historyItems = Array.isArray(result.recoverableSessions) ? result.recoverableSessions : [];
+        dto = { ...dto, recoverableSessions: historyItems };
+      } catch (error) {
+        errorText = error.message;
+      } finally {
+        historyLoading = false;
+        render();
+      }
+    }
+
     function render() {
       const isActive = active(dto);
       const isCleaning = cleaning(dto) || busy.has("cleanup") || busy.has("summarize");
@@ -370,17 +456,8 @@
       $("liveRetry").disabled = !loaded || isActive || busy.size > 0 || isCleaning
         || !(pending || failed || dto.finalizationPending || dto.error?.code === "live_save_failed"
           || ["needs_retry", "interrupted", "failed"].includes(dto.status)) || !can("meetingLiveRetry");
-      $("liveRecover").disabled = isActive || busy.size > 0 || isCleaning || !can("meetingLiveRecover");
-      $("liveRecoverSession").disabled = $("liveRecover").disabled;
-      const sessions = Array.isArray(dto.recoverableSessions) ? dto.recoverableSessions : [];
-      const nextHistory = JSON.stringify(sessions);
-      if (nextHistory !== historySignature) {
-        historySignature = nextHistory;
-        const selected = $("liveRecoverSession").value;
-        options($("liveRecoverSession"), [["", "最近会话"], ...sessions.map((s) => [s.sessionId,
-          `${s.title || s.sessionId} · ${STATUS_LABELS[s.status] || s.status} · ${timestamp(s.startedAtMs) ? new Date(timestamp(s.startedAtMs)).toLocaleString("zh-CN") : ""}`])],
-        sessions.some((s) => s.sessionId === selected) ? selected : "");
-      }
+      $("liveHistoryToggle").hidden = windowFlags.floating;
+      $("liveHistoryToggle").disabled = isActive || busy.size > 0 || isCleaning || !can("meetingLiveHistory") || !can("meetingLiveOpenSession");
       $("liveRefresh").disabled = busy.size > 0;
       $("liveError").textContent = errorText || dto.error?.message || (typeof dto.error === "string" ? dto.error : "")
         || (!supportedModel(selectedModel()) && selectedModel() ? "不支持此模型，请选择会议识别模型。" : "");
@@ -446,20 +523,11 @@
       }
       renderSummary();
       renderClock();
-    }
-
-    function showHistory(history, focus = false) {
-      $("liveMeetingPanel").hidden = history;
-      $("meetingHistoryPanel").hidden = !history;
-      for (const [id, selected] of [["liveMeetingTab", !history], ["liveHistoryTab", history]]) {
-        $(id).setAttribute("aria-selected", String(selected));
-        $(id).tabIndex = selected ? 0 : -1;
-        if (focus && selected) $(id).focus();
-      }
+      renderHistory();
     }
 
     function open() {
-      showHistory(false);
+      setHistoryOpen(false);
       if (openFlight) return openFlight;
       opened = true;
       loaded = false;
@@ -530,7 +598,6 @@
     for (const [id, name, method, payload] of [
       ["liveStop", "stop", "meetingLiveStop", () => undefined],
       ["liveRetry", "retry", "meetingLiveRetry", () => ({ sessionId: dto.sessionId })],
-      ["liveRecover", "recover", "meetingLiveRecover", () => $("liveRecoverSession").value ? { sessionId: $("liveRecoverSession").value } : undefined],
       ["liveCleanup", "cleanup", "meetingLiveCleanup", () => ({ sessionId: dto.sessionId, modelId: $("liveCleanerModel").value,
         useMimoReview: Boolean($("liveUseMimoReview").checked), reviewModelId: $("liveReviewModel").value })],
       ["liveSummarize", "summarize", "meetingLiveSummarize", () => ({ sessionId: dto.sessionId, modelId: $("liveCleanerModel").value })],
@@ -593,15 +660,13 @@
     $("liveCustomModel").addEventListener("input", render);
     $("liveTranscriptionInterval").addEventListener("change", saveIntervals);
     $("liveSaveInterval").addEventListener("change", saveIntervals);
-    $("liveRefresh").addEventListener("click", () => { void open(); });
-    $("liveMeetingTab").addEventListener("click", () => showHistory(false));
-    $("liveHistoryTab").addEventListener("click", () => showHistory(true));
-    for (const id of ["liveMeetingTab", "liveHistoryTab"]) $(id).addEventListener("keydown", (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-      event.preventDefault();
-      const history = event.key === "End" || (event.key !== "Home" && id === "liveMeetingTab");
-      showHistory(history, true);
-      $(history ? "liveHistoryTab" : "liveMeetingTab").click();
+    $("liveRefresh").addEventListener("click", () => { void refresh(); });
+    $("liveHistoryToggle").addEventListener("click", () => setHistoryOpen(!historyOpen));
+    $("liveHistoryClose").addEventListener("click", () => setHistoryOpen(false));
+    $("liveHistoryRefresh").addEventListener("click", () => { void refreshHistory(); });
+    $("liveHistorySearch").addEventListener("input", renderHistory);
+    $("liveHistoryBrowser").addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); setHistoryOpen(false); $("liveHistoryToggle").focus(); }
     });
     win.addEventListener("beforeunload", close);
     render();

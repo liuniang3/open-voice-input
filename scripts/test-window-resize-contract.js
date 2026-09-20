@@ -15,6 +15,7 @@ const liveCss = fs.readFileSync(path.join(root, "src/renderer/live-meeting.css")
 assert.match(main, /const isWindows = os\.platform\(\) === "win32"/);
 assert.match(main, /thickFrame:\s*isWindows/);
 assert.match(main, /transparent:\s*!isWindows/);
+assert.match(main, /movable:\s*true/);
 assert.match(main, /backgroundMaterial:\s*"acrylic"/);
 assert.match(main, /RESIZABLE_WINDOW_MODES = new Set\(\["settings", "result", "meeting", "file"\]\)/);
 assert.match(main, /RESIZABLE_WINDOW_MODES\.has\(mode\)/);
@@ -22,6 +23,9 @@ assert.doesNotMatch(main, /setWindowMessageResult|installNativeResizeHitTest|WM_
 assert.match(renderer, /\["settings", "result", "meeting", "file"\]\.includes\(mode\)/);
 assert.match(css, /body\.secondary-window-mode \.shell[\s\S]*border-radius:\s*16px/);
 assert.match(css, /html\[data-platform="win32"\] body\.secondary-window-mode \.shell[\s\S]*margin:\s*0/);
+assert.match(css, /\.topbar,\s*body\.recording-active \.recording-chrome,\s*\.live-floating \.live-heading\s*\{[\s\S]*user-select:\s*none/);
+assert.match(css, /html\[data-platform="darwin"\] \.topbar::before[\s\S]*-webkit-app-region:\s*drag/);
+assert.match(css, /html\[data-platform="darwin"\] :is\(button, input, textarea, select, a, \[contenteditable="true"\]\)[\s\S]*-webkit-app-region:\s*no-drag/);
 assert.match(css, /@media \(max-width: 760px\)[\s\S]*body\.settings-open \.settings-tabs/);
 assert.doesNotMatch(renderer, /statusPanel\.scrollHeight \+ chromeHeight/);
 assert.match(renderer, /const panelHeight = Math\.max\(76, titleHeight \+ detailHeight \+ meterHeight\)/);
@@ -38,6 +42,30 @@ async function verifyResponsiveWindows() {
   try {
     const page = await browser.newPage();
     await verifyBrowser(page);
+    const macDragRegions = await page.evaluate(() => {
+      document.documentElement.dataset.platform = "darwin";
+      const topbar = document.querySelector(".topbar");
+      const button = topbar.querySelector("button");
+      return {
+        topbar: getComputedStyle(topbar).webkitAppRegion,
+        topbarUserSelect: getComputedStyle(topbar).userSelect,
+        topInset: getComputedStyle(topbar, "::before").webkitAppRegion,
+        topInsetHeight: getComputedStyle(topbar, "::before").height,
+        button: getComputedStyle(button).webkitAppRegion
+      };
+    });
+    assert.deepEqual(macDragRegions, {
+      topbar: "drag", topbarUserSelect: "none",
+      topInset: "drag", topInsetHeight: "14px", button: "no-drag"
+    });
+    const apiStateBox = await page.locator("#apiState").boundingBox();
+    assert(apiStateBox, "topbar API status must be visible");
+    await page.mouse.move(apiStateBox.x + 2, apiStateBox.y + apiStateBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(apiStateBox.x + Math.max(3, apiStateBox.width - 2), apiStateBox.y + apiStateBox.height / 2);
+    await page.mouse.up();
+    assert.equal(await page.evaluate(() => getSelection()?.toString() || ""), "",
+      "dragging the topbar status must not select text");
     const cases = [
       { mode: "settings", width: 640, height: 480, open: () => page.evaluate(() => window.mockOpenSettings()) },
       { mode: "file", width: 720, height: 520, open: () => page.evaluate(() => window.applyWindowMode("file")) },
@@ -62,6 +90,10 @@ async function verifyResponsiveWindows() {
             }
           });
         });
+        await page.locator('[data-settings-tab="cleaner"]').click();
+        await page.locator("#cleanerProviderSelect").selectOption("openai-compatible");
+        await page.locator('[data-settings-tab="meeting"]').click();
+        await page.locator("#meetingAnalysisProviderSelect").selectOption("openai-compatible");
         await page.locator('[data-settings-tab="connections"]').click();
         await page.locator('.settings-tab-panel.is-active [data-provider-model-refresh="openai"]').click();
         await page.waitForFunction(() => [...document.querySelectorAll("#cleanerModelPresetSelect option")]

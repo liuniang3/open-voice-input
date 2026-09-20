@@ -55,7 +55,11 @@ function fixture() {
     meetingLiveStart: () => ({ ok: true, sessionId: "s1", status: "recording", recording: true, modelId: "qwen-audio-3.0-asr-flash-streaming" }),
     meetingLiveStop: () => ({ ok: true, sessionId: "s1", status: "stopping", recording: false, pendingSegments: 2 }),
     meetingLiveRetry: () => ({ ok: true, ...status, status: "stopping" }),
-    meetingLiveRecover: () => ({ ok: true, ...status, status: "interrupted" }),
+    meetingLiveHistory: () => ({ ok: true, ...status }),
+    meetingLiveOpenSession: ({ sessionId }) => ({ ok: true, ...completed({
+      sessionId, title: "历史例会", rawText: "历史会议原文", durationMs: 72000,
+      markdownPath: "C:/mock/history.md", audioPaths: ["C:/mock/history.wav"]
+    }), recoverableSessions: status.recoverableSessions || [] }),
     meetingLiveCleanup: () => ({ ok: true, ...status, cleanupStatus: "running", cleanupProgress: { completed: 0, total: 2 } }),
     meetingLiveChooseDestination: () => ({ ok: true, cancelled: false, destinationPath: "C:/mock/notes.md" }),
     meetingLiveOpenPath: () => ({ ok: true })
@@ -214,17 +218,32 @@ test("stop tracks ASR drain; retry only after stop; stop failure remains recover
   assert.match(f.$("liveStop").textContent, /重试停止/);
 });
 
-test("recover selected persisted session without starting capture", async () => {
+test("history browser opens a local session without starting capture or ASR", async () => {
   const f = fixture();
-  f.setStatus({ status: "idle", recoverableSessions: [{ sessionId: "old", title: "中断的例会", status: "interrupted", startedAtMs: 1800000000000 }] });
+  f.setStatus({ status: "idle", recording: false, recoverableSessions: [{
+    sessionId: "old", title: "历史例会", status: "completed", startedAtMs: 1800000000000,
+    durationMs: 72000, modelId: "mimo-v2.5-asr", hasTranscript: true, hasCorrection: false, hasSummary: false
+  }] });
   await f.ui.open();
-  assert.match(f.$("liveRecoverSession").children[1].textContent, /中断的例会/);
-  f.$("liveRecoverSession").value = "old";
-  await f.click("liveRecover");
-  assert.deepEqual(f.last("meetingLiveRecover").args, [{ sessionId: "old" }]);
+  await f.click("liveHistoryToggle");
+  await tick();
+  assert.equal(f.count("meetingLiveHistory"), 1);
+  assert.equal(f.$("liveHistoryBrowser").hidden, false);
+  assert.equal(f.$("liveHistoryList").children.length, 1);
+  assert.match(f.$("liveHistoryList").children[0].textContent + f.$("liveHistoryList").children[0].children[0].children[0].textContent, /历史例会/);
+  f.$("liveHistoryList").children[0].click();
+  await tick(); await tick();
+  assert.deepEqual(f.last("meetingLiveOpenSession").args, [{ sessionId: "old" }]);
   assert.equal(f.count("meetingLiveStart"), 0);
-  f.push(completed({ sessionId: "old", status: "interrupted" }));
-  assert.equal(f.$("liveRetry").disabled, false);
+  assert.equal(f.count("meetingLiveRetry"), 0);
+  assert.equal(f.$("liveRaw").textContent, "历史会议原文");
+  assert.equal(f.$("liveHistoryBrowser").hidden, true);
+  f.$("liveCleanerModel").value = "analysis-b";
+  await f.click("liveCleanup");
+  assert.equal(f.last("meetingLiveCleanup").args[0].sessionId, "old");
+  f.push(completed({ sessionId: "old", title: "历史例会", rawText: "历史会议原文" }));
+  await f.click("liveSummarize");
+  assert.equal(f.last("meetingLiveSummarize").args[0].sessionId, "old");
 });
 
 test("save indicator uses backend timestamp, flags delayed saves and freezes duration", async () => {
@@ -323,19 +342,28 @@ test("missing bridge and rejected IPC show errors without enabling capture", asy
   assert.match(f.$("liveError").textContent, /连接已关闭/);
 });
 
-test("history tabs preserve legacy controls and file UI, with keyboard navigation", async () => {
+test("history is integrated into realtime UI, searchable, and blocked while recording", async () => {
   const f = fixture();
+  f.setStatus({ status: "idle", recording: false, recoverableSessions: [
+    { sessionId: "alpha", title: "产品周会", status: "completed", startedAtMs: 1800000000000, modelId: "mimo-v2.5-asr" },
+    { sessionId: "beta", title: "设计评审", status: "completed", startedAtMs: 1790000000000, modelId: "qwen-audio-3.0-asr-flash-streaming" }
+  ] });
   await f.ui.open();
-  await f.click("liveHistoryTab");
-  assert.equal(f.$("meetingHistoryPanel").hidden, false);
-  assert.equal(f.$("liveMeetingPanel").hidden, true);
-  f.$("liveHistoryTab").dispatch("keydown", { key: "Home" });
-  assert.equal(f.$("liveMeetingPanel").hidden, false);
-  assert.equal(f.$("liveMeetingTab").focused, true);
+  assert.equal(f.$("liveHistoryTab"), undefined);
+  assert.equal(f.$("liveMeetingTab"), undefined);
+  await f.click("liveHistoryToggle"); await tick();
+  assert.equal(f.$("liveHistoryList").children.length, 2);
+  f.$("liveHistorySearch").value = "设计";
+  f.$("liveHistorySearch").dispatch("input");
+  assert.equal(f.$("liveHistoryList").children.length, 1);
+  f.$("liveHistoryBrowser").dispatch("keydown", { key: "Escape" });
+  assert.equal(f.$("liveHistoryBrowser").hidden, true);
+  f.push(completed({ status: "recording", recording: true }));
+  assert.equal(f.$("liveHistoryToggle").disabled, true);
   assert.equal(f.count("meetingLiveStart"), 0);
   for (const id of ["meetingSessionList", "meetingProcessStartBtn", "meetingResultPane", "filePanel", "fileProcessStartBtn"]) assert(f.$(id), id);
   assert(html.indexOf('src="./live-meeting-ui.js"') < html.indexOf('src="./renderer.js"'));
-  assert.match(html, /legacy-capture-controls[^>]*hidden/);
+  assert.match(html, /legacyMeetingHistoryPanel[^>]*inert[^>]*hidden/);
 });
 
 test("platform key capture distinguishes macOS Command/Control and Windows Ctrl/Super", () => {
@@ -437,6 +465,16 @@ async function verifyBrowser(page, screenshotDirectory) {
         if (name === "saveSettings") return settings = { ...settings, ...payload };
         if (name === "getStatus") return { settings, hasApiKey: false, registeredHotkeys: [] };
         if (name === "meetingLiveStatus") return { ok: true, ...dto };
+        if (name === "meetingLiveHistory") return { ok: true, ...dto, recoverableSessions: [{
+          sessionId: "recovered", title: "历史例会", status: "completed", startedAtMs: Date.now() - 60000,
+          durationMs: 60000, modelId: "mimo-v2.5-asr", hasTranscript: true, hasCorrection: false, hasSummary: false
+        }] };
+        if (name === "meetingLiveOpenSession") {
+          dto = { status: "completed", recording: false, sessionId: payload.sessionId, title: "历史例会",
+            rawText: "历史会议原文", pendingSegments: 0, failedSegments: 0,
+            markdownPath: "C:/mock/history.md", audioPaths: ["C:/mock/history.wav"], recoverableSessions: dto.recoverableSessions || [] };
+          return { ok: true, ...dto };
+        }
         if (name === "meetingLiveWindow") return { ok: true, ...payload };
         if (name === "meetingLivePause" || name === "meetingLiveResume") {
           window.mockPush({ paused: name === "meetingLivePause" });
@@ -488,10 +526,12 @@ async function verifyBrowser(page, screenshotDirectory) {
   }
   await page.setViewportSize({ width: 1280, height: 900 });
   if (screenshotDirectory) await page.screenshot({ path: path.join(screenshotDirectory, "meeting-live-mimo-1280.png") });
-  await page.evaluate(() => window.mockPush({ recoverableSessions: [{ sessionId: "recovered", title: "中断会议", status: "interrupted", startedAtMs: Date.now() - 60000 }] }));
-  await page.locator("#liveRecoverSession").selectOption("recovered");
-  await page.locator("#liveRecover").click();
-  assert.equal(await page.evaluate(() => window.mockCalls.filter((c) => c.name === "meetingLiveRecover").at(-1).payload.sessionId), "recovered");
+  await page.locator("#liveHistoryToggle").click();
+  await page.waitForFunction(() => document.querySelectorAll("#liveHistoryList > button").length === 1);
+  await page.locator("#liveHistoryList > button").click();
+  await page.waitForFunction(() => document.getElementById("liveRaw").textContent === "历史会议原文");
+  assert.equal(await page.evaluate(() => window.mockCalls.filter((c) => c.name === "meetingLiveOpenSession").at(-1).payload.sessionId), "recovered");
+  assert.equal(await page.evaluate(() => window.mockCalls.filter((c) => c.name === "meetingLiveStart").length), 0);
   await page.locator("#liveModel").selectOption("qwen-audio-3.0-asr-flash-streaming");
   await page.waitForFunction(() => document.getElementById("liveStart").disabled === false);
   await page.locator("#liveChooseDestination").click();
@@ -544,10 +584,32 @@ async function verifyBrowser(page, screenshotDirectory) {
     }
   }
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.locator("#liveHistoryTab").click();
-  assert.equal(await page.locator("#meetingHistoryPanel").isVisible(), true);
-  assert.equal(await page.locator("#meetingStartBtn").isVisible(), false);
-  await page.locator("#liveMeetingTab").click();
+  await page.locator("#liveHistoryToggle").click();
+  assert.equal(await page.locator("#liveHistoryBrowser").isVisible(), true);
+  assert.equal(await page.locator("#legacyMeetingHistoryPanel").isVisible(), false);
+  for (const size of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(size);
+    const historyLayout = await page.evaluate(() => {
+      const browser = document.getElementById("liveHistoryBrowser");
+      const visible = [...browser.querySelectorAll("button, input")].filter((el) => el.getClientRects().length);
+      return {
+        overflow: visible.filter((el) => {
+          const rect = el.getBoundingClientRect();
+          return rect.left < -1 || rect.right > innerWidth + 1;
+        }).map((el) => el.id || el.className),
+        pageWidth: document.documentElement.scrollWidth,
+        viewport: innerWidth
+      };
+    });
+    assert.deepEqual(historyLayout.overflow, [], `history controls overflow at ${size.width}`);
+    assert(historyLayout.pageWidth <= historyLayout.viewport + 1, `history page overflow at ${size.width}`);
+    if (screenshotDirectory) {
+      const file = path.join(screenshotDirectory, `meeting-live-history-${size.width}.png`);
+      await page.screenshot({ path: file });
+      screenshots.push(file);
+    }
+  }
+  await page.locator("#liveHistoryClose").click();
   await page.evaluate(() => window.applyWindowMode("file"));
   assert.equal(await page.locator("#filePanel").isVisible(), true);
   assert.equal(await page.locator("#meetingPanel").isVisible(), false);

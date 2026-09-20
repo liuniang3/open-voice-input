@@ -23,19 +23,25 @@ function test(name, run) {
 
 test("provider connection panel exposes one accessible connection per vendor", () => {
   assert.match(html, /data-settings-tab="connections"/);
-  for (const family of ["mimo", "aliyun", "openai"]) {
+  for (const family of ["mimo", "aliyun", "openai", "openCodeGo"]) {
     assert.equal((html.match(new RegExp(`id="${family}BaseUrlInput"`, "g")) || []).length, 1);
     assert.equal((html.match(new RegExp(`id="${family}ApiKeyInput"`, "g")) || []).length, 1);
     assert.match(html, new RegExp(`data-secret-toggle="${family}ApiKeyInput"`));
     assert.match(html, new RegExp(`data-secret-copy="${family}ApiKeyInput"`));
-    assert.match(html, new RegExp(`data-provider-connection-test="${family}"`));
+    const provider = family === "openCodeGo" ? "opencode-go" : family;
+    assert.match(html, new RegExp(`data-provider-connection-test="${provider}"`));
   }
   assert.match(html, /id="openaiApiStyleSelect"[\s\S]*value="responses"[\s\S]*value="chat-completions"/);
-  assert.equal((html.match(/data-provider-model-refresh="openai"/g) || []).length, 3);
+  assert.equal((html.match(/data-provider-model-refresh="openai"/g) || []).length, 1);
+  assert.equal((html.match(/data-provider-model-refresh="opencode-go"/g) || []).length, 1);
+  assert.match(html, /data-provider-model-refresh="cleaner"/);
+  assert.match(html, /data-provider-model-refresh="analysis"/);
   assert.match(html, /data-provider-model-status="openai"/);
   assert.match(html, /aria-describedby="mimoConnectionDescription"/);
   assert.match(html, /aria-describedby="aliyunConnectionDescription"/);
   assert.match(html, /aria-describedby="openaiConnectionDescription"/);
+  assert.match(html, /aria-describedby="openCodeGoConnectionDescription"/);
+  assert.equal((html.match(/value="opencode-go">OpenCode Go（实验性）/g) || []).length, 2);
 });
 
 test("vendor model panels do not expose duplicate credentials", () => {
@@ -72,6 +78,24 @@ test("shared OpenAI values override stale GPT profiles and preserve protocol", (
     apiKey: "shared-key",
     apiStyle: "chat-completions"
   });
+});
+
+test("OpenCode Go UI connection stays independent from OpenAI and overlapping model names", () => {
+  const code = source.slice(source.indexOf("const OPENAI_API_STYLES"), source.indexOf("let audioContext"));
+  const context = vm.createContext({ input: {
+    providerConnections: {
+      openai: { baseUrl: "https://openai.example/v1", apiKey: "openai-key", apiStyle: "responses" },
+      "opencode-go": { baseUrl: "https://opencode.ai/zen/go/v1", apiKey: "go-key", apiStyle: "chat-completions" }
+    },
+    cleanerProfiles: {
+      "mimo-v2.5": { provider: "opencode-go", providerFamily: "opencode-go" }
+    }
+  } });
+  vm.runInContext(code, context);
+  const connections = JSON.parse(JSON.stringify(vm.runInContext("providerConnectionsForSettings(input)", context)));
+  assert.equal(connections.openai.apiKey, "openai-key");
+  assert.equal(connections["opencode-go"].apiKey, "go-key");
+  assert.equal(connections["opencode-go"].baseUrl, "https://opencode.ai/zen/go/v1");
 });
 
 test("provider tests cross a restricted preload and main-process bridge", () => {

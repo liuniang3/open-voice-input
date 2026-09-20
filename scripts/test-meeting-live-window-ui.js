@@ -71,17 +71,21 @@ async function unitChecks() {
   assert.equal(f.count("meetingLiveStop"), 0);
   console.log("ok - UI actions use production window defaults and restore saved maximization");
 
+  f.push(completed({ recoverableSessions: [{ sessionId: "old", title: "历史例会", status: "completed" }] }));
+  await f.click("liveHistoryToggle");
+  assert.equal(f.$("liveHistoryBrowser").hidden, false);
+  f.push(recording());
+  assert.equal(f.$("liveHistoryBrowser").hidden, true);
   const opening = deferred();
   f.handlers.meetingLiveWindow = () => opening.promise;
   await f.click("liveFloat");
-  await f.click("liveHistoryTab");
   f.$("liveMeetingPanel").scrollTop = 500;
   opening.resolve({ ok: true, floating: true, compact: false, alwaysOnTop: true });
   await tick();
   assert.equal(f.$("liveMeetingPanel").hidden, false);
-  assert.equal(f.$("meetingHistoryPanel").hidden, true);
+  assert.equal(f.$("liveHistoryBrowser").hidden, true);
   assert.equal(f.$("liveMeetingPanel").scrollTop, 0);
-  console.log("ok - delayed float cannot strand the history pane with hidden navigation");
+  console.log("ok - recording and floating mode close the history browser");
 
   f.push(recording({ markdownPath: "C:/mock/raw.md" }));
   const stop = deferred();

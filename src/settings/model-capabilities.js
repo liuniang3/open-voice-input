@@ -1,6 +1,6 @@
 "use strict";
 
-const CAPABILITY_PRESET_REVISION = 1;
+const CAPABILITY_PRESET_REVISION = 2;
 
 const GENERIC_MODEL_CAPABILITY = Object.freeze({
   contextWindow: 128000,
@@ -11,6 +11,16 @@ const GENERIC_MODEL_CAPABILITY = Object.freeze({
 });
 
 const MODEL_CAPABILITY_PRESETS = Object.freeze([
+  {
+    pattern: /^(?:opencode-go\/)?(?:deepseek-v4-pro|deepseek-v4-flash|deepseek-v4\.1-flash|deepseek-v4-flash-vision-exp|deepseek-flash)$/i,
+    capability: {
+      contextWindow: 1000000,
+      maxOutput: 384000,
+      reasoning: "",
+      timeoutMs: 300000,
+      capabilitySource: "compatibility"
+    }
+  },
   {
     pattern: /(?:^|\/)mimo-v2\.5-pro(?:$|[-_:])/i,
     capability: {

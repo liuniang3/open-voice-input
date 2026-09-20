@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld("mimoInput", {
   meetingLiveWindow: (payload) => ipcRenderer.invoke("meeting:live:window", payload),
   meetingLiveTestConnection: (payload) => ipcRenderer.invoke("meeting:live:test-connection", payload),
   meetingLiveStatus: () => ipcRenderer.invoke("meeting:live:status"),
+  meetingLiveHistory: () => ipcRenderer.invoke("meeting:live:history"),
+  meetingLiveOpenSession: (payload) => ipcRenderer.invoke("meeting:live:open-session", payload),
   meetingLiveRecover: (payload) => ipcRenderer.invoke("meeting:live:recover", payload),
   meetingLiveChooseDestination: () => ipcRenderer.invoke("meeting:live:choose-destination"),
   meetingLiveOpenPath: (payload) => ipcRenderer.invoke("meeting:live:open-path", payload),

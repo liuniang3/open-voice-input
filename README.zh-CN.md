@@ -2,9 +2,9 @@
 
 当前开发版支持 Windows/macOS 和 **会议实时转录**：默认阿里 `qwen-audio-3.0-asr-flash-streaming`，也可选 `fun-asr-realtime`；阿里不可用时可切换到 `mimo-v2.5-asr` 非实时分段备用模式。支持仅麦克风、仅系统声音、双轨、悬浮窗和暂停/继续；完整音频持续保留，转录与 Markdown 自动保存间隔可分别选择。停止后可选 MiMo 全音频复核，再由独立配置的 LLM 校订；详细总结与思维导图另行触发。详见 [会议实时转录与恢复说明](docs/MEETING_REALTIME.md)。
 
-macOS 使用 AVAudioEngine 采集麦克风、ScreenCaptureKit 采集系统声音（macOS 13+）。仅系统模式不会打开麦克风，也不会请求麦克风权限，但仍需要屏幕/系统音频录制权限；自动粘贴另需辅助功能权限。已提供 Apple Silicon/Intel 构建配置，本次更新不宣称通过 Mac 真机采集或粘贴验证。在装有 Xcode Command Line Tools 的 Mac 上执行 `npm run dist:mac`，Windows 继续执行 `npm run dist`。
+macOS 使用 AVAudioEngine 采集麦克风、ScreenCaptureKit 采集系统声音（macOS 13+）。仅系统模式不会打开麦克风，也不会请求麦克风权限，但仍需要屏幕/系统音频录制权限；自动粘贴另需辅助功能权限。无边框窗口顶部、短语音悬浮窗和会议悬浮窗均提供原生拖动命中区域，兼容系统启用的三指拖移。已提供 Apple Silicon/Intel 构建配置，本次更新不宣称通过 Mac 真机采集、粘贴或触控板手势验证。在装有 Xcode Command Line Tools 的 Mac 上执行 `npm run dist:mac`，Windows 继续执行 `npm run dist`。
 
-一个支持可插拔 ASR 供应商和可选 LLM 文本清理的桌面语音输入助手。
+一个支持可插拔 ASR 供应商和可选 LLM 表达整理的桌面语音输入助手。
 
 Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱动。它会录制语音，通过用户选择的 ASR 供应商转写文本，再按需调用文本模型清理口头词、重复片段和标点，最后写入剪贴板，并尝试粘贴到之前光标所在的应用里。
 
@@ -13,12 +13,13 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 ## 当前版本更新
 
 - 会议转录默认使用阿里 Streaming 或 Fun-ASR 实时接口，也可切换到 `mimo-v2.5-asr` 非实时分段备用模式；停止后可选 MiMo 全音频复核、独立 LLM 校订，再单独生成详细总结和思维导图。
+- 会议入口已统一为“会议实时转录”；页面内的“历史记录”可搜索和打开以前的实时会话，并重新执行 MiMo 复核、校订或摘要。浏览历史只读取本地文件，不会自动调用 ASR。
 - 会议新增真正的仅系统声音采集、悬浮/精简窗口、可选置顶和暂停/继续；保留完整 WAV 与原生音频，转录分段和 Markdown 自动保存使用两个独立的可配置计时器。
 - 第一阶段已改为可插拔 ASR：优先适配专用 `mimo-v2.5-asr`，并支持 Qwen3-ASR 和 Fun-ASR。
 - 短语音 Qwen 实时预览默认使用 `qwen-audio-3.0-asr-flash-streaming`；Fun-ASR 同样支持 WebSocket 实时预览。MiMo 使用周期性音频片段预览；实时流失败时会用完整录音自动回退到非实时转写。
-- `Stable` 模式将原始 ASR 文本交给 MiMo 或 OpenAI 兼容小模型进行口头词、重复片段和标点清理；`Fast` 模式只执行 ASR。
+- `Stable` 模式可将原始 ASR 文本交给 MiMo、OpenAI、其他 OpenAI 兼容接口或实验性的 OpenCode Go，在忠于原意的前提下整理成清晰连贯的段落；`Fast` 模式只执行 ASR。
 - 设置已整合进无边框主界面，并新增独立的“供应商连接”页。
-- MiMo 全部模型共用一套 MiMo 连接，Qwen/Fun-ASR 共用一套阿里连接，GPT/OpenAI 模型共用一套 OpenAI 连接。OpenAI URL 可以填写 NowCoding 等自定义网关，并可选择 Responses 或 Chat Completions；Grok、GLM 等其他供应商仍按模型独立保存连接。
+- MiMo 全部模型共用一套 MiMo 连接，Qwen/Fun-ASR 共用一套阿里连接，GPT/OpenAI 模型共用一套 OpenAI 连接，OpenCode Go 使用完全隔离的连接和模型目录。OpenAI URL 可以填写 NowCoding 等自定义网关，并可选择 Responses 或 Chat Completions。
 - API Key 支持显示、隐藏和一键复制，便于本机检查配置；Key 仍只保存在 `%APPDATA%\\open-voice-input\\settings.json`，不会进入安装包或仓库。
 - 录音统一转换为 16 kHz、单声道、16-bit PCM WAV；长录音会按当前 ASR 供应商上限自动分段、提前转写并缓存，结束后按顺序拼接。
 - 新增独立文件转写工作区：可导入音频或视频、单独选择 ASR 模型、生成校订文本与结构化总结，并导出 Markdown、TXT 或 Word。
@@ -42,15 +43,14 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 - 任务栏托盘菜单进入设置
 - 可配置麦克风、快捷键、API Key、Base URL、供应商和模型
 - ASR 供应商：MiMo-V2.5-ASR、Qwen3-ASR、Fun-ASR
-- 文本清理供应商：MiMo 聊天清理、OpenAI 兼容接口清理
+- 表达整理供应商：MiMo、OpenAI 兼容接口、实验性 OpenCode Go
 - `Fast` 模式：只做 ASR，延迟更低
-- `Stable` 模式：先 ASR，再用 LLM 清理口头词、重复片段和标点
+- `Stable` 模式：先 ASR，再用 LLM 理解语境并整理表达
 - 转写后写入剪贴板，并尝试粘贴到之前的焦点应用
-- MiMo/Qwen 批处理长录音自动分段，稳定模式只在完整拼接后执行一次文本清理
+- MiMo/Qwen 批处理长录音自动分段，稳定模式只在完整拼接后执行一次表达整理
 - 本地兜底清理常见口头词、重复片段和提示词泄漏式输出
 - **独立文件转写**：从托盘或主界面进入，导入音频/视频后选择 ASR，按“原始转写 → 校订文本 → 结构化总结”处理，并导出 Markdown、TXT 或 Word。
-- **会议工作台媒体导入**（WAV 与常见音视频，经打包 FFmpeg）：源流式复制，只抽取**首音轨**，生成本地 16 kHz 单声道 archive，需手动点「生成原文」。**基础模式不需要 OSS。** 默认 Qwen no-Bucket **不会**凭空做说话人分离。
-- **会议增强转写（可选）**：工作台可选「增强」模式，系统轨经 OSS 私有上传 + Fun-ASR 说话人分离（32/48/64 kbps）；设置页配置 Fun/OSS 并分别测试连接。详见 [docs/MEETING_STAGE_4C.md](docs/MEETING_STAGE_4C.md)。
+- **实时会议历史**：在实时会议页面浏览、搜索以前的会话，重新打开原文、完整音频、复核稿、校订稿和摘要；旧会议工作台入口及说话人分离设置当前不再提供。
 
 **媒体导入限制：** 仅首音轨；未验证全部 codec/容器；未宣称真实超长视频验收。安装包/便携版额外约 **80MB**（单个 FFmpeg）。二进制为 **FFmpeg 6.1.1**（gyan.dev essentials GPL，经构建时 `ffmpeg-static@5.3.0`）。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [docs/FFMPEG_MEDIA_IMPORT.md](docs/FFMPEG_MEDIA_IMPORT.md)。
 
@@ -75,7 +75,7 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 - `Open Voice Input-Setup-<版本>-x64.exe`：安装版，创建开始菜单和桌面快捷方式。
 - `Open Voice Input-Portable-<版本>-x64.exe`：单文件便携版，复制到另一台 Windows 电脑后直接运行。
 
-发布版不需要安装 Node.js、npm 或 Electron。首次启动没有可用 API Key 时会自动打开设置窗口；填写 ASR 和可选文本清理 API 后即可使用。
+发布版不需要安装 Node.js、npm 或 Electron。首次启动没有可用 API Key 时会自动打开设置窗口；填写 ASR 和可选表达整理 API 后即可使用。
 
 需要先从 Releases 手动安装一次 `0.4.0` 或更高版本来获得更新器。由于 `0.4.3` 及更早的未签名 macOS 构建尚无本地安装包兜底，Mac 用户需要手动安装一次 `0.4.4`；之后应用可以下载并打开后续更新包。可使用“设置 > 关于与更新”或托盘菜单“检查更新”；检查更新不会上传 API 配置、录音或转录内容。
 
@@ -160,13 +160,13 @@ npm run dist
 
 1. 启动程序。
 2. 右键任务栏托盘图标，打开 `设置`。
-3. 设置 ASR 供应商、文本清理供应商、API 凭证、麦克风和全局快捷键。
+3. 设置 ASR 供应商、表达整理供应商、API 凭证、麦克风和全局快捷键。
 4. 按全局快捷键呼出录音窗口。
 5. 悬浮窗显示录音或实时转写时开始说话。
 6. 按 `Enter` 结束录音。
 7. 程序会把最终文本写入剪贴板，并尝试粘贴到之前光标所在位置。
 
-默认短语音快捷键：`Ctrl+Alt+M`。默认长内容转录快捷键：`Ctrl+Alt+Shift+M`，触发后会打开并置前会议工作台。设置快捷键时会检查应用内重复、Windows 保留组合和已被其他程序占用的全局组合；Windows 无法提供占用程序的名称。
+默认短语音快捷键：`Ctrl+Alt+M`。默认长内容转录快捷键：`Ctrl+Alt+Shift+M`，触发后会打开并置前会议实时转录。设置快捷键时会检查应用内重复、Windows 保留组合和已被其他程序占用的全局组合；Windows 无法提供占用程序的名称。
 
 ## 会议实时工作流
 
@@ -176,6 +176,7 @@ npm run dist
 4. 停止后等待音频收尾以及流式或分段任务完成；有转写缺口时从保留音频重试。停止不会自动调用会后复核或 LLM。
 5. 按需勾选 **MiMo 音频复核**、选择其 ASR 配置，再用单独选择的 LLM 执行**校订**。复核以有界分段覆盖全部保存音频；不勾选时只校订实时原文。保留有意义的重复及尚未解决的分歧，原文始终保留。
 6. 单独点击**生成摘要**，得到详细纪要与层级思维导图。已有完成的校订稿时以它为依据，否则使用原文；校订完成不会自动生成总结。
+7. 点击页面顶部的**历史记录**可搜索并加载以前的实时会议。加载本身不发送 ASR 请求；选择 MiMo 复核、校订、摘要或重试时，才会执行相应的显式操作。录制过程中不能切换历史会话。
 
 输出分别为原始 `.md`、可选 `.reviewed.md`、校订 `.cleaned.md` 和包含纪要及思维导图的 `.summary.md`。派生文件重名时另选文件名，已有文件不覆盖，以界面显示的实际路径为准。原生 PCM、完整 WAV 和重试检查点保存在会话目录。权限、恢复和文件结构详见 [完整说明](docs/MEETING_REALTIME.md)。
 
@@ -187,12 +188,13 @@ ASR 供应商：
 - `Qwen3-ASR`：通过 DashScope/OpenAI 兼容配置接入专用 ASR，支持非实时和实时模式。
 - `Fun-ASR`：通过 DashScope 接入专用 ASR。本地麦克风录音使用 WebSocket 实时协议；公网音频 URL 可走官方 REST 批处理。
 
-文本清理供应商：
+表达整理供应商：
 
 - `MiMo`：通过 MiMo 聊天模型清理文本，可选择 MiMo V2.5 或 MiMo V2.5 Pro。
 - `OpenAI 兼容接口`：通过任意兼容聊天接口清理文本，内置 GPT-5.4 mini 和 Grok 4.5 模型预设，并继续支持自定义模型 ID。
+- `OpenCode Go（实验性）`：使用独立的 `https://opencode.ai/zen/go/v1` Chat Completions 连接，可自动获取模型列表；可用于 Stable 模式清理、会议校订和结构化总结。请求会携带专用 User-Agent，单次会议分析中的分批请求共用稳定会话 ID。
 
-目前综合推荐使用 GPT-5.4 mini。MiMo 的 ASR、清理和复核共用 MiMo 连接；Qwen 与 Fun-ASR 共用阿里连接；GPT 清理和分析共用 OpenAI 连接。OpenAI 连接既可填写官方地址，也可填写 NowCoding 等兼容网关，并选择 Responses 或 Chat Completions。Grok、GLM 等其他兼容模型继续独立保存 URL/Key，避免凭证跨供应商串用。
+目前综合推荐使用 GPT-5.4 mini。MiMo 的 ASR、表达整理和复核共用 MiMo 连接；Qwen 与 Fun-ASR 共用阿里连接；GPT 表达整理和分析共用 OpenAI 连接。OpenCode Go 的 Key 和模型目录不会串入这些连接，即使它提供的模型 ID 也叫 `mimo-v2.5` 或 `glm-5.2`。OpenCode Go 官方主要面向 coding agent，语音表达整理和会议总结可能受到限流或策略拒绝；发生失败时程序会保留原始文本、音频和重试数据。
 
 ## 短语音转写模式
 
@@ -201,13 +203,13 @@ ASR 供应商：
 `Stable` 模式执行两步：
 
 1. ASR 供应商返回原始转写文本。
-2. 文本清理供应商使用保守的“删除跨度”方法，仅删除明确的口头词、结巴、假启动和意外重复，并补充标点。
+2. 表达整理模型理解本次转写的语境，删除口头词、结巴、假启动和意外重复，并可调整标点、语序和句式，把内容整理成一个清晰连贯的段落。
 
-清洗模型被禁止改写、扩写、重排或总结。程序还会在本地验证模型结果：清洗文本必须来自原文字符顺序，且不能删除过量内容；验证失败、JSON 格式错误或清洗请求失败时直接回退到原始 ASR 文本，不让已经成功的语音识别一并失败。
+整理模型不需要逐字复刻，可以在不改变含义的前提下把口语改成自然表达，但不能遗漏主要意图，也不能新增事实、回答原文中的问题或输出解释。程序会在本地检查信息保留比例、无依据扩写、数字和技术标识、元解释及严格 JSON 格式；验证失败或请求失败时直接回退到原始 ASR 文本，不让已经成功的语音识别一并失败。
 
 每次录音都会使用录音开始时锁定的设置快照，因此录音处理中途修改设置只会影响下一次录音。
 
-实时模式下，Qwen 默认通过 `qwen-audio-3.0-asr-flash-streaming` 的 WebSocket `run-task` 协议显示逐句草稿，Fun-ASR 使用其流式接口；MiMo `mimo-v2.5-asr` 仍按文件式接口周期性刷新预览。Qwen 草稿和定稿按句子 ID 更新，不按文字内容去重，因此相同句子不会被误删。按 `Enter` 后会等待流式任务完成；如果连接、音频发送或结束确认失败，则自动使用保留的完整录音执行非实时转写。`Stable` 模式随后仍会进入第二步文本清理。
+实时模式下，Qwen 默认通过 `qwen-audio-3.0-asr-flash-streaming` 的 WebSocket `run-task` 协议显示逐句草稿，Fun-ASR 使用其流式接口；MiMo `mimo-v2.5-asr` 仍按文件式接口周期性刷新预览。Qwen 草稿和定稿按句子 ID 更新，不按文字内容去重，因此相同句子不会被误删。按 `Enter` 后会等待流式任务完成；如果连接、音频发送或结束确认失败，则自动使用保留的完整录音执行非实时转写。`Stable` 模式随后仍会进入第二步表达整理。
 
 ## 隐私
 
@@ -221,26 +223,25 @@ ASR 供应商：
 %APPDATA%\open-voice-input\open-voice-input.log
 ```
 
-## 会议工作台（现状）
+## 会议实时转录（现状）
 
-历史会议工作台与[会议实时工作流](docs/MEETING_REALTIME.md)并存。原生采集支持仅麦克风、仅系统、双轨；Windows 使用 WASAPI 输出端点混音，macOS 使用 ScreenCaptureKit 显示器过滤的系统声音。采集层说明见 [docs/MEETING_STAGE_0B.md](docs/MEETING_STAGE_0B.md)；增强分离见 [docs/MEETING_STAGE_4C.md](docs/MEETING_STAGE_4C.md)。
+会议功能统一从[会议实时工作流](docs/MEETING_REALTIME.md)进入。原生采集支持仅麦克风、仅系统、双轨；Windows 使用 WASAPI 输出端点混音，macOS 使用 ScreenCaptureKit 显示器过滤的系统声音。实时页面内置历史浏览，可重新打开以前保存的原文、完整音频和派生结果。旧“会议历史/会议工作台”入口已经下线。
 
-**已实现：** L0 采集与会话恢复；基础转写（Qwen no-Bucket，无需 OSS，但仍向 ASR 发送音频）；可选说话人分离（系统轨 OSS + Fun-ASR）；校订/总结；媒体导入（首音轨）；导出/回放/说话人显示名；设置页 Fun/OSS 配置与连接测试。实时 `fun-asr-realtime` 不依赖此 OSS 流程，也不生成讲话人标签。
+**已实现：** 跨平台原生采集；阿里实时或 MiMo 分段转写；完整音频、Markdown 热保存和失败检查点；历史浏览；显式 MiMo 全音频复核、LLM 校订、结构化总结与思维导图。打开历史记录不会自动重跑转写。
 
 **当前限制：**
 
-- **基础转写**不分多人说话人（系统侧多为 `remote_unknown`）。
-- **说话人分离**需配置 Fun-ASR + OSS；仅系统轨走 Fun，麦克风仍走 Qwen。
-- 媒体导入只取**首音轨**；未宣称全 codec / 超长视频验收。
+- 当前不提供说话人分离或讲话人标签；双轨只区分麦克风与系统音频来源。
+- 媒体导入请使用独立的“文件转写”工作区；只取**首音轨**，未宣称全 codec / 超长视频验收。
 - **未做**回声消除（AEC）、进程级 loopback 隔离、真实多小时腾讯会议共存验收、L1 高质量转换。
 - DRM 可能使系统轨静音；采集可能含本应用自身声音。
 
 ```powershell
 npm run build:helper
 npm run check:helper
-npm run test:meeting
-npm run test:meeting:ui
-npm run test:meeting:4c
+npm run test:meeting:live
+npm run test:meeting:live:ui
+npm run test:all
 ```
 
 ## 当前缺点
@@ -248,8 +249,8 @@ npm run test:meeting:4c
 - 这不是真正的 Windows IME，只是全局语音输入助手。它依赖剪贴板和粘贴动作，部分软件可能拦截、延迟或拒绝粘贴。
 - 焦点恢复和自动粘贴受目标应用、管理员权限窗口、远程桌面、浏览器输入策略和 Windows 安全策略影响，不保证所有场景都成功。
 - 实时 ASR 质量受麦克风、网络延迟、供应商行为和模型版本影响。
-- 如果第一步 ASR 已经听错，第二步文本清理只能整理已有文本，不能恢复没有听准的内容。
-- 文本清理模型仍可能把有意义的重复误判为结巴，或过于保守地保留自我修正。当前已关闭本地重复词正则，并通过最小编辑提示词和结果校验降低误伤，但无法从纯文本中彻底消除语义歧义。
+- 如果第一步 ASR 已经听错，第二步表达整理只能处理已有文本，不能恢复没有听准的内容。
+- 表达整理模型仍可能误解口语中的指代、歧义或刻意重复。当前已关闭本地重复词正则，并通过语义整理提示词和结果校验限制遗漏与无依据扩写，但纯文本整理无法恢复 ASR 没有听准的内容。
 - 正式打包版本支持应用内更新。Windows 发布包仍未签名，可能触发 SmartScreen；macOS 已为 Intel 与 Apple Silicon 分离更新通道。当前未签名 macOS 构建会在应用内下载并打开经过校验的 ZIP，用户解压后将应用替换到 `Applications`，无需跳转 GitHub；接入 Developer ID 签名与公证后会自动启用“重启并安装”。
 - 会议：基础不分多人；增强依赖 Fun+OSS；首音轨导入；无 AEC / 未做真实多小时验收（见上文与 docs/MEETING_STAGE_4C.md）。
 

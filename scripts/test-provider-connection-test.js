@@ -55,6 +55,29 @@ async function main() {
   });
   assert.equal(calls[0].url, "https://mimo-proxy.example/v1/chat/completions");
 
+  calls.length = 0;
+  await testProviderConnection({
+    provider: "opencode-go",
+    settings: {
+      providerConnections: {
+        "opencode-go": { apiKey: "fixture", baseUrl: "https://opencode.ai/zen/go/v1" }
+      },
+      cleanerModel: "opencode-go/glm-5.2",
+      cleanerProfiles: {
+        "opencode-go/glm-5.2": { provider: "opencode-go", providerFamily: "opencode-go" }
+      }
+    },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return response({ choices: [{ finish_reason: "stop", message: { content: "OK" } }] });
+    }
+  });
+  assert.equal(calls[0].url, "https://opencode.ai/zen/go/v1/chat/completions");
+  assert.equal(JSON.parse(calls[0].options.body).model, "glm-5.2");
+  assert.equal(JSON.parse(calls[0].options.body).max_completion_tokens, 128);
+  assert.match(calls[0].options.headers["User-Agent"], /^open-voice-input\//);
+  assert.match(calls[0].options.headers["x-opencode-session"], /^connection-test-/);
+
   await assert.rejects(
     () => testProviderConnection({ provider: "openai", settings: { providerConnections: { openai: {} } } }),
     error => error.code === "provider_credentials_missing"

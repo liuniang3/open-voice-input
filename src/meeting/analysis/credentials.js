@@ -83,6 +83,8 @@ function resolveMeetingAnalysisCredentials({ env = process.env, settings = {} } 
     apiKey,
     baseUrl: baseUrl.replace(/\/+$/, ""),
     apiStyle: connection.apiStyle,
+    provider: provider,
+    providerFamily: connection.family,
     modelId,
     contextWindowTokens: positiveInt(
       s.meetingAnalysisContextWindow || env.OVI_MEETING_ANALYSIS_CONTEXT_WINDOW,
