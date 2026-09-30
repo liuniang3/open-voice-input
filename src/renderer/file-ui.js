@@ -25,8 +25,11 @@
     analysis: null,
     resultTab: "raw",
     rawDoc: null,
-    correctedDoc: null,
     summaryDoc: null,
+    summaryJob: null,
+    summaryPath: "",
+    summaryModel: "",
+    setupCollapsedOnBusy: false,
     importBusy: false,
     importSessionId: null,
     pollTimer: null,
@@ -60,7 +63,8 @@
       processRetry: $("fileProcessRetryBtn"),
       processCancel: $("fileProcessCancelBtn"),
       analysisLabel: $("fileAnalysisLabel"),
-      analysisTemplate: $("fileAnalysisTemplateSelect"),
+      mimoReview: $("fileAnalysisMimoReview"),
+      summaryModelSelect: $("fileSummaryModelSelect"),
       analysisStart: $("fileAnalysisStartBtn"),
       analysisRetry: $("fileAnalysisRetryBtn"),
       analysisCancel: $("fileAnalysisCancelBtn"),
@@ -68,7 +72,9 @@
       resultContent: $("fileResultContent"),
       exportFormat: $("fileExportFormatSelect"),
       exportScope: $("fileExportScopeSelect"),
-      export: $("fileExportBtn")
+      export: $("fileExportBtn"),
+      setupDetails: $("fileSetupDetails"),
+      setupSummaryMeta: $("fileSetupSummaryMeta")
     };
   }
 
@@ -174,9 +180,9 @@
   function clearSelection() {
     state.selectedId = null;
     state.process = null;
-    state.analysis = null;
+    state.summaryJob = null;
+    state.summaryPath = "";
     state.rawDoc = null;
-    state.correctedDoc = null;
     state.summaryDoc = null;
     state.importSessionId = null;
     state.importBusy = false;
@@ -230,9 +236,53 @@
     }
   }
 
+  function renderSummaryModelOptions() {
+    const e = els();
+    if (!e.summaryModelSelect) return;
+    const picker = window.TextSupplierUi;
+    const { groups, selected: configured } = picker.modelOptionGroups(state.settings, "summary");
+    const selected = state.summaryModel || picker.formatPair(configured.supplierId, configured.modelId);
+    const available = new Set();
+    e.summaryModelSelect.replaceChildren();
+    for (const group of groups) {
+      const optgroup = document.createElement("optgroup");
+      optgroup.label = group.label;
+      for (const modelId of group.models) {
+        const value = picker.formatPair(group.supplierId, modelId);
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = modelId;
+        optgroup.appendChild(option);
+        available.add(value);
+      }
+      if (optgroup.children.length) e.summaryModelSelect.appendChild(optgroup);
+    }
+    if (selected && !available.has(selected)) {
+      const pair = picker.parsePair(selected);
+      if (pair.modelId) {
+        const option = document.createElement("option");
+        option.value = selected;
+        option.textContent = `${pair.supplierId || "已有连接"} / ${pair.modelId}（手动配置）`;
+        e.summaryModelSelect.appendChild(option);
+      }
+    }
+    e.summaryModelSelect.value = selected && [...e.summaryModelSelect.options].some(option => option.value === selected)
+      ? selected : e.summaryModelSelect.options[0]?.value || "";
+    state.summaryModel = e.summaryModelSelect.value;
+  }
+
+  function renderSetupSummary() {
+    const e = els();
+    if (!e.setupSummaryMeta) return;
+    const row = currentRow();
+    const model = state.settings.meetingFileAsrModel || "mimo-v2.5-asr";
+    e.setupSummaryMeta.textContent = row ? `${row.title || row.id} · ${model}` : `未选择文件 · ${model}`;
+  }
+
   function renderSelected() {
     const row = currentRow();
     const e = els();
+    renderSetupSummary();
     if (!row) {
       clearSelection();
       return;
@@ -255,7 +305,7 @@
   function renderControls() {
     const row = currentRow();
     const proc = state.process?.stage || "idle";
-    const ana = state.analysis?.status || "none";
+    const ana = state.summaryJob?.status || "none";
     const imported = Boolean(row && hasArchive(row));
     const processRunning = isRunningProcess(proc);
     const analysisRunning = isRunningAnalysis(ana);
@@ -263,18 +313,28 @@
     const canRetry = Boolean(row && imported && !state.importBusy && !processRunning && !analysisRunning && (proc === "failed" || proc === "cancelled"));
     const canCancel = Boolean(row && processRunning);
     const canAnalyze = Boolean(
-      row && proc === "completed" && !analysisRunning && !processRunning &&
+      row && proc === "completed" && !analysisRunning && !processRunning && !state.importBusy &&
       (ana === "none" || ana === "completed")
     );
-    const canRetryAnalysis = Boolean(row && proc === "completed" && !analysisRunning && (ana === "failed" || ana === "cancelled"));
+    const canRetryAnalysis = Boolean(row && proc === "completed" && !analysisRunning &&
+      ["failed", "cancelled", "needs_retry"].includes(ana));
     const canCancelAnalysis = Boolean(row && analysisRunning);
     const e = els();
+    const busyNow = processRunning || analysisRunning || Boolean(state.importBusy);
+    if (e.setupDetails) {
+      // Collapse setup once when processing starts so results keep the space.
+      if (busyNow && !state.setupCollapsedOnBusy) {
+        e.setupDetails.open = false;
+        state.setupCollapsedOnBusy = true;
+      }
+      if (!busyNow) state.setupCollapsedOnBusy = false;
+    }
     if (e.processStart) e.processStart.disabled = !canStart;
     if (e.processRetry) e.processRetry.disabled = !canRetry;
     if (e.processCancel) e.processCancel.disabled = !canCancel;
     if (e.analysisStart) e.analysisStart.disabled = !canAnalyze;
     if (e.analysisStart) {
-      e.analysisStart.textContent = ana === "completed" ? "重新生成结果" : "校订并总结";
+      e.analysisStart.textContent = ana === "completed" ? "重新生成摘要" : "生成摘要";
     }
     if (e.analysisRetry) e.analysisRetry.disabled = !canRetryAnalysis;
     if (e.analysisCancel) e.analysisCancel.disabled = !canCancelAnalysis;
@@ -284,10 +344,17 @@
     setPill(e.importStatus, state.importBusy ? "processing" : row ? (hasArchive(row) ? "ok" : "warn") : "idle", state.importBusy ? "导入中" : row ? (hasArchive(row) ? "已导入" : "待导入") : "未选择");
     if (e.processLabel) e.processLabel.textContent = processLabel;
     if (e.processProgress) e.processProgress.textContent = ui.processProgressText?.(state.process) || "—";
-    const analysisLabel = ui.analysisStageLabel?.(ana, state.analysis?.stage) || (ana === "none" ? "尚未开始" : ana);
+    const analysisLabel = ana === "running" ? "正在生成摘要…"
+      : ana === "completed" ? (state.summaryJob?.legacy ? "历史摘要（只读）" : "摘要已生成")
+      : ana === "failed" ? "摘要失败，原文保留"
+      : ana === "needs_retry" ? "摘要未完成，可重试"
+      : ana === "cancelled" ? "摘要已取消"
+      : "尚未开始";
     if (e.analysisLabel) e.analysisLabel.textContent = analysisLabel;
     if (e.processLabel) e.processLabel.dataset.kind = processKind;
-    if (e.analysisLabel) e.analysisLabel.dataset.kind = ana === "completed" ? "ok" : ana === "failed" ? "error" : isRunningAnalysis(ana) ? "processing" : "idle";
+    if (e.analysisLabel) e.analysisLabel.dataset.kind = ana === "completed" ? "ok"
+      : ["failed", "needs_retry", "cancelled"].includes(ana) ? "error"
+      : isRunningAnalysis(ana) ? "processing" : "idle";
   }
 
   async function loadSettings() {
@@ -296,6 +363,7 @@
     } catch {
       state.settings = {};
     }
+    renderSummaryModelOptions();
     renderFileAsrSelector();
     renderSelected();
   }
@@ -326,18 +394,20 @@
     channels.result.next();
     state.selectedId = String(sessionId);
     state.process = null;
-    state.analysis = null;
+    state.summaryJob = null;
+    state.summaryPath = "";
     state.rawDoc = null;
-    state.correctedDoc = null;
     state.summaryDoc = null;
     resetResultView();
     renderSelected();
     renderControls();
     const token = channels.select.next();
-    const [scan, process, analysis] = await Promise.all([
+    const [scan, process, job] = await Promise.all([
       window.mimoInput.meetingScanSession(state.selectedId),
       window.mimoInput.meetingProcessStatus({ sessionId: state.selectedId }),
-      window.mimoInput.meetingAnalysisStatus({ sessionId: state.selectedId })
+      typeof window.mimoInput.meetingFileSummaryStatus === "function"
+        ? window.mimoInput.meetingFileSummaryStatus({ sessionId: state.selectedId })
+        : Promise.resolve(null)
     ]);
     if (!accept(channels.select, token, state.selectedId)) return;
     const row = currentRow();
@@ -346,7 +416,11 @@
       row.hasArchive = Boolean(row.hasArchive || scan.session?.tracks?.microphone || scan.session?.tracks?.system);
     }
     state.process = process?.ok ? process.processing : null;
-    state.analysis = analysis?.ok ? analysis.analysis : null;
+    state.summaryJob = job?.ok ? job.summary : null;
+    if (state.summaryJob?.summary) {
+      state.summaryDoc = state.summaryJob.summary;
+      state.summaryPath = state.summaryJob.summaryMarkdownPath || "";
+    }
     renderSelected();
     renderControls();
     if (state.process?.stage === "completed" || row?.hasRaw) {
@@ -354,16 +428,16 @@
     } else {
       resetResultView("文件已导入，开始转写后结果会显示在这里。");
     }
-    if (state.analysis?.status === "completed") {
-      loadAnalysisResults(state.selectedId)
-        .then(() => {
-          if (state.resultTab !== "raw") {
-            return loadResult(state.resultTab, { expectedSessionId: state.selectedId });
-          }
-          return null;
-        })
-        .catch((error) => setHint(error.message || "分析结果读取失败，请重试分析。"));
-    }
+    // History readback: durable summary status plus legacy summaries stay visible.
+    loadSummaryResults(state.selectedId)
+      .then(() => {
+        renderControls();
+        if (state.resultTab !== "raw") {
+          return loadResult(state.resultTab, { expectedSessionId: state.selectedId });
+        }
+        return null;
+      })
+      .catch((error) => setHint(error.message || "摘要读取失败，请重试。"));
     if (state.selectedId) ensurePolling();
   }
 
@@ -449,9 +523,9 @@
     const token = channels.process.next();
     state.process = { ...(state.process || {}), stage: "exporting", status: "running", processMode: "file", mode: "file", optimistic: true };
     state.rawDoc = null;
-    state.correctedDoc = null;
     state.summaryDoc = null;
-    state.analysis = null;
+    state.summaryJob = null;
+    state.summaryPath = "";
     renderControls();
     ensurePolling();
     try {
@@ -480,60 +554,59 @@
     renderControls();
   }
 
-  async function analysisStart({ retry = false } = {}) {
+  async function summaryStart({ retry = false } = {}) {
     const sessionId = state.selectedId;
     if (!sessionId) return;
-    const force = !retry && state.analysis?.status === "completed";
     const token = channels.analysis.next();
-    state.analysis = { ...(state.analysis || {}), status: "running", stage: "fingerprint", optimistic: true };
-    state.correctedDoc = null;
+    state.summaryJob = { status: "running" };
     state.summaryDoc = null;
+    state.summaryPath = "";
     if (state.resultTab !== "raw") {
-      resetResultView(force ? "正在重新生成校订与总结…" : "正在生成校订与总结…");
+      resetResultView(retry ? "正在重试摘要…" : "正在生成摘要…");
     }
     renderControls();
     ensurePolling();
     try {
-      const api = retry ? window.mimoInput.meetingAnalysisRetry : window.mimoInput.meetingAnalysisStart;
+      const api = retry ? window.mimoInput.meetingFileSummaryRetry : window.mimoInput.meetingFileSummaryStart;
+      const selected = window.TextSupplierUi.parsePair(state.summaryModel || els().summaryModelSelect?.value || "");
       const res = await api({
         sessionId,
-        template: els().analysisTemplate?.value || "auto",
-        ...(!retry ? { force } : {}),
-        ...(retry ? { resetAttempts: true } : {})
+        supplierId: selected.supplierId || window.TextSupplierUi.LEGACY_SUPPLIER_ID,
+        modelId: selected.modelId,
+        useMimoReview: Boolean(els().mimoReview?.checked)
       });
       if (!accept(channels.analysis, token, sessionId)) return;
-      if (!res?.ok) throw new Error(res?.error?.message || "校订与总结失败");
-      state.analysis = res.analysis;
+      if (!res?.ok) throw new Error(res?.error?.message || "摘要生成失败");
+      state.summaryJob = res.summary || { status: "running" };
+      state.summaryPath = state.summaryJob.summaryMarkdownPath || "";
+      if (state.summaryJob.summary) state.summaryDoc = state.summaryJob.summary;
       renderControls();
-      try {
-        await loadAnalysisResults(sessionId);
+      if (state.summaryJob.status !== "running" && state.summaryJob.summary) {
         await loadResult("summary", { expectedSessionId: sessionId });
-        setHint("校订与总结已完成，已显示结构化总结。");
-      } catch (error) {
-        // Keep the backend's completed state visible; a result read failure must not
-        // turn a successful analysis job into a false failed state in the UI.
-        setHint(error.message || "分析已完成，但结果读取失败，请切换页签或重试分析。");
+        setHint("摘要已完成。");
+      } else if (state.summaryJob.status !== "running") {
+        setHint("摘要未完成，可重试。");
       }
       ensurePolling();
     } catch (error) {
-      state.analysis = { status: "failed", stage: "failed" };
+      state.summaryJob = { status: "failed" };
       renderControls();
       setHint(error.message || String(error));
       throw error;
     }
   }
 
-  async function analysisCancel() {
+  async function summaryCancel() {
     if (!state.selectedId) return;
-    const res = await window.mimoInput.meetingAnalysisCancel({ sessionId: state.selectedId });
-    if (!res?.ok) throw new Error(res?.error?.message || "取消分析失败");
-    state.analysis = res.analysis;
+    const res = await window.mimoInput.meetingFileSummaryCancel({ sessionId: state.selectedId });
+    if (!res?.ok) throw new Error(res?.error?.message || "取消摘要失败");
+    state.summaryJob = res.summary || { status: "cancelled" };
     renderControls();
   }
 
   async function loadResult(tab, { expectedSessionId = null } = {}) {
     if (!state.selectedId || (expectedSessionId && expectedSessionId !== state.selectedId)) return;
-    state.resultTab = tab === "corrected" || tab === "summary" ? tab : "raw";
+    state.resultTab = tab === "summary" ? "summary" : "raw";
     for (const button of panel.querySelectorAll("[data-file-tab]")) {
       const active = button.dataset.fileTab === state.resultTab;
       button.classList.toggle("is-active", active);
@@ -561,35 +634,19 @@
           e.resultContent.hidden = blocks.length === 0;
           ui.appendTranscriptBlocks?.(e.resultContent, blocks);
         }
-      } else if (state.resultTab === "corrected") {
-        if (!state.correctedDoc) {
-          const res = await window.mimoInput.meetingAnalysisCorrected({ sessionId });
-          if (!accept(channels.result, token, sessionId) || state.selectedId !== sessionId) return;
-          state.correctedDoc = res?.ok ? res.corrected : null;
-        }
-        const blocks = ui.formatTranscriptBlocks?.(state.correctedDoc) || [];
-        if (e.resultEmpty) {
-          e.resultEmpty.hidden = blocks.length > 0;
-          if (!blocks.length) e.resultEmpty.textContent = "暂无校订文本。";
-        }
-        if (e.resultContent) {
-          e.resultContent.hidden = blocks.length === 0;
-          ui.appendTranscriptBlocks?.(e.resultContent, blocks);
-        }
       } else {
-        if (!state.summaryDoc) {
-          const res = await window.mimoInput.meetingAnalysisSummary({ sessionId });
-          if (!accept(channels.result, token, sessionId) || state.selectedId !== sessionId) return;
-          state.summaryDoc = res?.ok ? res.summary : null;
-        }
-        const sections = ui.flattenSummarySections?.(state.summaryDoc) || [];
+        if (!state.summaryDoc) await loadSummaryResults(sessionId);
+        if (!accept(channels.result, token, sessionId) || state.selectedId !== sessionId) return;
+        const summary = state.summaryDoc;
+        const empty = !summary || (!summary.markdown && ui.flattenSummarySections?.(summary).length === 0
+          && !(Array.isArray(summary.sections) && summary.sections.length));
         if (e.resultEmpty) {
-          e.resultEmpty.hidden = sections.length > 0;
-          if (!sections.length) e.resultEmpty.textContent = "暂无结构化总结。";
+          e.resultEmpty.hidden = !empty;
+          if (empty) e.resultEmpty.textContent = "暂无摘要。点击“生成摘要”创建。";
         }
         if (e.resultContent) {
-          e.resultContent.hidden = sections.length === 0;
-          ui.appendSummarySections?.(e.resultContent, sections);
+          e.resultContent.hidden = empty;
+          if (!empty) ui.renderSummaryDocument?.(e.resultContent, summary);
         }
       }
     } catch (error) {
@@ -598,59 +655,61 @@
     }
   }
 
-  async function loadAnalysisResults(sessionId) {
+  async function loadSummaryResults(sessionId) {
     if (!sessionId || sessionId !== state.selectedId) return;
-    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    async function readArtifact(api, field, label) {
-      let lastMessage = `${label}结果不可用`;
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        const res = await api({ sessionId });
-        if (res?.ok && res[field]) return res[field];
-        lastMessage = res?.error?.message || lastMessage;
-        if (attempt < 4) await wait(220 * (attempt + 1));
+    // Durable readback of the shared summary engine (including history sessions).
+    if (typeof window.mimoInput.meetingFileSummaryStatus === "function") {
+      const res = await window.mimoInput.meetingFileSummaryStatus({ sessionId });
+      if (res?.ok && res.summary) {
+        state.summaryJob = res.summary;
+        state.summaryPath = res.summary.summaryMarkdownPath || "";
+        if (res.summary.summary) {
+          state.summaryDoc = res.summary.summary;
+          return;
+        }
       }
-      const error = new Error(lastMessage);
-      error.code = field === "corrected" ? "analysis_corrected_missing" : "analysis_summary_missing";
-      throw error;
     }
-    const corrected = await readArtifact(
-      window.mimoInput.meetingAnalysisCorrected,
-      "corrected",
-      "校订"
-    );
-    const summary = await readArtifact(
-      window.mimoInput.meetingAnalysisSummary,
-      "summary",
-      "结构化总结"
-    );
-    if (state.selectedId !== sessionId) return;
-    state.correctedDoc = corrected;
-    state.summaryDoc = summary;
+    if (["running", "completed", "needs_retry", "failed", "cancelled"].includes(state.summaryJob?.status)
+      && !state.summaryJob?.legacy) return;
+    // Legacy histories stay read-only: old analysis summaries still render.
+    const legacy = await window.mimoInput.meetingAnalysisSummary?.({ sessionId });
+    if (legacy?.ok && legacy.summary) {
+      state.summaryDoc = legacy.summary;
+      state.summaryJob = { status: "completed", legacy: true };
+      state.summaryPath = "";
+    }
   }
 
   async function refreshLive() {
     if (!state.selectedId || document.body.classList.contains("file-mode") === false) return;
     const sessionId = state.selectedId;
     const token = channels.poll.next();
-    const [process, analysis] = await Promise.all([
+    const [process, job] = await Promise.all([
       window.mimoInput.meetingProcessStatus({ sessionId }),
-      window.mimoInput.meetingAnalysisStatus({ sessionId })
+      typeof window.mimoInput.meetingFileSummaryStatus === "function"
+        ? window.mimoInput.meetingFileSummaryStatus({ sessionId })
+        : Promise.resolve(null)
     ]);
     if (!accept(channels.poll, token, sessionId)) return;
     if (process?.ok) state.process = process.processing;
-    if (analysis?.ok) state.analysis = analysis.analysis;
+    if (job?.ok && job.summary) {
+      state.summaryJob = job.summary;
+      if (job.summary.summary) {
+        state.summaryDoc = job.summary.summary;
+        state.summaryPath = job.summary.summaryMarkdownPath || "";
+      }
+    }
     renderControls();
     if (state.process?.stage === "completed" && !state.rawDoc) {
       await loadResult("raw", { expectedSessionId: sessionId });
     }
-    if (state.analysis?.status === "completed" && state.resultTab !== "raw") {
+    if (state.summaryJob?.summary && state.resultTab !== "raw") {
       await loadResult(state.resultTab, { expectedSessionId: sessionId });
     }
-    if (state.analysis?.status === "completed" && (!state.correctedDoc || !state.summaryDoc)) {
-      await loadAnalysisResults(sessionId).catch((error) => setHint(error.message || "分析结果读取失败，请重试分析。"));
-    }
     const doneProcess = ["completed", "failed", "cancelled", "idle"].includes(state.process?.stage);
-    const doneAnalysis = ["completed", "failed", "cancelled", "none"].includes(state.analysis?.status);
+    const doneAnalysis = ["completed", "failed", "cancelled", "none", "idle", "needs_retry"].includes(
+      state.summaryJob?.status || "none"
+    );
     if (doneProcess && doneAnalysis) stopPolling();
   }
 
@@ -665,7 +724,7 @@
     stopPolling();
     if (!state.selectedId || !document.body.classList.contains("file-mode")) return;
     const processBusy = isRunningProcess(state.process?.stage);
-    const analysisBusy = isRunningAnalysis(state.analysis?.status);
+    const analysisBusy = isRunningAnalysis(state.summaryJob?.status);
     if (!processBusy && !analysisBusy) return;
     state.pollTimer = setInterval(() => refreshLive().catch(() => {}), 1200);
   }
@@ -673,11 +732,13 @@
   function copyCurrent() {
     let text = "";
     if (state.resultTab === "summary") {
-      const sections = ui.flattenSummarySections?.(state.summaryDoc) || [];
-      text = sections.map((section) => `${section.title}\n${section.lines.map((line) => `· ${line}`).join("\n")}`).join("\n\n");
+      text = ui.summaryToPlainText?.(state.summaryDoc) || "";
+      if (!text) {
+        const sections = ui.flattenSummarySections?.(state.summaryDoc) || [];
+        text = sections.map((section) => `${section.title}\n${section.lines.map((line) => `· ${line}`).join("\n")}`).join("\n\n");
+      }
     } else {
-      const doc = state.resultTab === "corrected" ? state.correctedDoc : state.rawDoc;
-      const blocks = ui.formatTranscriptBlocks?.(doc) || [];
+      const blocks = ui.formatTranscriptBlocks?.(state.rawDoc) || [];
       text = blocks.map((block) => block.text).filter(Boolean).join("\n\n");
     }
     if (text) window.mimoInput.copyText(text);
@@ -697,7 +758,7 @@
     setHint(`已导出 ${res.files?.join("、") || "文件结果"}。`);
   }
 
-  async function openWorkspace({ fromModeEvent = false } = {}) {
+  async function openWorkspace({ fromModeEvent = false, sessionId = null } = {}) {
     if (openPromise) return openPromise;
     openPromise = (async () => {
       if (!fromModeEvent) await window.mimoInput.openFileWorkspace?.();
@@ -705,6 +766,7 @@
       panel.hidden = false;
       await loadSettings();
       await refreshSessions();
+      if (sessionId && state.sessions.some(row => row.id === sessionId)) state.selectedId = sessionId;
       if (!state.selectedId && state.sessions.length) {
         state.selectedId = state.sessions[0].id;
       }
@@ -728,9 +790,14 @@
     $("fileProcessStartBtn")?.addEventListener("click", () => processStart().catch(() => {}));
     $("fileProcessRetryBtn")?.addEventListener("click", () => processStart({ retry: true }).catch(() => {}));
     $("fileProcessCancelBtn")?.addEventListener("click", () => processCancel().catch((error) => setHint(error.message)));
-    $("fileAnalysisStartBtn")?.addEventListener("click", () => analysisStart().catch(() => {}));
-    $("fileAnalysisRetryBtn")?.addEventListener("click", () => analysisStart({ retry: true }).catch(() => {}));
-    $("fileAnalysisCancelBtn")?.addEventListener("click", () => analysisCancel().catch((error) => setHint(error.message)));
+    $("fileAnalysisStartBtn")?.addEventListener("click", () => summaryStart().catch(() => {}));
+    $("fileAnalysisRetryBtn")?.addEventListener("click", () => summaryStart({ retry: true }).catch(() => {}));
+    $("fileAnalysisCancelBtn")?.addEventListener("click", () => summaryCancel().catch((error) => setHint(error.message)));
+    $("fileAnalysisMimoReview")?.addEventListener("change", renderControls);
+    $("fileSummaryModelSelect")?.addEventListener("change", () => {
+      state.summaryModel = String(els().summaryModelSelect?.value || "").trim();
+      renderControls();
+    });
     $("fileAsrProviderSelect")?.addEventListener("change", () => {
       const provider = els().providerSelect.value;
       const current = currentFileAsrModel();
@@ -762,7 +829,8 @@
     state,
     openWorkspace,
     stopPolling,
-    refreshSessions
+    refreshSessions,
+    chooseFile: importFile
   };
   bind();
 })();

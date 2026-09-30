@@ -1,5 +1,12 @@
 # Third-Party Notices
 
+## Lucide interface icons
+
+- Selected SVG icons are vendored under `src/renderer/icons`; no network request is needed at runtime.
+- Upstream: https://github.com/lucide-icons/lucide, snapshot `5a92b9ba262de5bf10e864219883267672c05db8`.
+- License: ISC, with the upstream Feather-derived portions under MIT. The complete upstream license is included in `src/renderer/icons/LICENSE` inside the application.
+- The application mark and file/meeting feature icons are original project assets, not Lucide icons.
+
 ## ffmpeg-static / FFmpeg binary
 
 - **npm package (build-time only):** [ffmpeg-static](https://www.npmjs.com/package/ffmpeg-static) **5.3.0** (listed under `devDependencies`; not shipped inside `app.asar`)

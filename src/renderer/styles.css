@@ -425,6 +425,25 @@ button {
   background: rgba(224, 237, 250, 0.98);
 }
 
+.file-entry-mark {
+  position: relative;
+  width: 12px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.file-entry-mark::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 2px;
+  width: 5px;
+  border-top: 1.5px solid currentColor;
+  box-shadow: 0 3px 0 currentColor;
+}
+
 .meeting-entry-mark {
   width: 9px;
   height: 9px;
@@ -816,6 +835,38 @@ footer {
   min-width: 0;
   padding: 8px 4px 20px;
   border-bottom: 1px solid var(--ovi-border);
+}
+
+.legacy-text-config {
+  display: none !important;
+}
+
+.text-supplier-group {
+  grid-column: 1 / -1;
+  width: min(100%, 760px);
+}
+
+.text-supplier-toolbar {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.text-supplier-toolbar .field {
+  flex: 1 1 220px;
+}
+
+.text-supplier-toolbar button {
+  min-height: 36px;
+}
+
+.text-model-picker {
+  width: 100%;
+}
+
+.text-model-picker .field {
+  min-width: 0;
 }
 
 .settings-tab-panel[data-settings-panel="asr"] .settings-group,
@@ -1709,6 +1760,176 @@ body.file-mode .file-panel {
   text-align: center;
 }
 
+/* —— Summary reading layout + review toggle (file transcription) —— */
+.file-summary-model-field {
+  flex: 0 1 200px;
+  min-width: 140px;
+  max-width: 220px;
+}
+
+.file-summary-model-field select {
+  width: 100%;
+  min-width: 0;
+}
+
+.file-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  color: var(--ovi-text);
+  font-size: 12px;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+
+.file-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--ovi-primary);
+}
+
+.summary-doc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  min-width: 0;
+}
+
+.summary-doc.has-mindmap {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.2fr);
+}
+
+.summary-doc-mindmap h3,
+.summary-doc-section h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #0f5c42;
+  font-weight: 700;
+}
+
+.summary-mindmap-tree,
+.summary-mindmap-tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 16px;
+  border-left: 1px solid rgba(26, 122, 92, 0.25);
+}
+
+.summary-mindmap-tree {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.summary-mindmap-tree li {
+  padding: 3px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.summary-doc-paragraph {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.summary-doc-items {
+  margin: 6px 0 10px;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.summary-doc-items li {
+  margin: 4px 0;
+  white-space: pre-wrap;
+}
+
+.summary-uncertain,
+.summary-evidence {
+  display: block;
+  color: var(--ovi-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* —— Collapsible setup sections (file transcription + live meeting) —— */
+.setup-details {
+  flex: 0 0 auto;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+
+/* Closed details content must stay fully out of layout; this Chromium reports
+   client rects for content-visibility-skipped children and would break hit tests. */
+.setup-details:not([open]) > :not(summary) {
+  display: none;
+}
+
+.setup-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 3px 2px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  color: var(--ovi-muted);
+  font-size: 12px;
+  font-weight: 650;
+  border-radius: 6px;
+  -webkit-app-region: no-drag;
+}
+
+.setup-summary::-webkit-details-marker {
+  display: none;
+}
+
+.setup-summary::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  margin-right: 2px;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 120ms ease;
+}
+
+.setup-details[open] > .setup-summary::before {
+  transform: rotate(90deg);
+}
+
+.setup-summary:hover {
+  color: var(--ovi-text);
+}
+
+.setup-summary:focus-visible {
+  outline: 2px solid var(--ovi-primary);
+  outline-offset: 2px;
+}
+
+.setup-summary-label {
+  flex: 0 0 auto;
+}
+
+.setup-summary-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--ovi-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 #meetingProcessModeHint {
   flex: 1 1 140px;
   min-width: 0;
@@ -2283,6 +2504,10 @@ body.settings-open .settings-tabs {
     min-height: 90px;
   }
 
+  .summary-doc.has-mindmap {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .meeting-main,
   .file-main {
     overflow-y: auto;
@@ -2290,7 +2515,8 @@ body.settings-open .settings-tabs {
 
   .meeting-results,
   .file-results {
-    flex: 0 0 max(180px, 44vh);
+    flex: 1 1 max(180px, 44vh);
+    min-height: 180px;
   }
 }
 
@@ -2329,6 +2555,19 @@ body.settings-open .settings-tabs {
 }
 
 @media (max-width: 520px) {
+  .text-supplier-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .text-supplier-toolbar .field {
+    grid-column: 1 / -1;
+  }
+
+  .text-supplier-toolbar button {
+    width: 100%;
+  }
+
   .model-select-control {
     grid-template-columns: 1fr;
   }

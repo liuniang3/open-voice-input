@@ -1,7 +1,7 @@
 {
   "name": "open-voice-input",
   "productName": "Open Voice Input",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "description": "Windows and macOS voice input assistant with pluggable ASR providers and optional LLM cleanup.",
   "main": "src/main.js",
   "scripts": {
@@ -77,6 +77,18 @@
       "!node_modules/ffmpeg-static/**"
     ],
     "extraResources": [
+      {
+        "from": "assets/mimo-icon.png",
+        "to": "assets/mimo-icon.png"
+      },
+      {
+        "from": "assets/mimo-trayTemplate.png",
+        "to": "assets/mimo-trayTemplate.png"
+      },
+      {
+        "from": "assets/mimo-trayTemplate@2x.png",
+        "to": "assets/mimo-trayTemplate@2x.png"
+      },
       {
         "from": "assets/mimo-tray.png",
         "to": "assets/mimo-tray.png"

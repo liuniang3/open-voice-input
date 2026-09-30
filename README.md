@@ -1,6 +1,6 @@
 # Open Voice Input
 
-The current development version supports Windows/macOS and a **live meeting** workflow: Alibaba `qwen-audio-3.0-asr-flash-streaming` by default, or `fun-asr-realtime`, with separate provisional and confirmed text. When Alibaba is unavailable, `mimo-v2.5-asr` provides non-realtime segmented transcription as a fallback. Choose microphone, system audio, or both; use a floating window and pause/resume while keeping full local audio. Transcription and Markdown autosave intervals are configured independently. After stopping, optionally review the complete audio with MiMo, reconcile using an independently configured LLM, and separately generate detailed notes with a mindmap. See [meeting behavior, outputs and recovery](docs/MEETING_REALTIME.md).
+The current development version supports Windows/macOS and a **live meeting** workflow: Alibaba `qwen-audio-3.0-asr-flash-streaming` by default, or `fun-asr-realtime`, with separate provisional and confirmed text. When Alibaba is unavailable, `mimo-v2.5-asr` provides non-realtime segmented transcription as a fallback. Choose microphone, system audio, or both; use a floating window and pause/resume while keeping full local audio. Transcription and Markdown autosave intervals are configured independently. After stopping, generate a mindmap and coherent notes, optionally giving the summary model an additional MiMo full-audio review as evidence. See [meeting behavior, outputs and recovery](docs/MEETING_REALTIME.md).
 
 macOS native capture uses AVAudioEngine for microphone audio and ScreenCaptureKit for system audio (macOS 13+). System-only capture neither opens the microphone nor requests microphone permission; screen/system-audio permission is still required. Accessibility permission applies to automatic paste. The frameless main header, short-dictation overlay, and floating meeting header expose native draggable regions compatible with macOS three-finger drag when enabled in System Settings. Apple Silicon and Intel build jobs are provided, but this update has no macOS hardware validation for capture, paste, or trackpad gestures. `npm run dist:mac` requires a Mac with Xcode Command Line Tools; Windows uses `npm run dist`.
 
@@ -12,11 +12,26 @@ Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 
 Release history: [CHANGELOG.md](CHANGELOG.md)
 
+## Home And First-Run Setup
+
+Normal launch, the local `.vbs` launcher and an idle tray double-click open Home. During recording, tray double-click brings the active recorder forward. Short dictation remains hotkey-driven; Home shows the shortcut, today/week usage, file and live-meeting entries, and recent file/meeting records. Settings stay available through the gear button, and each workspace can return Home.
+
+The three-step guide configures and tests ASR, optionally adds a text supplier and discovers/selects a cleanup model, then checks the microphone and hotkeys. Local microphone testing never uploads audio; provider connectivity tests run only on request. The guide can be skipped and reopened from Home or Settings. Existing configured users retain their credentials and are not forced through setup again.
+
+Usage starts accumulating after this upgrade and counts short-dictation results successfully written to the clipboard, including clipboard fallback when automatic paste fails. Repeated copy, send or retry of the same recording does not increment the count again. Files and meetings are excluded. Dates use the local timezone and Monday-start weeks; character counts include punctuation but exclude whitespace. `voice-usage.json` in the user-data directory stores only dates, counts, character totals and dedupe IDs, never transcripts, audio or credentials. These statistics are not uploaded. Guide completion is stored separately in `onboarding-state.json`.
+
+Home, Settings and setup share a light translucent shell, with redesigned app/file/meeting icons and a separate monochrome macOS tray template. The UI and services are shared across Windows/macOS. This iteration has Windows native and browser verification only; macOS permissions, recording and paste still require hardware checks.
+
 ## Current Release Highlights
 
-- Live meetings default to Alibaba Streaming or Fun-ASR realtime and can switch to segmented non-realtime `mimo-v2.5-asr` when Alibaba is unavailable. Optional MiMo full-audio review, LLM reconciliation, and separate summary/mindmap generation run only after recording stops.
+- Meetings enter a unified floating window automatically, with remembered normal bounds, a font slider and red/yellow/green status lights. Small windows show current realtime text, with restore and font/opacity controls only on pointer hover. Background opacity supports 0%; hovering temporarily restores the default 90% background without changing the saved preference.
+- File results, meeting transcripts and summaries have draggable reading-height controls. Ali streaming rotation receives new audio while the old interval finalizes instead of serially waiting at each ten-minute boundary.
+- Added Home with hotkey status, local today/week usage, recent records and skippable first-run setup; redesigned app and feature icons.
+- File and meeting summaries now share one flow, optionally using MiMo audio review as additional evidence. The reading view pairs a mindmap with coherent contextual paragraphs; setup can be collapsed and reading panes resized.
+- Text suppliers can be added independently with Chat Completions or Responses protocols, model discovery and custom model IDs; existing configurations remain compatible.
+- Live meetings default to Alibaba Streaming or Fun-ASR realtime and can switch to segmented non-realtime `mimo-v2.5-asr` when Alibaba is unavailable. Optional MiMo full-audio review and summary generation run only after recording stops.
 - Meeting navigation is unified under Live Meeting. Its searchable History browser reopens prior live sessions for MiMo review, reconciliation, or summary; browsing local history does not automatically call ASR.
-- Meeting capture supports microphone-only, dual-track and genuine system-only modes, with floating/compact views, optional always-on-top, pause/resume, full WAV archives, and independently configurable transcription and Markdown autosave intervals.
+- Meeting capture supports microphone-only, dual-track and genuine system-only modes, with a unified floating view, optional always-on-top, pause/resume, full WAV archives, and independently configurable transcription and Markdown autosave intervals.
 - The first stage is now a pluggable ASR layer, tuned most heavily for the dedicated `mimo-v2.5-asr` model and also supporting Qwen3-ASR and Fun-ASR.
 - Short-dictation Qwen preview now defaults to `qwen-audio-3.0-asr-flash-streaming`; Fun-ASR also provides WebSocket preview. MiMo uses periodic partial-audio preview, and a failed realtime stream falls back to non-realtime transcription of the complete recording.
 - `Stable` mode sends raw ASR text to MiMo, OpenAI, an OpenAI-compatible endpoint, or the experimental OpenCode Go provider to turn it into a clear, coherent paragraph while preserving the speaker's intent. `Fast` mode performs ASR only.
@@ -24,7 +39,7 @@ Release history: [CHANGELOG.md](CHANGELOG.md)
 - MiMo models share one MiMo connection, Qwen/Fun-ASR models share one Alibaba connection, GPT models share one OpenAI connection, and OpenCode Go has an isolated connection and model catalog. The OpenAI URL may be a custom gateway such as NowCoding and supports either Responses or Chat Completions.
 - API key fields include local show/hide and copy controls. Keys remain in `%APPDATA%\\open-voice-input\\settings.json` and are excluded from builds and Git.
 - Recordings are normalized to 16 kHz mono 16-bit PCM WAV. Long recordings are segmented according to the active ASR provider, transcribed and cached early, then joined in order when recording stops.
-- An independent file transcription workspace can import audio or video, select its ASR model, generate corrected text and a structured summary, and export Markdown, TXT, or Word.
+- An independent file transcription workspace can import audio or video, select its ASR model, optionally review audio with MiMo, generate a mindmap and coherent notes, and export Markdown, TXT, or Word.
 - Settings, meeting, and file workspaces provide custom minimize, maximize/restore, window dragging, and edge resizing controls.
 - Windows x64 installer and single-file portable builds are available, with GitHub Release automation and SHA-256 checksums.
 - Release builds check GitHub Releases and show download progress in-app without opening a browser. Windows and signed macOS builds restart into the installer; unsigned macOS builds open the verified ZIP for manual app replacement. Checks run after startup and every six hours by default and can be disabled in Settings.
@@ -45,13 +60,13 @@ For the second-stage rewrite step, a small chat model is usually enough. GPT-5.4
 - Tray menu for settings
 - Configurable microphone, two independent global hotkeys, shared vendor connections, and independent custom-model profiles
 - ASR providers: MiMo-V2.5-ASR, Qwen3-ASR, and Fun-ASR
-- Cleanup providers: MiMo, OpenAI-compatible, and experimental OpenCode Go chat cleanup
+- Cleanup providers: independently configured Chat Completions / Responses suppliers, with backward-compatible existing connections
 - `Fast` mode: ASR only, lower latency
 - `Stable` mode: ASR first, then context-aware LLM rewriting for clear expression
 - Clipboard paste into the previous focused app
 - Provider-aware long-recording segmentation with one final cleanup pass after all ASR segments are joined
 - Local validation and raw-transcript fallback for unsupported rewrites, prompt leaks, and provider failures
-- **Independent file transcription**: open it from the tray or main UI, import audio/video, choose an ASR model, run raw transcript → correction → structured summary, and export Markdown, TXT, or Word.
+- **Independent file transcription**: open it from the tray or Home, import audio/video, choose an ASR model, run raw transcript → optional MiMo audio review → mindmap and coherent notes, and export Markdown, TXT, or Word.
 - **Live meeting history**: search and reopen prior live sessions, including their transcript, full audio, review, reconciliation, and summary outputs. The legacy meeting workbench entry and speaker-diarization settings are currently unavailable.
 
 **Media import limits:** first audio track only; not all codecs/containers are verified; long real-world videos are not claimed tested. The Windows installer/portable build includes **one** FFmpeg binary (~80 MB extra). FFmpeg is **FFmpeg 6.1.1** (gyan.dev essentials GPL build) via build-time `ffmpeg-static@5.3.0` — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [docs/FFMPEG_MEDIA_IMPORT.md](docs/FFMPEG_MEDIA_IMPORT.md).
@@ -77,7 +92,7 @@ The recommended option is to download a Windows build from GitHub Releases:
 - `Open Voice Input-Setup-<version>-x64.exe`: installer with Start Menu and desktop shortcuts.
 - `Open Voice Input-Portable-<version>-x64.exe`: single-file portable build that can be copied to another Windows PC.
 
-Release builds do not require Node.js, npm, or a separate Electron installation. If no usable API key is available on first launch, the settings window opens automatically.
+Release builds do not require Node.js, npm, or a separate Electron installation. Normal launch opens Home. First-time users without usable ASR configuration see an optional setup guide for ASR, text cleanup, microphone and hotkeys.
 
 Install version `0.4.0` or newer once from Releases to enable in-app updates. Because unsigned macOS builds through `0.4.3` do not yet have the local-package fallback, Mac users must manually install `0.4.4` once; later updates can be downloaded and opened in-app. Afterwards use `Settings > About & Updates` or the tray `Check for Updates` command. API settings, recordings and transcripts are never sent during update checks.
 

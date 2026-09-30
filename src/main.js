@@ -23,7 +23,8 @@ const { Readable } = require("node:stream");
 const { createRuntimeLogWriter } = require("./runtime-log");
 const { createVoicePipeline } = require("./providers/voice-pipeline");
 const { testProviderConnection } = require("./providers/provider-connection-test");
-const { listProviderModels } = require("./providers/provider-model-catalog");
+const { listProviderModels, refreshTextSupplierCatalog } = require("./providers/provider-model-catalog");
+const { ensureTextSuppliers, sanitizeSupplierId } = require("./settings/text-suppliers");
 const { createQwenRealtimeSession, isQwenAudioStreamingModel } = require("./providers/asr/qwen-realtime-session");
 const { createFunAsrRealtimeSession } = require("./providers/asr/fun-asr-realtime-session");
 const {
@@ -47,6 +48,10 @@ const { resolveMeetingAnalysisCredentials } = require("./meeting/analysis/creden
 const { ensureConnectionProfiles } = require("./settings/connection-profiles");
 const { resolveProviderConnection } = require("./settings/provider-connections");
 const { validateHotkey, normalizeAccelerator } = require("./hotkeys/validate-hotkey");
+const { createUsageStats } = require("./usage-stats");
+const { createOnboardingState } = require("./onboarding-state");
+const { normalizePresentation, minimalBounds, visibleBounds, createMeetingWindowStore } = require("./settings/meeting-window");
+const { createTransparentPreview } = require("./meeting/transparent-preview");
 
 let meetingImportJobs = null;
 function getMeetingImportJobs() {
@@ -150,7 +155,7 @@ async function startMeetingImportFromDialog({
 }
 
 const RESOURCE_ROOT = app.isPackaged ? process.resourcesPath : path.join(__dirname, "..");
-const APP_ICON_PATH = path.join(RESOURCE_ROOT, "assets", "mimo-icon.ico");
+const APP_ICON_PATH = path.join(RESOURCE_ROOT, "assets", os.platform() === "win32" ? "mimo-icon.ico" : "mimo-icon.png");
 const TRAY_ICON_PATH = path.join(RESOURCE_ROOT, "assets", "mimo-tray.png");
 const HOTKEY_HELPER_PATH = app.isPackaged
   ? path.join(process.resourcesPath, "win-hotkey-helper.ps1")
@@ -160,6 +165,7 @@ const STABLE_USER_DATA_DIR = "open-voice-input";
 const FALLBACK_TRAY_ICON_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 const WINDOW_SIZES = {
+  home: { width: 960, height: 760 },
   recording: { width: 320, height: 132 },
   recordingMax: { width: 520, height: 420 },
   compact: { width: 220, height: 74 },
@@ -169,7 +175,7 @@ const WINDOW_SIZES = {
   file: { width: 1180, height: 760 }
 };
 
-const RESIZABLE_WINDOW_MODES = new Set(["settings", "result", "meeting", "file"]);
+const RESIZABLE_WINDOW_MODES = new Set(["settings", "result", "meeting", "file", "home"]);
 
 const DEFAULT_SETTINGS = {
   hotkey: "CommandOrControl+Alt+M",
@@ -229,6 +235,10 @@ const DEFAULT_SETTINGS = {
   openCodeGoModelCatalog: [],
   openCodeGoModelCapabilities: {},
   openCodeGoModelCatalogUpdatedAt: "",
+  // Stage 3A: named text-model suppliers (isolated URL/key/apiStyle per entry).
+  textSuppliers: [],
+  textSupplierCatalogs: {},
+  textModelSelection: null,
   // Meeting-scoped model choices and non-provider storage settings.
   meetingMicrophoneDeviceId: "",
   meetingSystemDeviceId: "",
@@ -281,6 +291,50 @@ let failedHotkeys = [];
 let hotkeyHelperProcess = null;
 let shortcutCaptureSuspended = false;
 let windowMode = "compact";
+let usageStats;
+let onboardingState;
+
+function getUsageStats() {
+  return usageStats ||= createUsageStats({ directory: app.getPath("userData") });
+}
+
+function getOnboardingState() {
+  return onboardingState ||= createOnboardingState({ directory: app.getPath("userData") });
+}
+
+async function recordVoiceUsage(text, metadata) {
+  if (!metadata?.requestId) return;
+  try {
+    const result = await getUsageStats().record({ text, requestId: metadata.requestId });
+    if (result.recorded) mainWindow?.webContents.send("home-usage-updated");
+  } catch { logEvent("usage: persistence unavailable"); }
+}
+
+async function homeOverview() {
+  const [usage, onboarding, sessions, live] = await Promise.all([
+    getUsageStats().get().catch(() => null),
+    getOnboardingState().read({ existingUser: Boolean(resolveApiKey()) }),
+    getMeetingCapture().store.listSessions().catch(() => []),
+    getRealtimeMeeting().listHistory().catch(() => ({ recoverableSessions: [] }))
+  ]);
+  const pair = settings.textModelSelections?.cleanup;
+  const supplier = pair && settings.textSuppliers?.find(entry => entry.id === pair.supplierId);
+  const profile = settings.cleanerProfiles?.[settings.cleanerModel] || {};
+  const family = settings.cleanerProviderFamily || profile.providerFamily || profile.provider || settings.cleanerProvider;
+  const connection = resolveProviderConnection(settings, { modelId: settings.cleanerModel,
+    provider: family === "mimo" ? "mimo" : family === "opencode-go" ? "opencode-go" : "openai" });
+  const cleanerConfigured = pair ? Boolean(supplier?.apiKey)
+    : Boolean(profile.apiKey || connection?.apiKey || (family === "mimo" && process.env.MIMO_API_KEY));
+  const recent = [
+    ...sessions.filter(row => row.source === "import").map(row => ({ id: row.id, kind: "file", title: row.title || "未命名文件", date: row.updatedAt || row.createdAt })),
+    ...(live.recoverableSessions || []).map(row => ({ id: row.sessionId, kind: "meeting", title: row.title || "未命名会议", date: row.startedAtMs }))
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 6)
+    .map(row => ({ ...row, title: String(row.title).replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 120) }));
+  return { ok: true, platform: os.platform(), hotkey: settings.hotkey,
+    hotkeyRegistered: registeredHotkeys.includes(settings.hotkey), usage, onboarding,
+    asrConfigured: Boolean(resolveApiKey()), cleanerConfigured,
+    transcriptionMode: settings.transcriptionMode, meetingRecording: Boolean(realtimeMeeting?.status().recording), recent };
+}
 let targetWindowHandle = "";
 let recordingKeyFallbacksActive = false;
 let voicePipeline;
@@ -297,8 +351,14 @@ let liveStopPromise = null;
 let liveRecoveryPromise = null;
 let liveActionPromise = null;
 let liveControlPromise = null;
-let liveWindowFlags = { floating: false, compact: false, alwaysOnTop: false };
+let liveWindowFlags = { floating: false, alwaysOnTop: false };
 let liveWindowRestore = null;
+let livePresentation = { fontSize: 14, opacity: 0.9, normalBounds: null };
+let liveWindowStore = null;
+let liveWindowSaveTimer;
+let liveWindowCandidate = null;
+let applyingLiveGeometry = false;
+let liveTransparentPreview = null;
 let captureOwner = null;
 let legacySessionId = null;
 let legacyCapturePending = false;
@@ -490,7 +550,10 @@ function liveDto(value = {}) {
       sections: value.summary.sections.slice(0, 1000)
         .filter(section => section && typeof section === "object" && !Array.isArray(section) && typeof section.heading === "string")
         .map(section => ({ heading: section.heading,
-          items: Array.isArray(section.items) ? section.items.slice(0, 1000).map(liveClaimDto).filter(Boolean) : [] }))
+          items: Array.isArray(section.items) ? section.items.slice(0, 1000).map(liveClaimDto).filter(Boolean) : [],
+          ...(Array.isArray(section.paragraphs) ? {
+            paragraphs: section.paragraphs.slice(0, 1000).map(liveClaimDto).filter(Boolean)
+          } : {}) }))
     } : {})
   } : null;
   dto.recoverableSessions = Array.isArray(value.recoverableSessions) ? value.recoverableSessions.map((item) =>
@@ -498,7 +561,7 @@ function liveDto(value = {}) {
       "sessionId", "title", "status", "startedAtMs", "durationMs", "modelId",
       "hasTranscript", "hasCorrection", "hasSummary"
     ])).filter(([, field]) => ["string", "number", "boolean"].includes(typeof field)))) : [];
-  dto.window = { ...liveWindowFlags };
+  dto.window = liveWindowSnapshot();
   dto.error = value.error ? liveIpcError(value.error).error : null;
   const remember = (file) => {
     if (typeof file === "string" && path.isAbsolute(file) && /\.(md|wav)$/i.test(file)) {
@@ -522,6 +585,7 @@ function publishLiveUpdate(value) {
     captureOwner = null;
   }
   if (mainWindow && !mainWindow.isDestroyed()) sendWhenLoaded(mainWindow, "meeting:live:update", dto);
+  syncLivePreview(dto);
 }
 
 function getRealtimeMeeting() {
@@ -597,7 +661,12 @@ function startLiveMeeting(payload = {}) {
     }
     await requireCapturePermissions(input.captureMode);
     if (meetingQuitCleanupStarted) throw liveError("app_quitting");
-    return await getRealtimeMeeting().start(input);
+    const result = await getRealtimeMeeting().start(input);
+    if (result.recording && windowMode === "meeting") {
+      try { setLiveWindow({ floating: true }); }
+      catch { logEvent("meeting-live: automatic floating window unavailable"); }
+    }
+    return result;
   })().catch((error) => {
     if (!realtimeMeeting?.status().recording && !realtimeMeeting?.status().paused) captureOwner = null;
     throw error;
@@ -736,10 +805,10 @@ async function loadSettings() {
     const raw = await fs.readFile(settingsPath(), "utf8");
     const saved = JSON.parse(raw);
     if (!saved.meetingQwenModel && saved.meetingQwenApiKey) saved.meetingQwenModel = "qwen3-asr-flash";
-    settings = ensureConnectionProfiles({ ...DEFAULT_SETTINGS, ...saved });
+    settings = ensureTextSuppliers(ensureConnectionProfiles({ ...DEFAULT_SETTINGS, ...saved }));
     settings.restoreClipboard = false;
   } catch {
-    settings = ensureConnectionProfiles({ ...DEFAULT_SETTINGS });
+    settings = ensureTextSuppliers(ensureConnectionProfiles({ ...DEFAULT_SETTINGS }));
   }
 }
 
@@ -772,8 +841,8 @@ async function migrateLegacyUserData() {
 }
 
 async function saveSettings(nextSettings) {
-  const next = ensureConnectionProfiles({ ...settings, ...nextSettings,
-    meetingRealtimeDestination: settings.meetingRealtimeDestination });
+  const next = ensureTextSuppliers(ensureConnectionProfiles({ ...settings, ...nextSettings,
+    meetingRealtimeDestination: settings.meetingRealtimeDestination }));
   const shortCheck = validateHotkey(next.hotkey, { otherHotkeys: [next.meetingHotkey] });
   if (!shortCheck.ok) throw new Error(`短语音快捷键：${shortCheck.message}`);
   const meetingCheck = validateHotkey(next.meetingHotkey, { otherHotkeys: [next.hotkey] });
@@ -852,8 +921,17 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+  liveTransparentPreview = createTransparentPreview({ BrowserWindow, ipcMain, screen, mainWindow,
+    onPresentation: setLiveWindow, onBounds: bounds => {
+      if (!mainWindow || mainWindow.isDestroyed() || !liveWindowFlags.floating) return;
+      applyingLiveGeometry = true;
+      try { mainWindow.setBounds(bounds, false); } finally { applyingLiveGeometry = false; }
+      observeLiveGeometry();
+    } });
   mainWindow.on("maximize", () => mainWindow.webContents.send("window-maximized", true));
   mainWindow.on("unmaximize", () => mainWindow.webContents.send("window-maximized", false));
+  mainWindow.on("resize", observeLiveGeometry);
+  mainWindow.on("move", observeLiveGeometry);
   mainWindow.on("blur", () => {
     mainWindow.webContents.send("window-blur");
   });
@@ -863,7 +941,7 @@ function createWindow() {
       mainWindow.hide();
     }
   });
-  mainWindow.on("closed", () => { mainWindow = null; });
+  mainWindow.on("closed", () => { liveTransparentPreview?.dispose(); liveTransparentPreview = null; mainWindow = null; });
 }
 
 function isAppLocalUrl(value) {
@@ -888,14 +966,14 @@ function configurePermissions() {
       && (requestingOrigin === "file://" || isAppLocalUrl(requestingOrigin))
       && (!details.embeddingOrigin || details.embeddingOrigin === "file://" || isAppLocalUrl(details.embeddingOrigin))
       && details.mediaType !== "video" && !meetingQuitCleanupStarted
-      && (!captureOwner || captureOwner === "short");
+      && (!captureOwner || captureOwner === "short" || captureOwner === "setup");
   });
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details = {}) => {
     const allowed = permission === "media" && isAppSender(webContents, details.requestingUrl)
       && details.isMainFrame !== false && !details.mediaTypes?.includes("video")
-      && !meetingQuitCleanupStarted && (!captureOwner || captureOwner === "short");
+      && !meetingQuitCleanupStarted && (!captureOwner || captureOwner === "short" || captureOwner === "setup");
     if (!allowed) return callback(false);
-    captureOwner = "short";
+    captureOwner ||= "short";
     requireCapturePermissions("microphone").then(() => callback(true)).catch(() => {
       if (captureOwner === "short") captureOwner = null;
       callback(false);
@@ -932,16 +1010,28 @@ function showAndStart() {
 
 function showWindowOnly() {
   if (!mainWindow) return;
+  if (liveTransparentPreview?.reveal()) return;
   if (captureOwner || realtimeMeeting?.status().recording) {
     mainWindow.show();
     mainWindow.focus();
     return;
   }
-  setWindowMode("compact");
-  prepareWindowForDisplay(mainWindow, "compact");
+  showHome();
+}
+
+function showHome() {
+  if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
+  if (captureOwner === "short" || windowMode === "recording") {
+    mainWindow.show(); focusMainWindow();
+    return { ok: false, error: { message: "请先结束当前语音输入。" } };
+  }
+  targetWindowHandle = "";
+  setWindowMode("home");
+  prepareWindowForDisplay(mainWindow, "home");
   mainWindow.show();
-  enforceWindowGeometry(mainWindow, "compact");
-  mainWindow.focus();
+  focusWindow(mainWindow, "home", { topmost: false });
+  sendWhenLoaded(mainWindow, "open-home");
+  return { ok: true };
 }
 
 function showSettings(tabName = "") {
@@ -973,6 +1063,7 @@ function showResultWindow() {
 
 function showMeetingWorkspace() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (liveTransparentPreview?.reveal()) return;
   targetWindowHandle = "";
   logEvent("meeting: show workspace");
   // Prefer a single open-meeting event; window-mode is still emitted for
@@ -1011,9 +1102,12 @@ function setWindowMode(mode) {
 }
 
 function restoreLiveWindow() {
+  rememberLiveGeometry(true);
   const saved = liveWindowRestore;
   liveWindowRestore = null;
-  liveWindowFlags = { floating: false, compact: false, alwaysOnTop: false };
+  liveWindowFlags = { floating: false, alwaysOnTop: false };
+  syncLivePreview();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBackgroundColor(os.platform() === "win32" ? "#eef4f1" : "#00000000");
   if (!saved || !mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMaximized()) mainWindow.unmaximize();
   mainWindow.setMinimumSize(...saved.minimumSize);
@@ -1023,37 +1117,92 @@ function restoreLiveWindow() {
   if (saved.maximized) mainWindow.maximize();
 }
 
+function liveWindowSnapshot() {
+  const bounds = mainWindow && !mainWindow.isDestroyed() ? mainWindow.getBounds() : null;
+  return { ...liveWindowFlags, fontSize: livePresentation.fontSize, opacity: livePresentation.opacity,
+    minimal: Boolean(liveWindowFlags.floating && bounds && minimalBounds(bounds)) };
+}
+
+function syncLivePreview(value = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  liveTransparentPreview?.update({ ...value, ...liveWindowSnapshot(), bounds: mainWindow.getBounds() });
+}
+
+function persistLivePresentation() {
+  clearTimeout(liveWindowSaveTimer);
+  liveWindowSaveTimer = setTimeout(() => {
+    if (liveWindowCandidate) livePresentation.normalBounds = liveWindowCandidate;
+    liveWindowCandidate = null;
+    liveWindowStore?.write(livePresentation).catch(() => logEvent("meeting-live: window preferences unavailable"));
+  }, 400);
+}
+
+function rememberLiveGeometry(immediate = false) {
+  if (applyingLiveGeometry || !liveWindowFlags.floating || !mainWindow || mainWindow.isDestroyed() || mainWindow.isMaximized()) return;
+  const bounds = mainWindow.getBounds();
+  // Save settled normal sizes, not intermediate sizes while dragging through
+  // the small-window threshold. Restore returns to the pre-shrink geometry.
+  if (!minimalBounds(bounds)) {
+    if (immediate) { livePresentation.normalBounds = { ...bounds }; liveWindowCandidate = null; }
+    else liveWindowCandidate = { ...bounds };
+  } else liveWindowCandidate = null;
+  persistLivePresentation();
+}
+
+function observeLiveGeometry() {
+  if (windowMode !== "meeting" || !liveWindowFlags.floating || applyingLiveGeometry) return;
+  rememberLiveGeometry();
+  syncLivePreview();
+  mainWindow.webContents.send("meeting:live:window-changed", liveWindowSnapshot());
+}
+
+function floatingBounds() {
+  const bounds = livePresentation.normalBounds || { ...mainWindow.getBounds(), width: 640, height: 560 };
+  const area = screen?.getDisplayMatching?.(bounds)?.workArea;
+  return visibleBounds(bounds, area);
+}
+
 function setLiveWindow(payload = {}) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw liveError("invalid_payload");
-  const input = pickMeetingFields(payload, ["floating", "compact", "alwaysOnTop"]);
-  if (Object.values(input).some(value => typeof value !== "boolean")) throw liveError("invalid_payload");
+  const input = pickMeetingFields(payload, ["floating", "alwaysOnTop", "restoreNormal", "fontSize", "opacity"]);
+  if (["floating", "alwaysOnTop", "restoreNormal"].some(key => Object.hasOwn(input, key) && typeof input[key] !== "boolean")
+    || ["fontSize", "opacity"].some(key => Object.hasOwn(input, key) && !Number.isFinite(input[key]))) throw liveError("invalid_payload");
   // Delayed renderer actions must not resize the settings or short-recording view.
   if (!mainWindow || mainWindow.isDestroyed() || windowMode !== "meeting") throw liveError("window_mode_unavailable");
-  const next = { ...liveWindowFlags, ...input };
-  if (input.compact === true && input.floating !== false) next.floating = true;
-  if (!next.floating) next.compact = false;
+  rememberLiveGeometry(true);
+  const next = { ...liveWindowFlags, ...pickMeetingFields(input, ["floating", "alwaysOnTop"]) };
   if (input.floating === true && !liveWindowFlags.floating && input.alwaysOnTop === undefined) next.alwaysOnTop = true;
   if (input.floating === false && input.alwaysOnTop === undefined) next.alwaysOnTop = false;
-  if (next.floating || next.compact || next.alwaysOnTop) {
-    if (!liveWindowRestore) {
-      liveWindowRestore = {
-        bounds: mainWindow.getNormalBounds(), minimumSize: mainWindow.getMinimumSize(),
-        resizable: mainWindow.isResizable(), alwaysOnTop: mainWindow.isAlwaysOnTop(), maximized: mainWindow.isMaximized()
-      };
-    }
-    const layoutChanged = next.floating !== liveWindowFlags.floating || next.compact !== liveWindowFlags.compact;
-    liveWindowFlags = next;
-    if (layoutChanged && mainWindow.isMaximized()) mainWindow.unmaximize();
-    mainWindow.setMinimumSize(...(next.floating ? next.compact ? [360, 240] : [520, 420] : liveWindowRestore.minimumSize));
-    mainWindow.setResizable(true);
-    if (layoutChanged) {
-      const size = next.floating ? next.compact ? { width: 420, height: 300 } : { width: 640, height: 560 } : liveWindowRestore.bounds;
-      mainWindow.setBounds({ ...mainWindow.getBounds(), ...size }, false);
-      if (!next.floating && liveWindowRestore.maximized) mainWindow.maximize();
-    }
-    setWindowAlwaysOnTop(mainWindow, next.alwaysOnTop);
-  } else restoreLiveWindow();
-  const window = { ...liveWindowFlags, bounds: mainWindow.getBounds(), minimumSize: mainWindow.getMinimumSize(),
+  if (Object.hasOwn(input, "fontSize") || Object.hasOwn(input, "opacity")) {
+    livePresentation = normalizePresentation({ ...livePresentation, ...pickMeetingFields(input, ["fontSize", "opacity"]) });
+    persistLivePresentation();
+  }
+  applyingLiveGeometry = true;
+  try {
+    if (next.floating || next.alwaysOnTop) {
+      if (!liveWindowRestore) {
+        liveWindowRestore = {
+          bounds: mainWindow.getNormalBounds(), minimumSize: mainWindow.getMinimumSize(),
+          resizable: mainWindow.isResizable(), alwaysOnTop: mainWindow.isAlwaysOnTop(), maximized: mainWindow.isMaximized()
+        };
+      }
+      const layoutChanged = next.floating !== liveWindowFlags.floating || input.restoreNormal === true;
+      liveWindowFlags = next;
+      if (layoutChanged && mainWindow.isMaximized()) mainWindow.unmaximize();
+      mainWindow.setMinimumSize(...(next.floating ? [240, 100] : liveWindowRestore.minimumSize));
+      mainWindow.setResizable(true);
+      if (layoutChanged) {
+        const bounds = next.floating ? floatingBounds() : liveWindowRestore.bounds;
+        mainWindow.setBounds(bounds, false);
+        if (next.floating && !livePresentation.normalBounds && !minimalBounds(bounds)) livePresentation.normalBounds = { ...bounds };
+        if (!next.floating && liveWindowRestore.maximized) mainWindow.maximize();
+      }
+      mainWindow.setBackgroundColor(next.floating || os.platform() !== "win32" ? "#00000000" : "#eef4f1");
+      setWindowAlwaysOnTop(mainWindow, next.alwaysOnTop);
+    } else restoreLiveWindow();
+  } finally { applyingLiveGeometry = false; }
+  syncLivePreview();
+  const window = { ...liveWindowSnapshot(), bounds: mainWindow.getBounds(), minimumSize: mainWindow.getMinimumSize(),
     resizable: mainWindow.isResizable(), alwaysOnTop: mainWindow.isAlwaysOnTop() };
   publishLiveUpdate(getRealtimeMeeting().status());
   return { ...window, window };
@@ -1071,9 +1220,12 @@ function enforceWindowGeometry(win, mode = windowMode, resetSize = false) {
   const isResult = mode === "result";
   const isMeeting = mode === "meeting";
   const isFile = mode === "file";
+  const isHome = mode === "home";
   const resizable = RESIZABLE_WINDOW_MODES.has(mode);
   if (isMeeting || isFile) {
     win.setMinimumSize(720, 520);
+  } else if (isHome) {
+    win.setMinimumSize(640, 520);
   } else if (isSettings) {
     win.setMinimumSize(640, 480);
   } else if (isResult) {
@@ -1087,7 +1239,7 @@ function enforceWindowGeometry(win, mode = windowMode, resetSize = false) {
     win.setContentSize(size.width, size.height, false);
     win.setBounds({ ...win.getBounds(), width: size.width, height: size.height }, false);
   }
-  setWindowAlwaysOnTop(win, !isSettings && !isMeeting && !isFile);
+  setWindowAlwaysOnTop(win, !isSettings && !isMeeting && !isFile && !isHome);
   logEvent("window: geometry", `${mode} ${JSON.stringify(win.getBounds())}`);
 }
 
@@ -1114,7 +1266,7 @@ function prepareWindowForDisplay(win = mainWindow, mode = windowMode) {
   }
   enforceWindowGeometry(win, mode);
   win.setFocusable(true);
-  setWindowAlwaysOnTop(win, mode === "meeting" ? liveWindowFlags.alwaysOnTop : !["settings", "file"].includes(mode));
+  setWindowAlwaysOnTop(win, mode === "meeting" ? liveWindowFlags.alwaysOnTop : !["settings", "file", "home"].includes(mode));
   if (!win.isVisible() && !(win === mainWindow && mode === "meeting" && liveWindowRestore)) win.center();
   win.moveTop();
 }
@@ -1600,11 +1752,16 @@ function createTray() {
   if (image.isEmpty()) {
     image = nativeImage.createFromDataURL(FALLBACK_TRAY_ICON_DATA_URL);
   }
-  if (os.platform() === "darwin") image = image.resize({ width: 18, height: 18 });
+  if (os.platform() === "darwin") {
+    const template = nativeImage.createFromPath(path.join(RESOURCE_ROOT, "assets", "mimo-trayTemplate.png"));
+    if (!template.isEmpty()) image = template;
+    image = image.resize({ width: 18, height: 18 });
+    image.setTemplateImage(true);
+  }
   tray = new Tray(image);
   tray.setToolTip(APP_DISPLAY_NAME);
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "显示", click: showWindowOnly },
+    { label: "主页", click: showWindowOnly },
     { label: "设置", click: showSettings },
     { label: "检查更新", click: showUpdateSettings },
     { label: "文件转写", click: showFileTranscriptionWorkspace },
@@ -1615,7 +1772,7 @@ function createTray() {
     { type: "separator" },
     { label: "退出", click: () => app.quit() }
   ]));
-  tray.on("double-click", showSettings);
+  tray.on("double-click", showWindowOnly);
   logEvent("tray: created");
 }
 
@@ -1847,6 +2004,38 @@ ipcMain.handle("window:is-maximized", async (event) => {
   return { ok: true, maximized: Boolean(win && !win.isDestroyed() && win.isMaximized()) };
 });
 ipcMain.handle("window:settings", async () => showSettings());
+ipcMain.handle("window:home", async () => showHome());
+ipcMain.handle("home:overview", async (event) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };
+  return homeOverview();
+});
+ipcMain.handle("onboarding:finish", async (event, payload = {}) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };
+  await getOnboardingState().finish(payload.skipped === true ? "skipped" : "completed");
+  return { ok: true };
+});
+ipcMain.handle("onboarding:asr-test", async (event) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };
+  try {
+    const snapshot = structuredClone(settings);
+    snapshot.transcriptionMode = "fast";
+    const started = Date.now();
+    await createVoicePipeline({ getSettings: () => snapshot }).testConnection();
+    return { ok: true, latencyMs: Date.now() - started };
+  } catch (error) { return sanitizeIpcError(error); }
+});
+ipcMain.handle("onboarding:microphone-probe", async (event, active) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url) || typeof active !== "boolean") return { ok: false };
+  if (!active) {
+    if (captureOwner === "setup") captureOwner = null;
+    return { ok: true };
+  }
+  if (meetingQuitCleanupStarted || windowMode !== "home" || captureOwner || realtimeMeeting?.status().recording) {
+    return { ok: false, error: { message: "请先结束当前录制，再测试麦克风。" } };
+  }
+  captureOwner = "setup";
+  return { ok: true };
+});
   ipcMain.handle("window:result", async () => showResultWindow());
   ipcMain.handle("window:meeting", async () => showMeetingWorkspace());
   ipcMain.handle("window:file", async () => showFileTranscriptionWorkspace());
@@ -1881,7 +2070,9 @@ ipcMain.handle("provider:test-connection", async (event, payload = {}) => {
   try {
     if (!isAppSender(event.sender, event.senderFrame?.url)) throw new Error("untrusted_sender");
     const provider = typeof payload?.provider === "string" ? payload.provider.trim() : "";
-    return await testProviderConnection({ settings, provider });
+    const supplierId = typeof payload?.supplierId === "string" ? payload.supplierId.trim() : "";
+    const modelId = typeof payload?.modelId === "string" ? payload.modelId.trim() : "";
+    return await testProviderConnection({ settings, provider, supplierId, modelId });
   } catch (error) {
     return sanitizeIpcError(error);
   }
@@ -1890,13 +2081,33 @@ ipcMain.handle("provider:list-models", async (event, payload = {}) => {
   try {
     if (!isAppSender(event.sender, event.senderFrame?.url)) throw new Error("untrusted_sender");
     const provider = typeof payload?.provider === "string" ? payload.provider.trim() : "";
+    const supplierId = typeof payload?.supplierId === "string" ? payload.supplierId.trim() : "";
+    if (supplierId) {
+      // Named supplier refresh: settings only change after a successful fetch so
+      // a failed refresh keeps the previous cached catalog.
+      const id = sanitizeSupplierId(supplierId);
+      if (!id) throw new Error("supplier_invalid");
+      const refreshed = await refreshTextSupplierCatalog({ settings, supplierId: id });
+      settings = await saveSettings({ textSupplierCatalogs: refreshed.settings.textSupplierCatalogs });
+      return refreshed.result;
+    }
     return await listProviderModels({ settings, provider });
   } catch (error) {
     return sanitizeIpcError(error);
   }
 });
-ipcMain.handle("input:inject", async (_event, text) => injectText(text));
-ipcMain.handle("clipboard:write-text", async (_event, text) => clipboard.writeText(String(text || "")));
+ipcMain.handle("input:inject", async (event, text, metadata) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };
+  const result = await injectText(String(text || ""));
+  await recordVoiceUsage(String(text || ""), metadata);
+  return result;
+});
+ipcMain.handle("clipboard:write-text", async (event, text, metadata) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };
+  clipboard.writeText(String(text || ""));
+  await recordVoiceUsage(String(text || ""), metadata);
+  return { ok: true };
+});
 ipcMain.handle("recording:keys:clear", async () => {
   unregisterRecordingKeyFallbacks();
   if (captureOwner === "short" && !shortStartPending) captureOwner = null;
@@ -1977,8 +2188,8 @@ for (const action of ["retry", "cleanup", "summarize"]) {
     if (captureOwner || liveStartPromise || liveStopPromise || liveRecoveryPromise || liveActionPromise || liveControlPromise) throw liveError("capture_busy");
     const current = getRealtimeMeeting().status();
     if (livePostprocessBusy(current) || current.recording || current.paused || current.status === "stopping") throw liveError("live_busy");
-    const input = pickMeetingFields(payload, action === "cleanup" ? ["sessionId", "modelId", "useMimoReview", "reviewModelId"]
-      : action === "summarize" ? ["sessionId", "modelId"] : ["sessionId"]);
+    const input = pickMeetingFields(payload, action === "cleanup" || action === "summarize"
+      ? ["sessionId", "modelId", "supplierId", "useMimoReview", "reviewModelId"] : ["sessionId"]);
     for (const [key, value] of Object.entries(input)) {
       if (key === "useMimoReview") {
         if (typeof value !== "boolean") throw liveError("invalid_payload");
@@ -2407,6 +2618,134 @@ ipcMain.handle("meeting:transcript:get", async (_event, payload) => {
   }
 });
 
+// Stage 2B — file Generate Summary on the realtime postprocess engine.
+// Legacy meeting:analysis:* handlers below remain for history read compatibility.
+const fileSummaryJobs = new Map();
+const fileSummaryStarts = new Map();
+
+function fileSummaryError(code) {
+  return Object.assign(new Error(code), { code });
+}
+
+function fileSummaryPayload(payload) {
+  const input = pickMeetingFields(payload, ["modelId", "supplierId", "useMimoReview", "reviewModelId", "retryFailed"]);
+  if (input.useMimoReview != null && typeof input.useMimoReview !== "boolean") throw fileSummaryError("invalid_payload");
+  if (input.retryFailed != null && typeof input.retryFailed !== "boolean") throw fileSummaryError("invalid_payload");
+  for (const key of ["modelId", "supplierId", "reviewModelId"]) {
+    if (input[key] != null && (typeof input[key] !== "string" || input[key].length > 4096)) throw fileSummaryError("invalid_payload");
+  }
+  const useMimoReview = input.useMimoReview === true;
+  const reviewModelId = String(input.reviewModelId || "mimo-v2.5-asr");
+  if (useMimoReview && !/^mimo-.*asr/i.test(reviewModelId)) throw fileSummaryError("file_summary_model_unsupported");
+  const modelId = String(input.modelId || settings.meetingAnalysisModel || settings.cleanerModel || "gpt-5.4-mini");
+  return { modelId, supplierId: String(input.supplierId || ""), reviewModelId, useMimoReview,
+    retryFailed: input.retryFailed !== false };
+}
+
+function buildFileSummaryService(sessionId, sessionDir, { modelId, reviewModelId, supplierId }) {
+  const { createFileSummaryService } = require("./meeting/processing/file-summary");
+  const { meetingTextProfile, profileFor, languageModel, transcriber } = require("./meeting/realtime/providers");
+  const { readMixed } = require("./meeting/realtime/audio");
+  const snapshot = structuredClone(settings);
+  // Credentials resolve lazily and independently: the MiMo review family never
+  // shares the summary model profile, and neither is read when unused.
+  // Same routing as live meeting summaries: a persisted supplier+model pair
+  // (or an explicit pair in the payload) wins; missing suppliers fail cleanly.
+  const summaryProfile = meetingTextProfile(snapshot, { slot: "summary", supplierId, modelId });
+  return createFileSummaryService({
+    sessionDir,
+    sessionId,
+    modelId: summaryProfile.modelId || modelId,
+    reviewModelId,
+    readMixedFn: readMixed,
+    review: (call) => transcriber(profileFor(snapshot, reviewModelId))(call),
+    llm: (call) => languageModel(summaryProfile)(call)
+  });
+}
+
+async function startFileSummary(sessionId, payload) {
+  const options = fileSummaryPayload(payload);
+  if (fileSummaryStarts.has(sessionId)) return fileSummaryStarts.get(sessionId);
+  const start = (async () => {
+    const existing = fileSummaryJobs.get(sessionId);
+    // Finished jobs retain readable status but never block regeneration.
+    if (existing?.running) return existing.service.status();
+    const current = await getMeetingCapture().store.readSession(sessionId);
+    if (!current?.session || !current.sessionDir) throw fileSummaryError("session_not_found");
+    const service = buildFileSummaryService(sessionId, current.sessionDir, options);
+    const job = { service, running: true, ...options };
+    fileSummaryJobs.set(sessionId, job);
+    job.promise = service.summarize({ useMimoReview: options.useMimoReview, retryFailed: options.retryFailed })
+      .catch(() => { /* sanitized failure already recorded on the job status */ })
+      .finally(() => {
+        if (fileSummaryJobs.get(sessionId) === job) job.running = false;
+      });
+    return service.status();
+  })();
+  fileSummaryStarts.set(sessionId, start);
+  try { return await start; }
+  finally { if (fileSummaryStarts.get(sessionId) === start) fileSummaryStarts.delete(sessionId); }
+}
+
+async function fileSummaryStatus(sessionId) {
+  const job = fileSummaryJobs.get(sessionId);
+  if (job) {
+    const dto = await job.service.status();
+    // status() performs history file reads; a newer start may replace the
+    // entry meanwhile — always answer from the current job.
+    const current = fileSummaryJobs.get(sessionId);
+    if (current && current !== job) return current.service.status();
+    return dto;
+  }
+  const current = await getMeetingCapture().store.readSession(sessionId);
+  if (!current?.session || !current.sessionDir) throw fileSummaryError("session_not_found");
+  const { createFileSummaryService } = require("./meeting/processing/file-summary");
+  // Credential-free probe for history readback of completed summaries.
+  const probe = createFileSummaryService({
+    sessionDir: current.sessionDir,
+    sessionId,
+    modelId: "history-read",
+    llm: async () => { throw fileSummaryError("invalid_operation"); }
+  });
+  return probe.status();
+}
+
+async function fileSummaryStartHandler(payload) {
+  const sessionId = String(payload?.sessionId || "");
+  if (!sessionId || sessionId.length > 256) return { ok: false, error: { code: "invalid_session_id", message: "sessionId required" } };
+  try {
+    return { ok: true, summary: await startFileSummary(sessionId, payload) };
+  } catch (error) {
+    return meetingIpcError(error);
+  }
+}
+ipcMain.handle("meeting:file-summary:start", async (_event, payload) => fileSummaryStartHandler(payload));
+ipcMain.handle("meeting:file-summary:retry", async (_event, payload) => fileSummaryStartHandler(payload));
+ipcMain.handle("meeting:file-summary:status", async (_event, payload) => {
+  try {
+    const sessionId = String(payload?.sessionId || "");
+    if (!sessionId || sessionId.length > 256) return { ok: false, error: { code: "invalid_session_id", message: "sessionId required" } };
+    return { ok: true, summary: await fileSummaryStatus(sessionId) };
+  } catch (error) {
+    return meetingIpcError(error);
+  }
+});
+ipcMain.handle("meeting:file-summary:cancel", async (_event, payload) => {
+  try {
+    const sessionId = String(payload?.sessionId || "");
+    if (!sessionId || sessionId.length > 256) return { ok: false, error: { code: "invalid_session_id", message: "sessionId required" } };
+    const job = fileSummaryJobs.get(sessionId);
+    if (job) {
+      job.service.cancel();
+      // Let the in-flight operation observe the abort before answering status.
+      await job.promise;
+    }
+    return { ok: true, summary: await fileSummaryStatus(sessionId) };
+  } catch (error) {
+    return meetingIpcError(error);
+  }
+});
+
 // Stage 3A — analysis (correct + structured summary)
 ipcMain.handle("meeting:analysis:start", async (_event, payload) => {
   try {
@@ -2622,7 +2961,25 @@ ipcMain.handle("file:export:save", async (_event, payload) => {
     const analyzer = getMeetingAnalyzer();
     const transcript = await processor.getRawTranscript(sessionId).catch(() => null);
     const corrected = await analyzer.getCorrectedTranscript(sessionId).catch(() => null);
-    const summary = await analyzer.getSummary(sessionId).catch(() => null);
+    // Prefer the validated shared postprocess summary; legacy stage3a artifacts
+    // stay readable as a fallback for old histories.
+    let summary = null;
+    const { readLatestSummaryResult } = require("./meeting/processing/file-summary");
+    const shared = await readLatestSummaryResult(current.sessionDir, sessionId).catch(() => null);
+    if (shared?.result) {
+      summary = {
+        title: shared.result.title || "",
+        markdown: shared.result.markdown || "",
+        mindmap: shared.result.mindmap || null,
+        sections: Array.isArray(shared.result.sections) ? shared.result.sections : [],
+        incomplete: shared.result.incomplete === true,
+        uncertain: shared.result.uncertain === true,
+        schema: shared.result.schema || null,
+        source: shared.result.source || null,
+        useMimoReview: shared.result.useMimoReview === true
+      };
+    }
+    if (!summary) summary = await analyzer.getSummary(sessionId).catch(() => null);
     const speakerMap = await meetingSpeakerMap.readSpeakerMap(current.sessionDir, sessionId);
     const report = await meetingSessionExport.writeExportFiles({
       outPath: picked.filePath,
@@ -2854,6 +3211,8 @@ app.whenReady().then(async () => {
   logEvent("app: ready");
   attachMeetingPlaybackProtocolHandler();
   await loadSettings();
+  liveWindowStore = createMeetingWindowStore(app.getPath("userData"));
+  livePresentation = await liveWindowStore.read();
   voicePipeline = createVoicePipeline({ getSettings: () => settings, logEvent });
   logEvent("settings: loaded", JSON.stringify({ hotkey: settings.hotkey, microphoneDeviceId: settings.microphoneDeviceId, transcriptionMode: settings.transcriptionMode }));
   configurePermissions();
@@ -2870,10 +3229,8 @@ app.whenReady().then(async () => {
   setWindowMode("compact");
   if (process.argv.includes("--settings")) {
     showSettings();
-  } else if (resolveApiKey()) {
-    mainWindow.hide();
   } else {
-    showSettings();
+    showHome();
   }
   logEvent("app: initialized");
   configureUpdateSchedule();
@@ -2886,6 +3243,9 @@ function cleanupHotkeysAndShortcuts() {
 }
 
 async function shutdownMeetingCaptureBounded(timeoutMs = MEETING_QUIT_TIMEOUT_MS) {
+  rememberLiveGeometry(true);
+  clearTimeout(liveWindowSaveTimer);
+  await liveWindowStore?.write(livePresentation).catch(() => logEvent("meeting-live: window preferences unavailable"));
   // Never race durable live audio/Markdown writes against a quit timeout.
   if (liveRecoveryPromise) await liveRecoveryPromise;
   if (liveStartPromise) await liveStartPromise.catch(() => {});
@@ -2967,7 +3327,7 @@ app.on("will-quit", () => {
 });
 
 app.on("render-process-gone", (_event, webContents, details) => {
-  if (webContents === mainWindow?.webContents && captureOwner === "short") {
+  if (webContents === mainWindow?.webContents && ["short", "setup"].includes(captureOwner)) {
     captureOwner = null;
     stopRealtimeAsr();
     unregisterRecordingKeyFallbacks();

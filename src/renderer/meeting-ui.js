@@ -740,6 +740,185 @@ function appendSummarySections(container, sections) {
   }
 }
 
+/**
+ * Shared summary reading layout: a left mindmap pane plus a right prose pane of
+ * coherent paragraphs with optional discrete action items. Old summaries that
+ * only carry bullet items, Markdown, or the legacy stage3a flat fields still
+ * render. Only safe text nodes are created; model text is never marked up.
+ */
+function renderSummaryDocument(container, summary, doc) {
+  if (!container) return;
+  const d = doc || (typeof document !== "undefined" ? document : null);
+  if (!d) return;
+  container.replaceChildren();
+  const create = (tag, className, text) => {
+    const node = d.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = String(text);
+    return node;
+  };
+  const annotate = (parent, claim) => {
+    if (!claim || typeof claim !== "object") return;
+    if (claim.uncertain === true) parent.appendChild(create("small", "summary-uncertain", "待确认"));
+    const provenance = Array.isArray(claim.provenance) ? claim.provenance.slice(0, 8) : [];
+    for (const item of provenance) {
+      const quote = item && typeof item.quote === "string" ? item.quote : "";
+      if (quote) parent.appendChild(create("small", "summary-evidence", `来源：${quote}`));
+    }
+  };
+  const claimText = (claim) => {
+    const text = String(claim && typeof claim.text === "string" ? claim.text : "").trim();
+    return text ? `${text}${claim.uncertain === true ? "（待确认）" : ""}` : "";
+  };
+  if (!summary || typeof summary !== "object") {
+    container.appendChild(create("p", "meeting-empty", "暂无摘要"));
+    return;
+  }
+  const root = create("div", "summary-doc");
+  const mindmapData = summary.mindmap && typeof summary.mindmap === "object" ? summary.mindmap : null;
+  const sections = Array.isArray(summary.sections) ? summary.sections.filter(section =>
+    section && typeof section.heading === "string"
+    && ((Array.isArray(section.paragraphs) && section.paragraphs.some(item => item && typeof item.text === "string"))
+      || (Array.isArray(section.items) && section.items.some(item => item && typeof item.text === "string")))
+  ) : [];
+  if (mindmapData) {
+    root.classList.add("has-mindmap");
+    const pane = create("aside", "summary-doc-mindmap");
+    pane.appendChild(create("h3", null, "脉络"));
+    let budget = 500;
+    const walk = (parent, node, depth) => {
+      if (!node || typeof node !== "object" || depth > 12 || budget <= 0) return;
+      const list = create("ul", depth === 0 ? "summary-mindmap-tree" : null);
+      parent.appendChild(list);
+      const nodes = Array.isArray(node) ? node : [node];
+      for (const item of nodes) {
+        if (budget-- <= 0) break;
+        const li = create("li");
+        list.appendChild(li);
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          li.appendChild(create("span", null, item.title || item.label || item.text || item.topic || "议题"));
+          annotate(li, item);
+          walk(li, item.children || item.branches || item.points, depth + 1);
+        } else li.appendChild(create("span", null, String(item)));
+      }
+    };
+    walk(pane, mindmapData, 0);
+    root.appendChild(pane);
+  }
+  const prose = create("div", "summary-doc-prose");
+  if (sections.length) {
+    let budget = 2000;
+    for (const section of sections.slice(0, 100)) {
+      if (budget <= 0) break;
+      const block = create("section", "summary-doc-section");
+      block.appendChild(create("h3", null, section.heading));
+      for (const paragraph of (section.paragraphs || [])) {
+        if (budget-- <= 0) break;
+        if (!paragraph || typeof paragraph.text !== "string") continue;
+        const proseParagraph = create("p", "summary-doc-paragraph", paragraph.text);
+        annotate(proseParagraph, paragraph);
+        block.appendChild(proseParagraph);
+      }
+      const items = (section.items || []).filter(item => item && typeof item.text === "string");
+      if (items.length) {
+        const list = create("ul", "summary-doc-items");
+        for (const item of items) {
+          if (budget-- <= 0) break;
+          const li = create("li", null, item.text);
+          annotate(li, item);
+          list.appendChild(li);
+        }
+        block.appendChild(list);
+      }
+      prose.appendChild(block);
+    }
+    root.appendChild(prose);
+    container.appendChild(root);
+    return;
+  }
+  const flat = flattenSummarySections(summary);
+  if (flat.length) {
+    for (const section of flat.slice(0, 100)) {
+      const block = create("section", "summary-doc-section");
+      block.appendChild(create("h3", null, section.title));
+      const list = create("ul", "summary-doc-items");
+      for (const line of section.lines.slice(0, 200)) list.appendChild(create("li", null, line));
+      block.appendChild(list);
+      prose.appendChild(block);
+    }
+    root.appendChild(prose);
+    container.appendChild(root);
+    return;
+  }
+  let buffer = [];
+  let list = null;
+  const flush = () => {
+    if (buffer.length) prose.appendChild(create("p", "summary-doc-paragraph", buffer.join("\n")));
+    buffer = [];
+  };
+  for (const line of String(summary.markdown || "").split(/\r?\n/)) {
+    const heading = /^#{1,6}\s+(.+)$/.exec(line);
+    const bullet = /^\s*(?:[-*+] |\d+\. )(.+)$/.exec(line);
+    if (heading || bullet || !line.trim()) flush();
+    if (heading) {
+      list = null;
+      prose.appendChild(create("h3", null, heading[1]));
+    } else if (bullet) {
+      if (!list) { list = create("ul", "summary-doc-items"); prose.appendChild(list); }
+      list.appendChild(create("li", null, bullet[1]));
+    } else {
+      list = null;
+      if (line.trim()) buffer.push(line);
+    }
+  }
+  flush();
+  root.appendChild(prose);
+  container.appendChild(root);
+}
+
+function summaryToPlainText(summary) {
+  if (!summary || typeof summary !== "object") return "";
+  const lines = [];
+  const claimText = (claim) => {
+    const text = String(claim && typeof claim.text === "string" ? claim.text : "").trim();
+    return text ? `${text}${claim.uncertain === true ? "（待确认）" : ""}` : "";
+  };
+  if (summary.title) lines.push(String(summary.title));
+  const mindmapLines = [];
+  (function walk(node, depth) {
+    if (!node || typeof node !== "object" || depth > 12) return;
+    const label = claimText(node);
+    if (label) mindmapLines.push(`${"  ".repeat(depth)}- ${label}`);
+    for (const child of (Array.isArray(node.children) ? node.children : [])) walk(child, depth + 1);
+  })(summary.mindmap, 0);
+  if (mindmapLines.length) lines.push("", "脉络", ...mindmapLines);
+  const sections = Array.isArray(summary.sections) ? summary.sections : [];
+  const proseSections = sections.filter(section =>
+    section && typeof section.heading === "string"
+    && ((section.paragraphs || []).some(item => item && typeof item.text === "string")
+      || (section.items || []).some(item => item && typeof item.text === "string")));
+  if (proseSections.length) {
+    for (const section of proseSections) {
+      lines.push("", `## ${section.heading}`);
+      for (const paragraph of (section.paragraphs || [])) {
+        const text = claimText(paragraph);
+        if (text) lines.push("", text);
+      }
+      for (const item of (section.items || [])) {
+        const text = claimText(item);
+        if (text) lines.push(`- ${text}`);
+      }
+    }
+    return lines.join("\n").trim();
+  }
+  const flat = flattenSummarySections(summary);
+  if (flat.length) {
+    for (const section of flat) lines.push("", section.title, ...section.lines.map(line => `- ${line}`));
+    return lines.join("\n").trim();
+  }
+  return String(summary.markdown || "").trim();
+}
+
 function filterSessions(sessions, query) {
   const q = String(query || "").trim().toLowerCase();
   const list = Array.isArray(sessions) ? sessions : [];
@@ -966,6 +1145,8 @@ const api = {
   shouldAcceptRemoteUpdate,
   computeControlFlags,
   flattenSummarySections,
+  renderSummaryDocument,
+  summaryToPlainText,
   formatTranscriptBlocks,
   fillTextElement,
   appendTranscriptBlocks,

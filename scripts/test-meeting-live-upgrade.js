@@ -20,20 +20,22 @@ test("streaming preset, meeting profiles and independent cleaner/reviewer IDs ca
   await f.ui.open();
   assert.equal(f.$("liveModel").value, model);
   assert(!f.$("liveModel").children.some(o => o.value === "qwen-audio-3.0-asr-flash-streaming-test"));
-  assert.equal(f.$("liveCleanerModel").value, "analysis-a");
-  assert(f.$("liveCleanerModel").children.some(o => o.value === "cleaner-second"));
+  assert.equal(f.$("liveCleanerModel").value, "__legacy__::analysis-a");
+  assert(!f.$("liveCleanerModel").children.some(o => o.value === "__legacy__::cleaner-second"), "dictation profiles do not become meeting models");
   assert.equal(f.$("liveReviewModel").value, "mimo-v2.5-asr");
   await f.click("liveStart");
   assert.equal(f.last("meetingLiveStart").args[0].captureMode, "system");
   assert.equal(f.last("meetingLiveStart").args[0].modelId, model);
   assert(!JSON.stringify(f.calls).includes("not-a-real-secret"));
   f.push(completed());
+  assert.equal(f.$("liveCleanup"), undefined);
+  assert.ok(!f.$("liveUseMimoReview").checked, "MiMo review defaults off");
   f.$("liveUseMimoReview").checked = true;
   f.$("liveUseMimoReview").dispatch("change");
   assert.equal(f.$("liveReviewModelField").hidden, false);
-  await f.click("liveCleanup");
-  assert.deepEqual(f.last("meetingLiveCleanup").args[0], { sessionId: "s1", modelId: "analysis-a", useMimoReview: true, reviewModelId: "mimo-v2.5-asr" });
-  assert.equal(f.count("meetingLiveSummarize"), 0);
+  await f.click("liveSummarize");
+  assert.deepEqual(f.last("meetingLiveSummarize").args[0], { sessionId: "s1", supplierId: "__legacy__", modelId: "analysis-a", useMimoReview: true, reviewModelId: "mimo-v2.5-asr" });
+  assert.equal(f.count("meetingLiveCleanup"), 0);
 });
 
 test("MiMo batch fallback stays selectable; meeting analysis takes priority over dictation cleanup", async () => {
@@ -49,7 +51,7 @@ test("MiMo batch fallback stays selectable; meeting analysis takes priority over
     ["qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "mimo-v2.5-asr", "__custom__"]);
   assert.equal(f.$("liveTranscriptionIntervalField").hidden, false);
   assert.deepEqual(f.$("liveReviewModel").children.map(o => o.value), ["mimo-v2.5-asr", "mimo-file-asr", "mimo-custom-asr"]);
-  assert.equal(f.$("liveCleanerModel").value, "meeting-analysis");
+  assert.equal(f.$("liveCleanerModel").value, "__legacy__::meeting-analysis");
 });
 
 test("draft replacement never mutates confirmed text; pause freezes clock and can stop", async () => {
@@ -91,11 +93,10 @@ test("window IPC is confirmed, reversible and independent from capture and stale
   await tick();
   stop.resolve({ ok: true, ...completed() });
   await tick();
-  assert.equal(f.$("liveStatus").textContent, "已完成");
-  assert.equal(f.$("liveAlwaysOnTop").checked, true);
+  assert.equal(f.$("liveStatus").title, "已完成");
+  assert.equal(f.$("liveAlwaysOnTop").attributes["aria-pressed"], "true");
   f.handlers.meetingLiveWindow = flags => ({ ok: true, ...flags });
-  await f.click("liveCompact");
-  assert.equal(f.$("meetingPanel").classList.contains("live-compact"), true);
+  assert.equal(f.$("liveCompact"), undefined, "there is no separate compact-window control");
   await f.click("liveDetail");
   assert.equal(f.$("meetingPanel").classList.contains("live-floating"), false);
   assert.equal(f.count("meetingLiveStart"), 0);
@@ -119,28 +120,31 @@ test("summary is explicit, waits for drain/save and renders structured untrusted
   f.push(completed());
   f.$("liveCleanerModel").value = "analysis-b";
   await f.click("liveSummarize");
-  assert.deepEqual(f.last("meetingLiveSummarize").args[0], { sessionId: "s1", modelId: "analysis-b" });
+  assert.deepEqual(f.last("meetingLiveSummarize").args[0],
+    { sessionId: "s1", supplierId: "__legacy__", modelId: "analysis-b", useMimoReview: false, reviewModelId: "mimo-v2.5-asr" });
   assert.equal(f.count("meetingLiveCleanup"), 0);
-  assert.equal(f.$("liveCleanup").disabled, true);
+  assert.equal(f.$("liveCleanup"), undefined, "no separate cleanup action");
   f.push(completed({ postprocessStatus: "running", postprocessProgress: { kind: "summary", completed: 2, total: 4, failed: 1 } }));
   assert.match(f.$("livePostprocessStatus").textContent, /生成摘要 2 \/ 4.*失败 1/);
   assert.equal(f.$("liveCleanerModel").disabled, true);
   const malicious = '<img src=x onerror="window.pwned=true">';
-  const outputs = { reviewedMarkdownPath: "C:/mock/reviewed.md", summaryMarkdownPath: "C:/mock/summary.md" };
-  f.push(completed({ ...outputs, reviewedText: malicious, postprocessStatus: "completed",
+  const outputs = { summaryMarkdownPath: "C:/mock/summary.md" };
+  f.push(completed({ ...outputs, postprocessStatus: "completed",
     summary: { title: "Summary title", mindmap: { text: malicious, provenance: [], children: [{ text: "Decisions", uncertain: true, provenance: [{ quote: malicious }], children: [{ text: "Ship" }] }] },
-      sections: [{ heading: "Decisions", items: [{ text: malicious, uncertain: true, provenance: [{ sourceId: "internal-id", quote: "An exact quote" }] }] }], markdown: "# export-only duplicate\n" + malicious }
+      sections: [{ heading: "Decisions", paragraphs: [{ text: malicious, uncertain: true, provenance: [{ sourceId: "internal-id", quote: "An exact quote" }] }],
+        items: [{ text: "Ship it", uncertain: false, provenance: [{ sourceId: "internal-id", quote: "An exact quote" }] }] }], markdown: "# export-only duplicate\\n" + malicious }
   }));
   assert.equal(f.$("liveSummarySection").hidden, false);
   assert.match(allText(f.$("liveMindmap")), /Decisions[\s\S]*Ship/);
-  assert.match(allText(f.$("liveMindmap")), /待确认/);
+  assert.match(allText(f.$("liveMindmap")), /\u5f85\u786e\u8ba4/);
   assert(!allText(f.$("liveMindmap")).includes("[]"));
   assert(allText(f.$("liveSummaryDetail")).includes(malicious));
   assert(!/export-only|Summary title|sourceId|internal-id|provenance/.test(allText(f.$("liveSummaryDetail"))));
-  assert.match(allText(f.$("liveSummaryDetail")), /Decisions[\s\S]*待确认[\s\S]*An exact quote/);
+  assert.match(allText(f.$("liveSummaryDetail")), /Decisions[\s\S]*\u5f85\u786e\u8ba4[\s\S]*An exact quote/);
+  // Prose paragraphs lead each section; discrete action items stay as list rows.
   assert.equal(f.$("liveSummaryDetail").children[0].tagName, "H4");
-  assert.equal(f.$("liveSummaryDetail").children[1].tagName, "UL");
-  assert.equal(f.$("liveReviewed").textContent, malicious);
+  assert.equal(f.$("liveSummaryDetail").children[1].tagName, "P");
+  assert.equal(f.$("liveSummaryDetail").children[2].tagName, "UL");
   function safeTags(node) {
     assert(["DIV", "UL", "LI", "SPAN", "H4", "STRONG", "P", "SMALL"].includes(node.tagName), node.tagName);
     node.children.forEach(safeTags);
@@ -149,11 +153,8 @@ test("summary is explicit, waits for drain/save and renders structured untrusted
   safeTags(f.$("liveSummaryDetail"));
   await f.click("liveOpenSummary");
   assert.equal(f.last("meetingLiveOpenPath").args[0].path, outputs.summaryMarkdownPath);
-  await f.click("liveOpenReviewed");
-  assert.equal(f.last("meetingLiveOpenPath").args[0].path, outputs.reviewedMarkdownPath);
   f.push(recording({ sessionId: "s2" }));
   assert.equal(f.$("liveSummarySection").hidden, true);
-  assert.equal(f.$("liveReviewedSection").hidden, true);
   assert.equal(f.$("liveOpenSummary").disabled, true);
 });
 
@@ -201,17 +202,22 @@ async function verifyUpgradeBrowser(page, directory) {
   await page.locator("#liveFloat").click();
   assert.equal(await page.locator("#meetingPanel.live-floating").count(), 1);
   await page.setViewportSize({ width: 480, height: 360 });
-  await page.locator("#liveCompact").click();
   await page.locator("#livePause").click();
   assert.equal(await page.locator("#livePause").textContent(), "继续录制");
-  await page.locator("#liveAlwaysOnTop").check();
-  assert.equal(await page.locator("#liveAlwaysOnTop").isChecked(), true);
-  for (const size of [{ width: 480, height: 360 }, { width: 420, height: 300 }, { width: 360, height: 240 }]) {
+  await page.locator("#liveAlwaysOnTop").click();
+  assert.equal(await page.locator("#liveAlwaysOnTop").getAttribute("aria-pressed"), "true");
+  for (const size of [{ width: 480, height: 360 }, { width: 420, height: 300 }]) {
     await page.setViewportSize(size);
     const stop = await page.locator("#liveStop").boundingBox();
     assert(stop.y >= 0 && stop.y + stop.height <= size.height, "stop visible in compact window");
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   }
+  await page.setViewportSize({ width: 360, height: 240 });
+  await page.waitForFunction(() => document.getElementById("meetingPanel").classList.contains("live-minimal"));
+  assert.equal(await page.locator("#liveRestoreNormal").isVisible(), true);
+  assert.equal(await page.locator("#liveStop").isVisible(), false);
+  await page.setViewportSize({ width: 480, height: 360 });
+  await page.waitForFunction(() => !document.getElementById("meetingPanel").classList.contains("live-minimal"));
   await page.screenshot({ path: path.join(directory, "meeting-live-compact.png") });
   await page.locator("#liveDetail").click();
   assert.equal(await page.locator("#meetingPanel.live-floating").count(), 0);
@@ -241,36 +247,27 @@ async function verifyUpgradeBrowser(page, directory) {
   assert.equal(await page.evaluate(() => Boolean(window.pwned)), false);
   await page.evaluate(() => window.MeetingLiveUi.close());
   await page.evaluate(() => window.mockOpenSettings());
-  await page.locator('[data-settings-tab="meeting"]').click();
-  const settingsModels = await page.locator("#meetingQwenModelPresetSelect option").evaluateAll(options => options.map(option => option.value));
-  assert.deepEqual(settingsModels, ["qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "fun-asr-realtime-2026-09-18", "__custom__"]);
-  assert(!settingsModels.includes("qwen3-asr-flash"));
-  assert.equal(await page.locator("#meetingQwenModelPresetSelect").inputValue(), "qwen-audio-3.0-asr-flash-streaming");
+  await page.evaluate(async () => {
+    await window.mimoInput.saveSettings({ cleanerModel: "mimo-v2.5", meetingAnalysisModel: "", meetingAnalysisProfiles: {} });
+    window.mockOpenSettings();
+  });
+  await page.locator("#saveSettingsBtn").click();
+  await page.waitForFunction(() => document.getElementById("statusTitle").textContent === "设置已保存");
   await page.locator('[data-settings-tab="connections"]').click();
   assert.equal(await page.locator("#aliyunApiKeyInput").inputValue(), "test-only-live-key");
-  await page.locator("#openaiBaseUrlInput").fill("https://nowcoding.example/v1");
-  await page.locator("#openaiApiStyleSelect").selectOption("chat-completions");
+  await page.locator("#textSupplierAdd").click();
+  await page.locator("#textSupplierId").fill("vendor-test");
+  await page.locator("#textSupplierBaseUrl").fill("https://example.invalid/v1");
+  await page.locator("#textSupplierApiKey").fill("test-placeholder");
+  await page.locator("#textSupplierSave").click();
+  await page.waitForFunction(() => document.getElementById("textSupplierStatus").textContent.includes("已保存"));
   await page.locator('[data-settings-tab="meeting"]').click();
-  await page.locator("#meetingQwenModelPresetSelect").selectOption("fun-asr-realtime-2026-09-18");
-  assert.equal(await page.locator("#meetingQwenApiKeyInput").count(), 0);
-  await page.locator("#meetingQwenModelPresetSelect").selectOption("__custom__");
-  await page.locator("#meetingQwenModelInput").fill("fun-asr-realtime-latest");
-  await page.locator('[data-settings-tab="connections"]').click();
-  assert.equal(await page.locator("#aliyunApiKeyInput").inputValue(), "test-only-live-key");
-  assert.equal(await page.locator("#openaiBaseUrlInput").inputValue(), "https://nowcoding.example/v1");
-  assert.equal(await page.locator("#openaiApiStyleSelect").inputValue(), "chat-completions");
-  await page.locator('[data-settings-tab="meeting"]').click();
-  await page.locator("#meetingAnalysisModelPresetSelect").selectOption("grok-4.5");
-  assert.equal(await page.locator("#meetingAnalysisProviderSelect").inputValue(), "custom");
-  assert.equal(await page.locator("#meetingAnalysisCustomConnectionFields").isVisible(), true);
-  await page.locator("#meetingAnalysisBaseUrlInput").fill("https://grok.example/v1");
-  await page.locator("#meetingAnalysisApiKeyInput").fill("custom-grok-key");
-  await page.locator("#meetingAnalysisModelPresetSelect").selectOption("gpt-5.5");
-  assert.equal(await page.locator("#meetingAnalysisProviderSelect").inputValue(), "openai-compatible");
-  assert.equal(await page.locator("#meetingAnalysisCustomConnectionFields").isHidden(), true);
-  await page.locator("#meetingAnalysisModelPresetSelect").selectOption("grok-4.5");
-  assert.equal(await page.locator("#meetingAnalysisBaseUrlInput").inputValue(), "https://grok.example/v1");
-  assert.equal(await page.locator("#meetingAnalysisApiKeyInput").inputValue(), "custom-grok-key");
+  await page.locator("#summarySupplierSelect").selectOption("vendor-test");
+  await page.locator("#summaryCustomModelInput").fill("model-test");
+  await page.locator("#saveSettingsBtn").click();
+  await page.waitForFunction(() => document.getElementById("statusTitle").textContent === "设置已保存");
+  assert.equal(await page.locator("#summarySupplierSelect").inputValue(), "vendor-test");
+  assert.equal(await page.locator("#summaryModelSelect").inputValue(), "model-test");
   await page.screenshot({ path: path.join(directory, "meeting-settings-live-models.png") });
 }
 

@@ -42,8 +42,12 @@ function modelReply(input, { punctuate = false } = {}) {
   }
   const item = input.items[0];
   const claim = { text: item.text, evidence: [evidence(item)], uncertain: Boolean(item.uncertain) };
+  const paragraph = {
+    text: `The recorded discussion covered ${item.text.replace(/\s+/g, " ").trim()} as connected prose for the record.`,
+    evidence: [evidence(item)], uncertain: Boolean(item.uncertain)
+  };
   return JSON.stringify({ title: "Integration meeting", mindmap: { ...claim, children: [] },
-    sections: [{ heading: "Details", items: [claim] }] });
+    sections: [{ heading: "Details", paragraphs: [paragraph], items: [claim] }] });
 }
 
 async function fixture({ configure, serviceOptions = {}, getSettings } = {}) {
@@ -449,7 +453,7 @@ async function main() {
     } finally { await x.dispose(); }
   });
 
-  await test("live-only cleanup is explicit, never calls review ASR, and summary uses corrected text", async () => {
+  await test("legacy cleanup remains explicit, while new summary uses immutable original text", async () => {
     const requests = [];
     let reviews = 0;
     const x = await fixture({ serviceOptions: {
@@ -480,8 +484,8 @@ async function main() {
       assert.ok((await fs.readFile(x.api.status().cleanedMarkdownPath, "utf8")).includes("Repeated words\\."));
       await x.api.summarize(); await x.api.waitForIdle();
       assert.equal(x.api.status().postprocessStatus, "completed");
-      assert.equal(requests.at(-1).items[0].text, "Repeated words.", "summary reads reconciled result");
-      assert.equal(x.api.status().summary.mindmap.text, "Repeated words.");
+      assert.equal(requests.at(-1).items[0].text, "Repeated words", "summary reads the immutable original");
+      assert.equal(x.api.status().summary.mindmap.text, "Repeated words");
       assert.ok((await fs.readFile(x.api.status().summaryMarkdownPath, "utf8")).includes("Integration meeting"));
       assert.equal(reviews, 0);
       assert.equal(x.api.status().rawText, original.rawText);
@@ -516,20 +520,14 @@ async function main() {
       const notePath = x.api.status().markdownPath;
       const note = await fs.readFile(notePath, "utf8");
       const streams = x.streams.length;
-      await x.api.cleanup({ useMimoReview: true }); await x.api.waitForIdle();
-      assert.equal(x.api.status().cleanupStatus, "completed");
+      await x.api.summarize({ useMimoReview: true }); await x.api.waitForIdle();
+      assert.equal(x.api.status().postprocessStatus, "completed");
       assert.equal(reviews.length, 1);
       assert.deepEqual(reviews[0].subarray(44), audio, "MiMo receives the full archive despite failed preview");
       assert.equal(requests[0].target.source, "mimo");
-      assert.equal(x.api.status().reviewedText, "All preserved audio reviewed.");
-      assert.ok(x.api.status().correctedText.includes("All preserved audio reviewed."));
-      assert.ok((await fs.readFile(x.api.status().reviewedMarkdownPath, "utf8")).includes("All preserved audio reviewed\\."));
-      assert.notEqual(x.api.status().reviewedMarkdownPath, x.api.status().cleanedMarkdownPath);
-      await x.api.summarize(); await x.api.waitForIdle();
-      assert.equal(x.api.status().postprocessStatus, "completed");
       assert.equal(x.api.status().summary.mindmap.text, "All preserved audio reviewed.");
-      assert.equal(reviews.length, 1, "summary must not launch another ASR review");
-      assert.equal(x.streams.length, streams, "cleanup and summary never reconnect live ASR");
+      assert.equal(reviews.length, 1, "summary reviews saved audio once");
+      assert.equal(x.streams.length, streams, "summary never reconnects live ASR");
       assert.equal(x.api.status().rawText, "");
       assert.equal(await fs.readFile(notePath, "utf8"), note);
       await x.assertArchive(x.api, { microphone: audio });
@@ -619,8 +617,8 @@ async function main() {
       assert.equal(recovered.status().postprocessStatus, "completed", "reconciled cache remains valid after recovery");
       assert.equal(requests.length, 2, "one correction plus one summary, no re-reconciliation");
       assert.equal(reviews, 1, "recovery and summary do not call review ASR again");
-      assert.equal(requests.at(-1).items[0].text, "Repeated words.");
-      assert.equal(recovered.status().summary.mindmap.text, "Repeated words.");
+      assert.equal(requests.at(-1).items[0].text, "Repeated words");
+      assert.equal(recovered.status().summary.mindmap.text, "Repeated words");
       assert.equal(await fs.readFile(status.cleanedMarkdownPath, "utf8"), exported);
       await x.assertArchive(recovered, { microphone: audio });
     } finally { await x.dispose(); }
@@ -641,7 +639,7 @@ async function main() {
       assert.equal(x.api.status().rawText, "");
       await x.api.cleanup({ useMimoReview: true }); await x.api.waitForIdle();
       assert.equal(x.api.status().cleanupStatus, "completed");
-      await x.api.summarize(); await x.api.waitForIdle();
+      await x.api.summarize({ useMimoReview: true }); await x.api.waitForIdle();
       assert.equal(x.api.status().postprocessStatus, "completed");
       const before = x.api.status();
       assert.ok(before.correctedText.includes("Audio review before live retry."));

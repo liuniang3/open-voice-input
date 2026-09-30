@@ -111,10 +111,16 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
 .live-meeting .live-check { display: inline-flex; align-items: center; gap: 7px; flex: 0 1 auto; font-size: 13px; white-space: nowrap; }
 .live-meeting .live-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--ovi-primary); }
 .live-transport { padding: 12px 0; border-block: 1px solid var(--ovi-border); }
-#liveStatus { color: var(--ovi-muted); background: rgba(255,255,255,.65); }
-#liveStatus[data-kind="recording"] { color: #11696c; background: #d8efed; }
-#liveStatus[data-kind="paused"] { color: #825010; background: #fff0ce; }
-#liveStatus[data-kind="failed"] { color: #943a30; background: #ffe3e0; }
+.live-status-light { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%; background: #d3a337; box-shadow: 0 0 0 3px rgba(211,163,55,.12); }
+.live-status-light[data-light="green"] { background: #15986c; box-shadow: 0 0 0 3px rgba(21,152,108,.12); }
+.live-status-light[data-light="red"] { background: #cc514c; box-shadow: 0 0 0 3px rgba(204,81,76,.12); }
+.live-reading-tools { display: flex; justify-content: flex-end; min-height: 0; }
+.live-reading-tools:has(#liveFloat[hidden]) { display: none; }
+#liveFloat { display: inline-flex; align-items: center; gap: 7px; color: #11696c; font-weight: 600; }
+.live-font-control { display: flex; align-items: center; gap: 7px; flex: 1 1 130px; max-width: 190px; min-width: 115px; color: #52666d; }
+.live-font-control output { font-size: 11px; width: 20px; font-variant-numeric: tabular-nums; }
+.live-meeting input[type="range"] { height: 18px; min-height: 18px; padding: 0; border: 0; box-shadow: none; background: transparent; accent-color: #147c83; cursor: pointer; }
+.live-font-control input { flex: 1 1 0; min-width: 55px; }
 .live-meeting :is(button, input, select, pre):focus-visible,
 .live-history-item:focus-visible { outline: 2px solid var(--ovi-primary); outline-offset: 2px; }
 
@@ -150,7 +156,6 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
 .live-transcript {
   flex: 1;
   min-height: 140px;
-  max-height: 420px;
   overflow: auto;
   margin: 0;
   padding: 12px 4px;
@@ -196,16 +201,21 @@ body.meeting-mode:has(.live-floating) .topbar { display: none; }
 body.meeting-mode .meeting-panel.live-floating { grid-template-rows: minmax(0, 1fr); }
 .live-floating .live-history-browser,
 .live-floating .live-history-toggle,
+.live-floating .setup-details,
 .live-floating .live-setup,
 .live-floating .live-destination,
 .live-floating .live-outputs { display: none; }
 .live-floating .live-heading { -webkit-app-region: drag; flex-wrap: nowrap; }
 .live-floating .live-heading > div:first-child { flex: 1; overflow: hidden; }
 .live-floating .live-window-tools { -webkit-app-region: no-drag; flex: 0 0 auto; flex-wrap: nowrap; }
-.live-floating .live-meeting { padding: 12px 16px; gap: 10px; overflow: hidden; }
+.live-floating .live-meeting { padding: 6px 10px 10px; gap: 6px; overflow: hidden; position: relative; }
 .live-floating .live-heading h2 { font-size: 15px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 .live-floating .live-eyebrow { display: none; }
-.live-floating .live-transport { gap: 8px; padding: 8px 0; }
+.live-floating .live-heading { min-height: 30px; height: 30px; flex: 0 0 30px; gap: 6px; }
+.live-floating .live-window-tools { gap: 4px; }
+.live-floating .live-icon-tool { width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; flex-basis: 28px; border-color: transparent; background: transparent; }
+.live-floating #liveAlwaysOnTop[aria-pressed="true"] { color: #0c8175; background: rgba(12,129,117,.1); }
+.live-floating .live-transport { gap: 7px; padding: 7px 0; }
 .live-floating #liveStart,
 .live-floating .live-recovery > :not(.live-error),
 .live-floating #liveCorrectedSection,
@@ -213,26 +223,47 @@ body.meeting-mode .meeting-panel.live-floating { grid-template-rows: minmax(0, 1
 .live-floating .live-cleanup,
 .live-floating .live-summary { display: none; }
 .live-floating .live-results.has-corrected { grid-template-columns: minmax(0, 1fr); }
-.live-floating .live-results { flex: 1 1 0; min-height: 0; overflow: auto; }
-.live-floating .live-transcript { min-height: 0; max-height: 220px; }
+.live-floating .live-results, .live-floating .live-results[data-user-sized="true"] { flex: 1 1 0; height: auto; min-height: 0; overflow: hidden; }
+.live-floating .live-transcript { flex: 1 1 0; min-height: 0; max-height: none; padding: 4px; font-size: var(--live-font-size, 14px); }
 .live-floating .live-error { max-height: 64px; overflow: auto; }
 .live-floating .live-recovery:has(.live-error[hidden]) { display: none; }
-.live-compact #liveRawHeading,
-.live-compact .live-health,
-.live-compact #liveElapsedLabel { display: none; }
-.live-compact .live-results { flex: 1 1 0; min-height: 0; }
-.live-compact .live-text-section { flex: 1 1 0; min-height: 0; }
-.live-compact #liveRaw { flex: 1 1 0; min-height: 0; max-height: none; padding: 4px; }
-.live-compact .live-preview:not([hidden]) {
+.live-floating #liveRawHeading,
+.live-floating .live-health,
+.live-floating #liveElapsedLabel,
+.live-floating #livePreviewStatus,
+.live-floating .live-result-resize,
+.live-floating #liveSummaryResize,
+.live-floating .live-reading-tools { display: none; }
+.live-floating .live-text-section { flex: 1 1 0; min-height: 0; }
+.live-floating .live-preview:not([hidden]) {
   display: flex;
-  flex: 0 1 35%;
+  flex: 0 1 var(--draft-share, 35%);
   flex-direction: column;
   min-height: 0;
   max-height: none;
 }
-.live-compact .live-preview pre { flex: 1 1 0; min-height: 0; max-height: none; }
-.live-compact .live-clock strong { font-size: 16px; min-width: 52px; }
-.live-compact .live-clock { margin-left: 0; }
+.live-floating .live-preview pre { flex: 1 1 0; min-height: 0; max-height: none; font-size: var(--live-font-size, 14px); }
+.live-floating .live-clock strong { font-size: 16px; min-width: 52px; }
+.live-floating .live-clock { margin-left: auto; }
+body.meeting-mode:has(.live-floating) { background: transparent; }
+body.meeting-mode:has(.live-floating) .shell { padding: 2px; gap: 0; background: rgba(249,251,251,var(--live-opacity,.9)); }
+body.meeting-mode .meeting-panel.live-floating { background: transparent; border: 0; }
+.live-minimal .live-meeting { padding: 6px; }
+.live-minimal .live-meeting > :not(.live-results):not(.live-minimal-restore):not(.live-minimal-controls) { display: none; }
+.live-minimal #liveRaw, .live-minimal .draft-resize-grip { display: none; }
+.live-minimal .live-preview:not([hidden]) { flex: 1 1 0; border: 0; padding: 4px 28px 4px 6px; background: transparent; }
+.live-minimal .live-preview pre { margin: 0; }
+.live-minimal .live-minimal-restore { position: absolute; right: 6px; top: 6px; width: 24px; min-width: 24px; height: 24px; min-height: 24px; padding: 3px; z-index: 2; flex-basis: 24px; opacity: 0; visibility: hidden; pointer-events: none; }
+.live-minimal-controls { position: absolute; bottom: 6px; left: 8px; right: 8px; height: 30px; display: flex; align-items: center; gap: 12px; padding: 3px 8px; border-radius: 5px; background: rgba(249,251,251,.95); opacity: 0; visibility: hidden; pointer-events: none; }
+.live-minimal-controls label { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1 1 0; }
+.live-minimal-controls input { min-width: 20px; flex: 1 1 0; }
+body.meeting-mode .shell:hover .live-minimal :is(.live-minimal-controls, .live-minimal-restore) { opacity: 1; visibility: visible; pointer-events: auto; }
+body.meeting-mode .shell:hover .live-minimal .live-preview { padding-bottom: 36px; }
+body.meeting-mode:has(.live-minimal) .shell:hover { background: rgba(249,251,251,.9); }
+body.meeting-mode:has(.live-minimal.live-background-clear) .shell:not(:hover) { border-color: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.live-minimal .live-preview pre { scrollbar-color: transparent transparent; }
+body.meeting-mode .shell:hover .live-minimal .live-preview pre { scrollbar-color: auto; }
+.live-minimal .live-meeting::before { content: ""; position: absolute; top: 0; left: 0; right: 32px; height: 6px; -webkit-app-region: drag; }
 
 @media (max-width: 760px) {
   .live-meeting { padding: 12px; }

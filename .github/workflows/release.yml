@@ -56,7 +56,7 @@ jobs:
             dist/*.exe.blockmap
             dist/latest.yml
             dist/SHA256SUMS.txt
-          generate_release_notes: true
+          body_path: docs/releases/${{ github.ref_name }}.md
 
   build-macos:
     runs-on: ${{ matrix.runner }}
@@ -104,4 +104,4 @@ jobs:
             dist/*.zip.blockmap
             dist/latest-*-mac.yml
             dist/macOS-*-SHA256SUMS.txt
-          generate_release_notes: true
+          body_path: docs/releases/${{ github.ref_name }}.md

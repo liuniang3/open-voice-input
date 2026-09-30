@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { createMeetingPostprocessService, createMeetingPostprocessor } = require("../src/meeting/realtime/postprocess");
+const { createMeetingPostprocessService, createMeetingPostprocessor, toRenderData } = require("../src/meeting/realtime/postprocess");
 
 let passed = 0;
 async function test(name, run) {
@@ -19,7 +19,13 @@ function correction(input) {
 function summary(input) {
   const item = input.items[0];
   const claim = { text: item.text.slice(0, 80), evidence: [evidence(item)], uncertain: Boolean(item.uncertain) };
-  return { title: "Meeting", mindmap: { ...claim, children: [] }, sections: [{ heading: "Details", items: [claim] }] };
+  const paragraph = {
+    text: `The discussion covered ${item.text.slice(0, 40).replace(/\s+/g, " ").trim()}. `
+      + "The group kept the recorded wording and left open points marked as such.",
+    evidence: [evidence(item)], uncertain: Boolean(item.uncertain)
+  };
+  return { title: "Meeting", mindmap: { ...claim, children: [] },
+    sections: [{ heading: "Details", paragraphs: [paragraph], items: [claim] }] };
 }
 async function fixture(options = {}) {
   const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "meeting-postprocess-test-"));
@@ -420,6 +426,74 @@ async function main() {
     const protectedResult = await f.service.reconcile();
     assert.equal(protectedResult.result.text, f.state.segments[0].text);
     assert.equal(protectedResult.result.items[0].validation, "original_preserved");
+  });
+  await test("one-shot summary without review stays on raw transcript and never calls ASR", async () => {
+    const f = await fixture();
+    const result = await f.service.summarize({ useMimoReview: false });
+    assert.equal(result.status, "completed");
+    assert.equal(result.result.useMimoReview, false);
+    assert.equal(f.calls.asr.length, 0);
+    assert.equal(f.calls.reads.length, 0);
+    assert.equal(f.calls.llm.filter(call => call.task === "reconcile").length, 0);
+    assert.ok(result.result.sections.every(section => section.paragraphs.length >= 1));
+    assert.ok(result.result.sections[0].paragraphs[0].provenance[0].sourceId.startsWith("live:"));
+    assert.ok(result.result.mindmap.text);
+  });
+  await test("one-shot summary with review compares MiMo and raw before summarizing", async () => {
+    const f = await fixture({ state: { preview: { windows: [{ id: "w0", startFrame: 0, endFrame: 6500, status: "failed" }] } } });
+    const result = await f.service.summarize({ useMimoReview: true });
+    assert.equal(result.status, "completed");
+    assert.equal(result.result.useMimoReview, true);
+    assert.equal(f.calls.asr.length, 3); // full preserved-audio coverage, pause-bounded windows
+    assert.ok(f.calls.llm.some(call => call.task === "reconcile")); // raw-vs-review comparison pass
+    assert.ok(f.calls.llm.some(call => call.task === "summary_map"));
+    assert.equal(result.result.incomplete, false);
+    assert.equal(result.result.gaps[0].resolvedByReview, true);
+    assert.ok(result.result.sections.every(section => section.paragraphs.length >= 1));
+    const sources = new Set(result.result.sections.flatMap(section => [...section.paragraphs, ...section.items])
+      .flatMap(claim => claim.provenance.map(item => item.source)));
+    assert.ok([...sources].some(source => source === "live" || source === "mimo"));
+  });
+  await test("reviewed summary retry resumes without repeating ASR or completed compare work", async () => {
+    const f = await fixture();
+    let fail = true;
+    f.llm.complete = async request => {
+      f.calls.llm.push(request);
+      if (fail && request.task === "summary_map") { fail = false; throw new Error("private response body"); }
+      return request.task === "reconcile" ? correction(request.input) : summary(request.input);
+    };
+    assert.equal((await f.service.summarize({ useMimoReview: true })).status, "needs_retry");
+    const asrAfterFail = f.calls.asr.length;
+    const compareCalls = f.calls.llm.filter(call => call.task === "reconcile").length;
+    assert.ok(asrAfterFail > 0 && compareCalls > 0);
+    const result = await f.create().summarize({ useMimoReview: true, retryFailed: true });
+    assert.equal(result.status, "completed");
+    assert.equal(f.calls.asr.length, asrAfterFail);
+    assert.equal(f.calls.llm.filter(call => call.task === "reconcile").length, compareCalls);
+  });
+  await test("summary paragraphs are coherent prose with citations, not bullet-only claims", async () => {
+    const f = await fixture();
+    const result = await f.service.summarize();
+    const paragraphs = result.result.sections.flatMap(section => section.paragraphs);
+    assert.ok(paragraphs.length >= 1);
+    assert.ok(paragraphs.every(item => item.text.trim().length > 40 && item.provenance.length >= 1));
+    assert.ok(result.result.markdown.includes("The discussion covered"));
+    assert.ok(result.result.renderData.sections[0].paragraphs.length >= 1);
+    const proseLines = result.result.markdown.split("\n")
+      .filter(line => line.trim() && !line.startsWith("#") && !line.startsWith("-") && !line.startsWith("Evidence:"));
+    assert.ok(proseLines.length >= 1, "markdown must carry readable prose lines");
+  });
+  await test("old history stays compatible: legacy items-only summaries and raw-only sessions", async () => {
+    const legacy = { title: "Old", mindmap: { text: "Root", uncertain: false, provenance: [], children: [] },
+      sections: [{ heading: "Details", items: [{ text: "Old bullet", uncertain: false, provenance: [] }] }] };
+    const rendered = toRenderData(legacy);
+    assert.equal(rendered.sections[0].items[0].text, "Old bullet");
+    assert.deepEqual(rendered.sections[0].paragraphs, []);
+    const f = await fixture({ state: { cleanupStatus: "completed", cleanedMarkdownPath: "/legacy/old.cleaned.md" } });
+    const result = await f.service.summarize({ useMimoReview: false });
+    assert.equal(result.status, "completed");
+    assert.equal(f.calls.asr.length, 0);
+    assert.ok(result.result.sections[0].paragraphs.length >= 1);
   });
   console.log(`${passed} meeting postprocess tests passed`);
 }

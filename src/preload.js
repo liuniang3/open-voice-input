@@ -22,8 +22,8 @@ contextBridge.exposeInMainWorld("mimoInput", {
   testConnection: () => ipcRenderer.invoke("connection:test"),
   testProviderConnection: (payload) => ipcRenderer.invoke("provider:test-connection", payload),
   listProviderModels: (payload) => ipcRenderer.invoke("provider:list-models", payload),
-  injectText: (text) => ipcRenderer.invoke("input:inject", text),
-  copyText: (text) => ipcRenderer.invoke("clipboard:write-text", text),
+  injectText: (text, metadata) => ipcRenderer.invoke("input:inject", text, metadata),
+  copyText: (text, metadata) => ipcRenderer.invoke("clipboard:write-text", text, metadata),
   hide: () => ipcRenderer.invoke("window:hide"),
   clearRecordingKeys: () => ipcRenderer.invoke("recording:keys:clear"),
   resizeRecordingWindow: (size) => ipcRenderer.invoke("window:recording-resize", size),
@@ -33,6 +33,17 @@ contextBridge.exposeInMainWorld("mimoInput", {
   isWindowMaximized: () => ipcRenderer.invoke("window:is-maximized"),
   onWindowMaximized: (callback) => ipcRenderer.on("window-maximized", (_event, maximized) => callback(Boolean(maximized))),
   openSettings: () => ipcRenderer.invoke("window:settings"),
+  openHome: () => ipcRenderer.invoke("window:home"),
+  getHomeOverview: () => ipcRenderer.invoke("home:overview"),
+  finishOnboarding: (payload) => ipcRenderer.invoke("onboarding:finish", payload),
+  testOnboardingAsr: () => ipcRenderer.invoke("onboarding:asr-test"),
+  onboardingMicrophoneProbe: (active) => ipcRenderer.invoke("onboarding:microphone-probe", active),
+  onOpenHome: (callback) => ipcRenderer.on("open-home", callback),
+  onUsageUpdated: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("home-usage-updated", listener);
+    return () => ipcRenderer.removeListener("home-usage-updated", listener);
+  },
   openResultWindow: () => ipcRenderer.invoke("window:result"),
   openMeetingWorkspace: () => ipcRenderer.invoke("window:meeting"),
   openFileWorkspace: () => ipcRenderer.invoke("window:file"),
@@ -47,6 +58,11 @@ contextBridge.exposeInMainWorld("mimoInput", {
   meetingLiveCleanup: (payload) => ipcRenderer.invoke("meeting:live:cleanup", payload),
   meetingLiveSummarize: (payload) => ipcRenderer.invoke("meeting:live:summarize", payload),
   meetingLiveWindow: (payload) => ipcRenderer.invoke("meeting:live:window", payload),
+  onMeetingLiveWindowChanged: (callback) => {
+    const listener = (_event, flags) => callback(flags);
+    ipcRenderer.on("meeting:live:window-changed", listener);
+    return () => ipcRenderer.removeListener("meeting:live:window-changed", listener);
+  },
   meetingLiveTestConnection: (payload) => ipcRenderer.invoke("meeting:live:test-connection", payload),
   meetingLiveStatus: () => ipcRenderer.invoke("meeting:live:status"),
   meetingLiveHistory: () => ipcRenderer.invoke("meeting:live:history"),
@@ -102,6 +118,10 @@ contextBridge.exposeInMainWorld("mimoInput", {
   meetingAnalysisCancel: (payload) => ipcRenderer.invoke("meeting:analysis:cancel", payload),
   meetingAnalysisCorrected: (payload) => ipcRenderer.invoke("meeting:analysis:corrected", payload),
   meetingAnalysisSummary: (payload) => ipcRenderer.invoke("meeting:analysis:summary", payload),
+  meetingFileSummaryStart: (payload) => ipcRenderer.invoke("meeting:file-summary:start", payload),
+  meetingFileSummaryRetry: (payload) => ipcRenderer.invoke("meeting:file-summary:retry", payload),
+  meetingFileSummaryStatus: (payload) => ipcRenderer.invoke("meeting:file-summary:status", payload),
+  meetingFileSummaryCancel: (payload) => ipcRenderer.invoke("meeting:file-summary:cancel", payload),
   // Stage 4B-core
   meetingRenameSession: (payload) => ipcRenderer.invoke("meeting:session:rename", payload),
   meetingSpeakerMapGet: (payload) => ipcRenderer.invoke("meeting:speaker-map:get", payload),

@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { createLiveMeetingUi } = require("../src/renderer/live-meeting-ui");
+const TextSupplierUi = require("../src/renderer/text-supplier-ui");
 const root = path.resolve(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "src/renderer/index.html"), "utf8");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -73,7 +74,7 @@ function fixture() {
     return handlers[name](...args);
   }]));
   api.onMeetingLiveUpdate = (callback) => { callbacks.add(callback); return () => callbacks.delete(callback); };
-  const win = { document: { getElementById: $, createElement: element }, mimoInput: api, addEventListener() {} };
+  const win = { document: { getElementById: $, createElement: element }, mimoInput: api, TextSupplierUi, addEventListener() {} };
   const ui = createLiveMeetingUi(win, {
     now: () => clock, every: (fn) => { timers.add(fn); return fn; }, cancel: (fn) => timers.delete(fn)
   });
@@ -207,8 +208,8 @@ test("stop tracks ASR drain; retry only after stop; stop failure remains recover
   assert.deepEqual(f.last("meetingLiveStop").args, []);
   assert.equal(f.$("liveStart").disabled, true);
   assert.equal(f.$("liveRetry").disabled, true);
-  assert.match(f.$("liveStatus").textContent, /识别收尾/);
-  assert.equal(f.count("meetingLiveCleanup"), 0);
+  assert.match(f.$("liveStatus").title, /识别收尾/);
+  assert.equal(f.count("meetingLiveSummarize"), 0);
   f.push(completed({ status: "needs_retry", failedSegments: 1 }));
   assert.equal(f.$("liveRetry").disabled, false);
   await f.click("liveRetry");
@@ -239,11 +240,11 @@ test("history browser opens a local session without starting capture or ASR", as
   assert.equal(f.$("liveRaw").textContent, "历史会议原文");
   assert.equal(f.$("liveHistoryBrowser").hidden, true);
   f.$("liveCleanerModel").value = "analysis-b";
-  await f.click("liveCleanup");
-  assert.equal(f.last("meetingLiveCleanup").args[0].sessionId, "old");
   f.push(completed({ sessionId: "old", title: "历史例会", rawText: "历史会议原文" }));
   await f.click("liveSummarize");
   assert.equal(f.last("meetingLiveSummarize").args[0].sessionId, "old");
+  assert.equal(f.last("meetingLiveSummarize").args[0].useMimoReview, false);
+  assert.equal(f.count("meetingLiveCleanup"), 0);
 });
 
 test("save indicator uses backend timestamp, flags delayed saves and freezes duration", async () => {
@@ -278,32 +279,71 @@ test("transcript renders plain text, preserves manual scroll, follows bottom, re
   assert.equal(f.$("liveOpenMarkdown").disabled, true);
 });
 
-test("cleanup is explicit, uses selected model, reports progress and opens only returned outputs", async () => {
+test("summary is one-shot with default-off MiMo review, durable status and returned outputs only", async () => {
   const f = fixture();
   await f.ui.open();
   const output = { markdownPath: "C:/mock/raw-s1.md", audioPaths: ["C:/mock/microphone-complete.wav", "C:/mock/system-complete.wav"] };
   f.push(completed(output));
-  assert.equal(f.count("meetingLiveCleanup"), 0);
+  assert.equal(f.$("liveCleanup"), undefined);
+  assert.ok(!f.$("liveUseMimoReview").checked, "MiMo review defaults off");
   f.$("liveCleanerModel").value = "analysis-b";
-  await f.click("liveCleanup");
-  assert.deepEqual(f.last("meetingLiveCleanup").args, [{ sessionId: "s1", modelId: "analysis-b", useMimoReview: false, reviewModelId: "mimo-v2.5-asr" }]);
-  f.push(completed({ ...output, cleanupStatus: "running", cleanupProgress: { completed: 1, total: 2 }, correctedText: "校订第一段" }));
-  assert.match(f.$("liveCleanupStatus").textContent, /1 \/ 2/);
-  assert.equal(f.$("liveCorrectedSection").hidden, false);
-  assert.equal(f.$("liveCleanup").disabled, true);
-  const cleaned = "C:/mock/raw-s1.cleaned-collision.md";
-  f.push(completed({ ...output, cleanupStatus: "completed", correctedText: "校订结果", cleanedMarkdownPath: cleaned }));
+  await f.click("liveSummarize");
+  assert.deepEqual(f.last("meetingLiveSummarize").args, [{ sessionId: "s1", supplierId: "__legacy__", modelId: "analysis-b", useMimoReview: false, reviewModelId: "mimo-v2.5-asr" }]);
+  f.push(completed({ ...output, postprocessStatus: "running", postprocessProgress: { kind: "summary", completed: 1, total: 2 } }));
+  assert.equal(f.$("liveCleanupStatus").textContent, "正在生成摘要");
+  assert.equal(f.$("liveSummarize").disabled, true);
+  const summaryPath = "C:/mock/raw-s1.summary.md";
+  f.push(completed({ ...output, postprocessStatus: "completed",
+    summary: { title: "会议摘要", markdown: "## 详情\n连贯段落。", mindmap: { text: "根", uncertain: false, provenance: [], children: [] },
+      sections: [{ heading: "详情", paragraphs: [{ text: "一段连贯的摘要散文内容。", uncertain: false, provenance: [] }], items: [] }] },
+    summaryMarkdownPath: summaryPath }));
+  assert.equal(f.$("liveCleanupStatus").textContent, "摘要已生成");
+  assert.ok(f.$("liveSummaryDetail").children.some(node => node.tagName === "P"
+    && node.textContent.includes("一段连贯的摘要散文内容。")), "paragraph prose renders on the right pane");
   assert.equal(f.$("liveRaw").textContent, "原始转写文本");
-  await f.click("liveOpenCleaned");
-  assert.deepEqual(f.last("meetingLiveOpenPath").args, [{ path: cleaned }]);
+  await f.click("liveOpenSummary");
+  assert.deepEqual(f.last("meetingLiveOpenPath").args, [{ path: summaryPath }]);
   await f.click("liveOpenMarkdown");
   assert.deepEqual(f.last("meetingLiveOpenPath").args, [{ path: output.markdownPath }]);
   f.$("liveAudioOutputs").children[1].click();
   await tick();
   assert.deepEqual(f.last("meetingLiveOpenPath").args, [{ path: output.audioPaths[1] }]);
-  f.push(completed({ cleanupStatus: "failed", error: { message: "校订失败" } }));
-  assert.equal(f.$("liveCleanup").disabled, false);
-  assert.match(f.$("liveCleanup").textContent, /重试/);
+  f.$("liveUseMimoReview").checked = true;
+  f.$("liveUseMimoReview").dispatch("change");
+  await f.click("liveSummarize");
+  assert.deepEqual(f.last("meetingLiveSummarize").args[0],
+    { sessionId: "s1", supplierId: "__legacy__", modelId: "analysis-b", useMimoReview: true, reviewModelId: "mimo-v2.5-asr" });
+  assert.equal(f.count("meetingLiveCleanup"), 0);
+});
+
+test("MiMo audio review can recover a saved meeting when realtime ASR has no final text", async () => {
+  const f = fixture();
+  await f.ui.open();
+  f.push(completed({ status: "needs_retry", rawText: "", failedSegments: 1,
+    audioPaths: ["C:/mock/complete.wav"] }));
+  assert.equal(f.$("liveSummarize").disabled, true);
+  f.$("liveUseMimoReview").checked = true;
+  f.$("liveUseMimoReview").dispatch("change");
+  assert.equal(f.$("liveSummarize").disabled, false);
+  await f.click("liveSummarize");
+  assert.equal(f.last("meetingLiveSummarize").args[0].useMimoReview, true);
+});
+
+test("meeting summary sends the exact supplier and model pair selected in settings", async () => {
+  const f = fixture();
+  f.setSettings({
+    textSuppliers: [{ id: "vendor-a", name: "Vendor A", baseUrl: "https://example.invalid/v1", apiStyle: "chat-completions", apiKey: "test-placeholder" }],
+    textSupplierCatalogs: { "vendor-a": { models: ["shared-model"] } },
+    textModelSelections: { summary: { supplierId: "vendor-a", modelId: "shared-model" } }
+  });
+  await f.ui.open();
+  assert.equal(f.$("liveCleanerModel").value, "vendor-a::shared-model");
+  f.push(completed());
+  await f.click("liveSummarize");
+  assert.deepEqual(f.last("meetingLiveSummarize").args[0], {
+    sessionId: "s1", supplierId: "vendor-a", modelId: "shared-model",
+    useMimoReview: false, reviewModelId: "mimo-v2.5-asr"
+  });
 });
 
 test("push supersedes a stale status response; closing invalidates pending reads", async () => {
@@ -422,7 +462,7 @@ async function run() {
 }
 
 // Optional real-browser verification: pass a Playwright Page. All requests are mocked.
-async function verifyBrowser(page, screenshotDirectory) {
+async function prepareBrowser(page) {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/*", async (route) => {
@@ -431,13 +471,20 @@ async function verifyBrowser(page, screenshotDirectory) {
       "/": ["src/renderer/index.html", "text/html"],
       "/styles.css": ["src/renderer/styles.css", "text/css"],
       "/live-meeting.css": ["src/renderer/live-meeting.css", "text/css"],
+      "/app-shell.css": ["src/renderer/app-shell.css", "text/css"],
+      "/reading-layout.css": ["src/renderer/reading-layout.css", "text/css"],
+      "/reading-layout.js": ["src/renderer/reading-layout.js", "text/javascript"],
+      "/home-ui.js": ["src/renderer/home-ui.js", "text/javascript"],
+      "/onboarding-ui.js": ["src/renderer/onboarding-ui.js", "text/javascript"],
       "/audio-utils.js": ["src/audio-utils.js", "text/javascript"],
       "/meeting-ui.js": ["src/renderer/meeting-ui.js", "text/javascript"],
+      "/text-supplier-ui.js": ["src/renderer/text-supplier-ui.js", "text/javascript"],
       "/file-ui.js": ["src/renderer/file-ui.js", "text/javascript"],
       "/live-meeting-ui.js": ["src/renderer/live-meeting-ui.js", "text/javascript"],
       "/renderer.js": ["src/renderer/renderer.js", "text/javascript"]
     };
-    const match = files[pathname];
+    const asset = /^\/(?:brand|icons)\/[a-z0-9-]+\.svg$/.test(pathname) ? [`src/renderer${pathname}`, "image/svg+xml"] : null;
+    const match = files[pathname] || asset;
     if (!match) return route.abort();
     return route.fulfill({ contentType: match[1], body: fs.readFileSync(path.join(root, match[0])) });
   });
@@ -451,6 +498,17 @@ async function verifyBrowser(page, screenshotDirectory) {
       meetingAnalysisModel: "analysis-demo", meetingAnalysisProfiles: { "analysis-demo": {} }
     };
     const hooks = {};
+    window.mockHome = {
+      ok: true, platform: "win32", hotkey: "CommandOrControl+Alt+M", hotkeyRegistered: true,
+      asrConfigured: true, cleanerConfigured: true, transcriptionMode: "stable", meetingRecording: false,
+      usage: { today: { count: 18, characters: 2384 }, week: { count: 126, characters: 18562 } },
+      onboarding: { status: "migrated" }, recent: [
+        { id: "file-demo", kind: "file", title: "产品反馈访谈", date: "2026-09-30T07:30:00Z" },
+        { id: "recovered", kind: "meeting", title: "团队例会", date: "2026-09-29T06:00:00Z" }
+      ]
+    };
+    window.mockSettings = () => settings;
+    window.mockHooks = hooks;
     window.mockCalls = [];
     window.mockPush = (patch) => { dto = { ...dto, ...patch }; hooks.onMeetingLiveUpdate?.(dto); };
     window.mockOpenSettings = () => hooks.onOpenSettings?.();
@@ -458,10 +516,22 @@ async function verifyBrowser(page, screenshotDirectory) {
       enumerateDevices: async () => [], getUserMedia: async () => { throw new Error("Microphone forbidden in UI test"); }
     } });
     window.mimoInput = new Proxy({}, { get(_target, name) {
-      if (String(name).startsWith("on")) return (callback) => { hooks[name] = callback; return () => { delete hooks[name]; }; };
+      if (/^on[A-Z]/.test(String(name))) return (callback) => { hooks[name] = callback; return () => { delete hooks[name]; }; };
       return async (payload) => {
         window.mockCalls.push({ name, payload });
         if (name === "getSettings") return settings;
+        if (name === "getHomeOverview") return window.mockHome;
+        if (name === "openHome") { hooks.onOpenHome?.(); return { ok: true }; }
+        if (name === "openSettings") { hooks.onOpenSettings?.(); return { ok: true }; }
+        if (name === "openMeetingWorkspace") { hooks.onOpenMeeting?.(); return { ok: true }; }
+        if (name === "finishOnboarding") { window.mockHome.onboarding = { status: payload.skipped ? "skipped" : "completed" }; return { ok: true }; }
+        if (name === "testOnboardingAsr") return { ok: true, latencyMs: 120 };
+        if (name === "checkHotkey") return { ok: true, accelerator: payload.accelerator };
+        if (name === "listProviderModels") {
+          if (payload?.supplierId) settings.textSupplierCatalogs = { ...settings.textSupplierCatalogs,
+            [payload.supplierId]: { models: ["custom-text-model"] } };
+          return { ok: true, models: ["custom-text-model"], latencyMs: 12 };
+        }
         if (name === "saveSettings") return settings = { ...settings, ...payload };
         if (name === "getStatus") return { settings, hasApiKey: false, registeredHotkeys: [] };
         if (name === "meetingLiveStatus") return { ok: true, ...dto };
@@ -494,12 +564,18 @@ async function verifyBrowser(page, screenshotDirectory) {
         if (name === "meetingLiveCleanup") { window.mockPush({ cleanupStatus: "running", cleanupProgress: { completed: 1, total: 2 } }); return { ok: true, ...dto }; }
         if (name === "meetingLiveChooseDestination") return { ok: true, destinationPath: "C:/mock/项目例会.md" };
         if (name === "meetingListSessions") return { ok: true, sessions: [] };
+        if (name === "fileChooseMedia" || name === "meetingChooseMedia") return { ok: true, cancelled: true };
         return { ok: true };
       };
     } });
   });
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto("http://meeting-ui.mock/");
+  await page.goto("http://localhost/");
+  return errors;
+}
+
+async function verifyBrowser(page, screenshotDirectory) {
+  const errors = await prepareBrowser(page);
   await page.evaluate(async () => { window.applyWindowMode("meeting"); await window.MeetingLiveUi.open(); });
   assert.equal(await page.title(), "会议实时转录");
   assert.equal(await page.locator("#liveStart").isEnabled(), true);
@@ -542,17 +618,21 @@ async function verifyBrowser(page, screenshotDirectory) {
   await page.evaluate(() => window.mockPush({ rawText: "<script>这只是原文，不应执行</script>\n\n" + "本周完成接口联调，下一步验证恢复与导出。\n".repeat(60) }));
   assert.equal(await page.locator("#liveRaw script").count(), 0);
   await page.locator("#liveStop").click();
-  await page.waitForFunction(() => document.getElementById("liveStatus").textContent.includes("识别收尾"));
+  await page.waitForFunction(() => document.getElementById("liveStatus").title.includes("识别收尾"));
   await page.evaluate(() => window.mockPush({ status: "needs_retry", failedSegments: 1, pendingSegments: 0, error: { message: "模拟识别失败，录音已保留" } }));
   assert.equal(await page.locator("#liveRetry").isEnabled(), true);
   await page.locator("#liveRetry").click();
   assert.equal(await page.evaluate(() => window.mockCalls.filter((c) => c.name === "meetingLiveRetry").at(-1).payload.sessionId), "demo");
   await page.evaluate(() => window.mockPush({ status: "completed", recording: false, pendingSegments: 0, failedSegments: 0, error: null }));
-  await page.locator("#liveCleanup").click();
-  await page.waitForFunction(() => document.getElementById("liveCleanupStatus").textContent.includes("1 / 2"));
-  await page.evaluate(() => window.mockPush({ cleanupStatus: "completed", correctedText: "本周完成接口联调。\n下一步验证恢复与导出。\n".repeat(30), cleanedMarkdownPath: "C:/mock/项目例会-demo.cleaned-unique.md" }));
-  await page.locator("#liveOpenCleaned").click();
-  assert.equal(await page.evaluate(() => window.mockCalls.filter((c) => c.name === "meetingLiveOpenPath").at(-1).payload.path), "C:/mock/项目例会-demo.cleaned-unique.md");
+  await page.locator("#liveSummarize").click();
+  await page.waitForFunction(() => document.getElementById("livePostprocessStatus").textContent.includes("生成摘要"));
+  await page.evaluate(() => window.mockPush({ postprocessStatus: "completed",
+    summary: { title: "Summary", markdown: "## Details\nCoherent prose.", mindmap: { text: "Root", uncertain: false, provenance: [], children: [] },
+      sections: [{ heading: "Details", paragraphs: [{ text: "Coherent paragraph for the record.", uncertain: false, provenance: [] }], items: [] }] },
+    summaryMarkdownPath: "C:/mock/summary.md" }));
+  await page.waitForFunction(() => /Coherent paragraph/.test(document.getElementById("liveSummaryDetail").textContent));
+  await page.locator("#liveOpenSummary").click();
+  assert.equal(await page.evaluate(() => window.mockCalls.filter((c) => c.name === "meetingLiveOpenPath").at(-1).payload.path), "C:/mock/summary.md");
   const viewports = [{ width: 1280, height: 900 }, { width: 960, height: 720 }, { width: 390, height: 844 }];
   const screenshots = [];
   for (const size of viewports) {
@@ -618,7 +698,7 @@ async function verifyBrowser(page, screenshotDirectory) {
   return { viewports, screenshots, errors, result: "real rendered mock UI passed" };
 }
 
-module.exports = { verifyBrowser, fixture, tick, deferred, completed };
+module.exports = { verifyBrowser, prepareBrowser, fixture, tick, deferred, completed };
 if (require.main === module) (async () => {
   await run();
   if (process.exitCode || !process.argv.includes("--browser")) return;

@@ -8,6 +8,7 @@ const { createQwen3AsrProvider } = require("../../providers/asr/qwen3-asr-provid
 const { isSupportedAliMeetingModel } = require("../../providers/asr/ali-meeting-stream");
 const { buildTextCleanupMessages, parseAndValidateCleanupResponse } = require("../../providers/cleaner/text-cleanup-method");
 const { resolveProviderConnection } = require("../../settings/provider-connections");
+const { createTextSupplierChat, resolveTextLlmProfile } = require("../../providers/text-supplier-llm");
 const DEFAULT_LIVE_MODEL = "qwen-audio-3.0-asr-flash-streaming";
 const MIMO_BATCH_MODEL = "mimo-v2.5-asr";
 
@@ -41,6 +42,15 @@ function previewProfileFor(settings, modelId = DEFAULT_LIVE_MODEL) {
 }
 
 function languageModel(profile) {
+  if (profile?.provider === "text-supplier") {
+    // Named supplier pair: own endpoint, key, API style and compat headers.
+    const chat = createTextSupplierChat(profile);
+    return async ({ messages, signal, maxTokens = 8192 }) => {
+      const response = await chat(messages, { signal, maxTokens });
+      if (response.finishReason && response.finishReason !== "stop") throw Object.assign(new Error("Incomplete model response"), { code: "analysis_response_incomplete" });
+      return response.content;
+    };
+  }
   const client = profile.provider === "mimo"
     ? createMimoClient({ getSettings: () => ({ ...profile, model: profile.modelId }), useEnvironmentFallback: false })
     : profile.provider === "opencode-go"
@@ -55,6 +65,23 @@ function languageModel(profile) {
     if (response.finishReason && response.finishReason !== "stop") throw Object.assign(new Error("Incomplete model response"), { code: "analysis_response_incomplete" });
     return response.content;
   };
+}
+
+// Shared meeting/file summary profile resolution: a persisted supplier+model
+// pair routes through the supplier registry; otherwise the legacy family
+// profiles apply unchanged. Missing suppliers fail cleanly here.
+function meetingTextProfile(settings, options = {}) {
+  if (options.supplierId === "__legacy__") {
+    return profileFor(settings, options.modelId || settings.meetingAnalysisModel || settings.cleanerModel, true);
+  }
+  const supplierProfile = resolveTextLlmProfile(settings, {
+    slot: options.slot || "summary",
+    supplierId: options.supplierId,
+    modelId: options.modelId
+  });
+  if (supplierProfile) return supplierProfile;
+  const legacyModel = options.modelId || settings.meetingAnalysisModel || settings.cleanerModel || "gpt-5.4-mini";
+  return profileFor(settings, legacyModel, true);
 }
 
 function positiveInteger(value, fallback) {
@@ -154,6 +181,7 @@ function cleaner(profile) {
 
 module.exports = {
   profileFor,
+  meetingTextProfile,
   transcriber,
   cleaner,
   previewProfileFor,

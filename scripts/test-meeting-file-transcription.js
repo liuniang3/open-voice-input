@@ -572,6 +572,90 @@ async function testFileExports() {
   assert.ok(bytes.includes(Buffer.from("word/document.xml")), "DOCX package must contain document.xml");
 }
 
+async function testSharedSummaryExportsReadableContent() {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ovi-file-export-shared-"));
+  const sharedSummary = {
+    title: "File meeting",
+    markdown: "## Details\nCoherent prose.",
+    mindmap: { text: "Root branch", uncertain: false, provenance: [], children: [{ text: "Child branch", uncertain: true, provenance: [] }] },
+    sections: [{
+      heading: "Details",
+      paragraphs: [{ text: "This coherent paragraph keeps the recorded decisions readable.", uncertain: false, provenance: [] }],
+      items: [{ text: "Ship the export", uncertain: true, provenance: [] }]
+    }],
+    incomplete: false,
+    uncertain: false
+  };
+  const base = {
+    session: { id: "file-shared", title: "shared export", source: "import" },
+    transcript: { items: [{ speakerId: "unknown", text: "original text", beginMs: 0, endMs: 1000 }] },
+    summary: sharedSummary
+  };
+  const mdPath = path.join(root, "shared.md");
+  const md = await writeExportFiles({ ...base, outPath: mdPath, format: "markdown", scope: "all" });
+  assert.equal(md.ok, true);
+  const mdText = await fsp.readFile(mdPath, "utf8");
+  assert.match(mdText, /Root branch/);
+  assert.match(mdText, /Child branch/);
+  assert.match(mdText, /This coherent paragraph keeps the recorded decisions readable\./);
+  assert.match(mdText, /Ship the export/);
+  assert.doesNotMatch(mdText, /```json/, "shared summaries must read as prose, not a JSON fence");
+  assert.match(mdText, /original text/, "raw export stays intact alongside the summary");
+
+  const txtPath = path.join(root, "shared.txt");
+  await writeExportFiles({ ...base, outPath: txtPath, format: "txt", scope: "summary" });
+  const txtText = await fsp.readFile(txtPath, "utf8");
+  assert.match(txtText, /This coherent paragraph keeps the recorded decisions readable\./);
+  assert.doesNotMatch(txtText, /"mindmap"/);
+
+  const docxPath = path.join(root, "shared.docx");
+  const report = await writeExportFiles({ ...base, outPath: docxPath, format: "docx", scope: "summary" });
+  assert.equal(report.ok, true);
+  const bytes = await fsp.readFile(docxPath);
+  assert.equal(bytes.subarray(0, 2).toString(), "PK", "DOCX must be a real ZIP package");
+  assert.ok(bytes.includes(Buffer.from("word/document.xml")));
+  assert.ok(bytes.includes(Buffer.from("This coherent paragraph keeps the recorded decisions readable.")),
+    "Word document body must contain the readable paragraph");
+  assert.ok(bytes.includes(Buffer.from("Ship the export")));
+}
+
+async function testLegacySummaryExportStaysCompatible() {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ovi-file-export-legacy-"));
+  const mdPath = path.join(root, "legacy.md");
+  await writeExportFiles({
+    outPath: mdPath,
+    format: "markdown",
+    scope: "summary",
+    session: { id: "file-legacy", title: "legacy export", source: "import" },
+    transcript: null,
+    summary: { template: "meeting", executiveSummary: { text: "legacy summary text" } }
+  });
+  const mdText = await fsp.readFile(mdPath, "utf8");
+  assert.match(mdText, /```json/, "unknown legacy shapes keep the machine-readable block");
+  assert.match(mdText, /legacy summary text/);
+  const rawPath = path.join(root, "raw-only.md");
+  await writeExportFiles({
+    outPath: rawPath,
+    format: "markdown",
+    scope: "raw",
+    session: { id: "file-legacy", title: "legacy export", source: "import" },
+    transcript: { items: [{ speakerId: "unknown", text: "raw only line", beginMs: 0, endMs: 500 }] },
+    corrected: { items: [{ speakerId: "unknown", correctedText: "must not leak", beginMs: 0, endMs: 500 }] },
+    summary: sharedSummaryFixture()
+  });
+  const rawText = await fsp.readFile(rawPath, "utf8");
+  assert.match(rawText, /raw only line/);
+  assert.doesNotMatch(rawText, /must not leak|structured|Root branch/, "raw-only scope excludes corrected and summary bodies");
+}
+
+function sharedSummaryFixture() {
+  return {
+    title: "Scope check",
+    mindmap: { text: "Root branch", uncertain: false, provenance: [], children: [] },
+    sections: [{ heading: "Details", paragraphs: [{ text: "Scoped paragraph", uncertain: false, provenance: [] }], items: [] }]
+  };
+}
+
 async function main() {
   await test("file mode dispatches MiMo and Qwen request formats without OSS", testProviderDispatchAndIsolation);
   await test("failed file transcription retry keeps the original provider", testFailedRetryKeepsProvider);
@@ -579,6 +663,8 @@ async function main() {
   await test("forced analysis creates a fresh generation without stale results", testForcedAnalysisUsesFreshGenerationWithoutStaleResults);
   await test("legacy sparse summaries recover supported merge fields", testSparseLegacySummaryRehydratesFromMergeArtifact);
   await test("file results export as a real DOCX package", testFileExports);
+  await test("shared summary exports readable markdown, text and Word content", testSharedSummaryExportsReadableContent);
+  await test("legacy and raw-only export scopes stay backward compatible", testLegacySummaryExportStaysCompatible);
   console.log(`${passed} file transcription regression tests passed`);
   if (process.exitCode) process.exitCode = 1;
 }

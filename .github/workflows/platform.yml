@@ -36,6 +36,8 @@ jobs:
       - run: npm run test:meeting:live:ui
       - run: npm run test:pipeline
       - run: npm run test:clean
+      - run: node scripts/test-home-usage.js
+      - run: node scripts/test-home-ui.js
 
   desktop:
     runs-on: ${{ matrix.runner }}

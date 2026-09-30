@@ -1,0 +1,23 @@
+html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; color: #203238; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+* { box-sizing: border-box; }
+.preview-surface { position: relative; width: 100vw; height: 100vh; border: 1px solid transparent; border-radius: 8px; overflow: hidden; padding: 10px 12px; }
+.preview-surface:is(:hover,.is-hovered) { background: rgba(249,251,251,.9); border-color: rgba(43,64,69,.14); backdrop-filter: blur(22px); }
+#previewText { margin: 0; height: 100%; overflow: auto; scrollbar-color: transparent transparent; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: var(--font-size,14px); line-height: 1.7; }
+.preview-surface:is(:hover,.is-hovered) #previewText { padding-right: 26px; padding-bottom: 36px; scrollbar-color: auto; }
+#previewRestore, .preview-controls { opacity: 0; visibility: hidden; pointer-events: none; }
+.preview-surface:is(:hover,.is-hovered) :is(#previewRestore,.preview-controls) { opacity: 1; visibility: visible; pointer-events: auto; }
+#previewRestore { position: absolute; right: 6px; top: 6px; width: 24px; height: 24px; padding: 3px; border: 1px solid #d5e2e5; border-radius: 5px; background: rgba(255,255,255,.8); color: inherit; }
+.preview-controls { display: flex; gap: 12px; position: absolute; left: 8px; right: 8px; bottom: 6px; height: 30px; padding: 3px 8px; border-radius: 5px; background: rgba(249,251,251,.95); }
+.preview-controls label { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1; }
+.preview-controls input { min-width: 20px; width: 100%; flex: 1; accent-color: #147c83; }
+.restore-icon, .type-icon, .opacity-icon { display: block; width: 18px; height: 18px; flex: 0 0 18px; background: currentColor; mask: var(--icon) center/contain no-repeat; -webkit-mask: var(--icon) center/contain no-repeat; }
+.restore-icon { --icon: url("./icons/maximize-2.svg"); }
+.type-icon { --icon: url("./icons/type.svg"); }
+.opacity-icon { --icon: url("./icons/blend.svg"); }
+.preview-drag { position: absolute; left: 4px; right: 32px; top: 2px; height: 8px; -webkit-app-region: drag; }
+.resize-edge { position: absolute; z-index: 4; touch-action: none; -webkit-app-region: no-drag; }
+.resize-edge:is(.n,.s) { left: 8px; right: 8px; height: 4px; cursor: ns-resize; }
+.resize-edge:is(.e,.w) { top: 8px; bottom: 8px; width: 4px; cursor: ew-resize; }
+.resize-edge:is(.ne,.nw,.se,.sw) { width: 8px; height: 8px; }
+.n,.ne,.nw { top: 0; }.s,.se,.sw { bottom: 0; }.e,.ne,.se { right: 0; }.w,.nw,.sw { left: 0; }
+.ne,.sw { cursor: nesw-resize; }.nw,.se { cursor: nwse-resize; }

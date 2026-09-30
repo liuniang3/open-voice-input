@@ -42,6 +42,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
   let cursor = Math.max(frame(preview.cursorFrame), ...preview.windows.map(w => frame(w.endFrame)));
   let available = cursor;
   let active = null;
+  const retiring = new Map();
   let retryActive = null;
   let worker = null;
   let retryWorker = null;
@@ -91,7 +92,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
       previewText: draft?.text || "", failedSegments, pendingSegments,
       failed: failedSegments,
       status: closed ? "closed" : draining ? "draining" : retryWorker ? "retrying"
-        : active && !active.dead ? "streaming" : failedSegments ? "needs_retry" : terminalStatus,
+        : active && !active.dead ? "streaming" : retiring.size ? "rotating" : failedSegments ? "needs_retry" : terminalStatus,
       error: checkpointFailed ? { code: "preview_checkpoint_failed" } : null
     };
   }
@@ -145,7 +146,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
     if (!ctx.retry) ctx.window.sentences = ctx.window.sentences.filter(s => s.final);
     ctx.controller.abort();
     closeStream(ctx.stream);
-    if (!ctx.retry) nextConnectAt = now() + Math.max(0, reconnectDelayMs);
+    if (!ctx.retry && !ctx.retiring) nextConnectAt = now() + Math.max(0, reconnectDelayMs);
     changed();
   }
 
@@ -277,6 +278,16 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
     changed();
   }
 
+  function retire(ctx) {
+    // A completed upload can wait for its final receipt while the next socket
+    // receives new audio. At most one old socket and one live socket coexist.
+    ctx.retiring = true;
+    const done = Promise.resolve().then(() => finish(ctx)).catch(error => {
+      fail(ctx, error?.code === "preview_finish_timeout" ? error.code : "preview_stream_failed");
+    }).finally(() => { retiring.delete(ctx); notify(); });
+    retiring.set(ctx, done);
+  }
+
   function startWorker() {
     if (worker || closed || typeof createStream !== "function" || (paused && !draining)) return worker;
     worker = Promise.resolve().then(async () => {
@@ -290,8 +301,13 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
         try {
           if (!ctx.stream) await connect(ctx);
           await send(ctx);
-          if (draining || ctx.window.endFrame - ctx.window.startFrame >= limit) {
+          if (draining) {
             await finish(ctx);
+            active = null;
+          } else if (ctx.window.endFrame - ctx.window.startFrame >= limit) {
+            if (retiring.size) await Promise.all(retiring.values());
+            if (ctx.dead || closed) continue;
+            retire(ctx);
             active = null;
           } else break;
         } catch (error) {
@@ -324,6 +340,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
       // Include reserved/read-ahead audio, not just acknowledged sends. A late
       // track can otherwise change the archive while stale mixed PCM is queued.
       if (active?.window === w) fail(active, "preview_audio_changed");
+      for (const ctx of retiring.keys()) if (ctx.window === w) fail(ctx, "preview_audio_changed");
       if (retryActive?.window === w) fail(retryActive, "preview_audio_changed");
       const queued = retryQueue.indexOf(w);
       if (queued >= 0) retryQueue.splice(queued, 1);
@@ -357,6 +374,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
     draining = Promise.resolve().then(async () => {
       const timer = setTimeout(() => {
         fail(active, "preview_drain_timeout");
+        for (const ctx of retiring.keys()) fail(ctx, "preview_drain_timeout");
         fail(retryActive, "preview_drain_timeout");
         markUnsent("preview_drain_timeout");
       }, Math.max(1, drainTimeoutMs));
@@ -364,6 +382,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
         await startWorker();
         // A worker can have observed idle just before drain was requested.
         if (active && !active.dead) await startWorker();
+        await Promise.all(retiring.values());
         markUnsent("preview_unsent");
       } finally { clearTimeout(timer); }
       active = null;
@@ -404,7 +423,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
   }
 
   async function waitForIdle() {
-    while (worker || retryWorker) await Promise.all([worker, retryWorker]);
+    while (worker || retryWorker || retiring.size) await Promise.all([worker, retryWorker, ...retiring.values()]);
   }
 
   function cancelRetries() {
@@ -419,6 +438,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
     available = Math.max(available, frame(availableFrames));
     paused = true;
     fail(active, "preview_interrupted");
+    for (const ctx of retiring.keys()) fail(ctx, "preview_interrupted");
     cancelRetries();
     markUnsent("preview_interrupted");
     terminalStatus = "paused";

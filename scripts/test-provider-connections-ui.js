@@ -104,7 +104,8 @@ test("provider tests cross a restricted preload and main-process bridge", () => 
   assert.match(preload, /listProviderModels:\s*\(payload\)\s*=>\s*ipcRenderer\.invoke\("provider:list-models", payload\)/);
   assert.match(main, /ipcMain\.handle\("provider:test-connection"/);
   assert.match(main, /ipcMain\.handle\("provider:list-models"/);
-  assert.match(main, /testProviderConnection\(\{ settings, provider \}\)/);
+  assert.match(main, /testProviderConnection\(\{ settings, provider, supplierId, modelId \}\)/);
+  assert.match(main, /refreshTextSupplierCatalog\(\{ settings, supplierId: id \}\)/);
   assert.match(main, /sanitizeIpcError\(error\)/);
 });
 

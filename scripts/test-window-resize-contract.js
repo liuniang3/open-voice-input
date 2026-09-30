@@ -11,16 +11,17 @@ const main = fs.readFileSync(path.join(root, "src/main.js"), "utf8");
 const renderer = fs.readFileSync(path.join(root, "src/renderer/renderer.js"), "utf8");
 const css = fs.readFileSync(path.join(root, "src/renderer/styles.css"), "utf8");
 const liveCss = fs.readFileSync(path.join(root, "src/renderer/live-meeting.css"), "utf8");
+const html = fs.readFileSync(path.join(root, "src/renderer/index.html"), "utf8");
 
 assert.match(main, /const isWindows = os\.platform\(\) === "win32"/);
 assert.match(main, /thickFrame:\s*isWindows/);
 assert.match(main, /transparent:\s*!isWindows/);
 assert.match(main, /movable:\s*true/);
 assert.match(main, /backgroundMaterial:\s*"acrylic"/);
-assert.match(main, /RESIZABLE_WINDOW_MODES = new Set\(\["settings", "result", "meeting", "file"\]\)/);
+assert.match(main, /RESIZABLE_WINDOW_MODES = new Set\(\["settings", "result", "meeting", "file", "home"\]\)/);
 assert.match(main, /RESIZABLE_WINDOW_MODES\.has\(mode\)/);
 assert.doesNotMatch(main, /setWindowMessageResult|installNativeResizeHitTest|WM_NCHITTEST/);
-assert.match(renderer, /\["settings", "result", "meeting", "file"\]\.includes\(mode\)/);
+assert.match(renderer, /\["settings", "result", "meeting", "file", "home"\]\.includes\(mode\)/);
 assert.match(css, /body\.secondary-window-mode \.shell[\s\S]*border-radius:\s*16px/);
 assert.match(css, /html\[data-platform="win32"\] body\.secondary-window-mode \.shell[\s\S]*margin:\s*0/);
 assert.match(css, /\.topbar,\s*body\.recording-active \.recording-chrome,\s*\.live-floating \.live-heading\s*\{[\s\S]*user-select:\s*none/);
@@ -29,8 +30,15 @@ assert.match(css, /html\[data-platform="darwin"\] :is\(button, input, textarea, 
 assert.match(css, /@media \(max-width: 760px\)[\s\S]*body\.settings-open \.settings-tabs/);
 assert.doesNotMatch(renderer, /statusPanel\.scrollHeight \+ chromeHeight/);
 assert.match(renderer, /const panelHeight = Math\.max\(76, titleHeight \+ detailHeight \+ meterHeight\)/);
-assert.match(liveCss, /\.live-compact #liveRaw \{[^}]*flex:\s*1 1 0;[^}]*max-height:\s*none;/s);
-assert.match(liveCss, /\.live-compact \.live-preview:not\(\[hidden\]\)[^}]*flex:\s*0 1 35%;/s);
+assert.match(liveCss, /\.live-floating \.live-transcript \{[^}]*flex:\s*1 1 0;[^}]*max-height:\s*none;/s);
+assert.match(liveCss, /\.live-floating \.live-preview:not\(\[hidden\]\)[^}]*flex:\s*0 1 var\(--draft-share, 35%\);/s);
+// Floating mode must hide the actual setup collapsible from index.html; a mismatched
+// class name leaves the summary bar visible and steals transcript height.
+assert.match(html, /<details id="liveSetupDetails" class="setup-details"/);
+assert.doesNotMatch(liveCss, /\.live-floating \.live-setup-details/);
+const floatingHideRule = liveCss.split("}").find((block) => block.includes(".live-floating .setup-details"));
+assert.ok(floatingHideRule && floatingHideRule.includes("display: none"),
+  "floating mode must hide .live-floating .setup-details");
 
 console.log("window resize contract tests passed");
 
@@ -67,6 +75,7 @@ async function verifyResponsiveWindows() {
     assert.equal(await page.evaluate(() => getSelection()?.toString() || ""), "",
       "dragging the topbar status must not select text");
     const cases = [
+      { mode: "home", width: 640, height: 520, open: () => page.evaluate(async () => { window.applyWindowMode("home"); await window.HomeUi.open(); }) },
       { mode: "settings", width: 640, height: 480, open: () => page.evaluate(() => window.mockOpenSettings()) },
       { mode: "file", width: 720, height: 520, open: () => page.evaluate(() => window.applyWindowMode("file")) },
       { mode: "meeting", width: 720, height: 520, open: () => page.evaluate(async () => {
@@ -79,46 +88,27 @@ async function verifyResponsiveWindows() {
       await page.setViewportSize({ width: item.width, height: item.height });
       await item.open();
       if (item.mode === "settings") {
-        await page.evaluate(() => {
-          const bridge = window.mimoInput;
-          window.mimoInput = new Proxy(bridge, {
-            get(target, name) {
-              if (name === "listProviderModels") {
-                return async () => ({ ok: true, models: ["gpt-5.4-mini", "openai/gpt-5.6", "o4-mini"], latencyMs: 12 });
-              }
-              return target[name];
-            }
-          });
-        });
-        await page.locator('[data-settings-tab="cleaner"]').click();
-        await page.locator("#cleanerProviderSelect").selectOption("openai-compatible");
-        await page.locator('[data-settings-tab="meeting"]').click();
-        await page.locator("#meetingAnalysisProviderSelect").selectOption("openai-compatible");
         await page.locator('[data-settings-tab="connections"]').click();
-        await page.locator('.settings-tab-panel.is-active [data-provider-model-refresh="openai"]').click();
-        await page.waitForFunction(() => [...document.querySelectorAll("#cleanerModelPresetSelect option")]
-          .some(option => option.value === "openai/gpt-5.6"));
+        await page.locator("#textSupplierAdd").click();
+        await page.locator("#textSupplierId").fill("resize-vendor");
+        await page.locator("#textSupplierBaseUrl").fill("https://example.invalid/v1");
+        await page.locator("#textSupplierApiKey").fill("test-only-resize");
+        await page.locator("#textSupplierSave").click();
+        await page.waitForFunction(() => document.getElementById("textSupplierStatus").textContent.includes("已保存"));
+        await page.locator("#textSupplierRefresh").click();
+        await page.waitForFunction(() => window.mockSettings().textSupplierCatalogs?.["resize-vendor"]?.models?.length);
         await page.locator('[data-settings-tab="cleaner"]').click();
-        await page.locator("#cleanerModelPresetSelect").selectOption("openai/gpt-5.6");
-        assert.equal(await page.locator("#cleanerModelPresetSelect").inputValue(), "openai/gpt-5.6");
-        assert.equal(await page.locator("#cleanerProviderSelect").inputValue(), "openai-compatible");
+        await page.locator("#cleanupSupplierSelect").selectOption("resize-vendor");
+        await page.locator("#cleanupModelSelect").selectOption("custom-text-model");
         await page.locator('[data-settings-tab="meeting"]').click();
-        assert.equal(await page.locator('#meetingAnalysisModelPresetSelect option[value="openai/gpt-5.6"]').count(), 1);
-        await page.locator("#meetingAnalysisModelPresetSelect").selectOption("openai/gpt-5.6");
-        assert.equal(await page.locator("#meetingAnalysisModelPresetSelect").inputValue(), "openai/gpt-5.6");
-        assert.equal(await page.locator("#meetingAnalysisProviderSelect").inputValue(), "openai-compatible");
+        await page.locator("#summarySupplierSelect").selectOption("resize-vendor");
+        await page.locator("#summaryModelSelect").selectOption("custom-text-model");
         await page.locator('[data-settings-tab="cleaner"]').click();
-        await page.locator("#cleanerModelPresetSelect").scrollIntoViewIfNeeded();
         await page.locator("#saveSettingsBtn").click();
-        await page.waitForFunction(() => window.mockCalls.some(call => call.name === "saveSettings" && call.payload?.cleanerModel === "openai/gpt-5.6"));
-        const savedProviders = await page.evaluate(() => {
-          const call = window.mockCalls.filter(item => item.name === "saveSettings" && item.payload?.cleanerModel === "openai/gpt-5.6").at(-1);
-          return {
-            cleaner: call.payload.cleanerProfiles["openai/gpt-5.6"].provider,
-            analysis: call.payload.meetingAnalysisProfiles["openai/gpt-5.6"].provider
-          };
-        });
-        assert.deepEqual(savedProviders, { cleaner: "openai", analysis: "openai" });
+        await page.waitForFunction(() => window.mockCalls.some(call => call.name === "saveSettings" && call.payload?.textModelSelections?.cleanup?.supplierId === "resize-vendor"));
+        const pairs = await page.evaluate(() => window.mockSettings().textModelSelections);
+        assert.deepEqual(pairs.cleanup, { supplierId: "resize-vendor", modelId: "custom-text-model" });
+        assert.deepEqual(pairs.summary, { supplierId: "resize-vendor", modelId: "custom-text-model" });
       }
       const layout = await page.evaluate(() => {
         const shell = document.querySelector(".shell").getBoundingClientRect();
@@ -166,7 +156,8 @@ async function verifyResponsiveWindows() {
       window.mockPush({ status: "recording", recording: true,
         rawText: "用于验证精简窗口可视区域随窗口增大的实时转写内容。\n".repeat(100),
         previewText: "当前实时草稿也应使用可用空间。".repeat(20), previewStatus: "streaming" });
-      document.getElementById("meetingPanel").classList.add("live-floating", "live-compact");
+      await window.mimoInput.meetingLiveWindow({ floating: true });
+      window.mockPush({ window: { floating: true, alwaysOnTop: false } });
     });
     await page.setViewportSize({ width: 420, height: 300 });
     const smallCompact = await page.locator("#liveRaw").evaluate(element => element.clientHeight);

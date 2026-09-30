@@ -2,7 +2,37 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v0.4.7 - 2026-09-30
+
+### Added
+
+- Added a shared Windows/macOS Home view with the current dictation hotkey, local today/week input statistics, file/live-meeting entries, and recent records.
+- Added optional first-run setup for ASR connectivity, text supplier/model discovery, microphone testing, and independently checked dictation/meeting hotkeys. Existing users retain their configuration and can reopen the guide manually.
+- Added atomic local usage persistence with per-recording deduplication. Statistics never store transcripts, audio or credentials.
+- Added arbitrary independent text suppliers with Chat Completions or Responses routing and model discovery for cleanup and summaries.
+
+### Changed
+
+- Added draggable, keyboard-accessible reading-height controls for file results, meeting transcripts and meeting summaries, plus a floating transcript/draft splitter.
+- Meetings automatically enter one unified floating view after recording starts. The view remembers settled normal bounds, uses compact icon controls and red/yellow/green status lights, and exposes a font slider.
+- Shrinking below the small-window threshold shows only current realtime text. Restore and font/opacity controls appear only while the pointer is inside, not from retained keyboard focus. Background opacity supports 0% and returns temporarily to the default 90% on hover without overwriting the saved preference.
+- Windows uses an isolated transparent preview for the zero-background small view, with bounded resize controls and no access to credentials or capture APIs. The regular window retains its native resize frame.
+- Removed the redundant global connection-test button from the Settings header; provider-specific tests remain available.
+- Ali streaming-window rotation now receives the next interval while the old connection awaits final confirmation, preserving ordered final text and explicit failed-window retries.
+
+- Normal app launch and idle tray double-click open Home instead of Settings; active recording windows are brought forward without interrupting capture.
+- Redesigned app, file and meeting icons; added macOS template tray assets and a consistent light translucent shell for Home, Settings and onboarding.
+- Unified file and live-meeting summary generation with optional MiMo full-audio review, a mindmap and coherent contextual paragraphs. Removed the separate correction action from the current UI while preserving old artifacts.
+- Made setup collapsible and transcript/summary reading areas resizable.
+- Opening Settings now enumerates microphones without automatically requesting capture permission; permission/device probes remain explicit actions.
+
+### Tests
+
+- Added usage privacy, retry deduplication, concurrent persistence, local week boundaries and onboarding migration tests.
+- Added browser coverage for Home navigation, the full guide, narrow/minimum layouts and late microphone cleanup, using synthetic credentials and mocked provider responses.
+- Added isolated Windows Electron checks for first launch, Home/Settings navigation and native window constraints without calling providers or touching user configuration.
+- Passed all 50 shared regression scripts, browser reading/hover controls, and native Windows zero-background compositing and restore tests. Added simulated streaming coverage across the 20-minute boundary and independent failed-window replay.
+- macOS capture, paste, permissions and gestures still require Mac builds and hardware validation; local Windows tests do not establish native macOS compatibility.
 
 ## v0.4.6 - 2026-09-20
 

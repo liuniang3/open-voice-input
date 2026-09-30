@@ -6,29 +6,91 @@
     <title>Open Voice Input</title>
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./live-meeting.css" />
+    <link rel="stylesheet" href="./app-shell.css" />
+    <link rel="stylesheet" href="./reading-layout.css" />
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
-        <div>
+        <div class="app-brand">
+          <img class="brand-mark" src="./brand/app.svg" alt="" />
+          <div>
           <h1 id="workspaceHeading">Open Voice Input</h1>
           <p id="apiState">正在检查 API Key...</p>
+          </div>
         </div>
         <div class="window-actions">
-          <button id="settingsBtn" class="icon-btn" title="设置" aria-label="设置">⚙</button>
+          <button id="homeBtn" class="icon-btn" title="返回主页" aria-label="返回主页"><span class="ui-icon icon-home" aria-hidden="true"></span></button>
+          <button id="settingsBtn" class="icon-btn" title="设置" aria-label="设置"><span class="ui-icon icon-settings" aria-hidden="true"></span></button>
           <button id="fileBtn" class="workspace-entry-btn" title="打开文件转写" aria-label="打开文件转写">
-            <span class="workspace-entry-mark file-entry-mark" aria-hidden="true"></span>
+            <img class="workspace-feature-icon" src="./brand/file.svg" alt="" />
             <span>文件转写</span>
           </button>
           <button id="meetingBtn" class="meeting-entry-btn" title="打开会议实时转录" aria-label="打开会议实时转录">
-            <span class="meeting-entry-mark" aria-hidden="true"></span>
+            <img class="workspace-feature-icon" src="./brand/meeting.svg" alt="" />
             <span>会议实时转录</span>
           </button>
           <button id="minimizeBtn" class="icon-btn window-control-btn" title="最小化" aria-label="最小化"></button>
           <button id="maximizeBtn" class="icon-btn window-control-btn" title="最大化" aria-label="最大化"></button>
-          <button id="closeBtn" class="icon-btn" title="隐藏" aria-label="隐藏">×</button>
+          <button id="closeBtn" class="icon-btn" title="隐藏" aria-label="隐藏"><span class="ui-icon icon-close" aria-hidden="true"></span></button>
         </div>
       </header>
+
+      <section id="homePanel" class="home-panel" hidden aria-label="主页">
+        <div class="home-voice-band">
+          <div class="home-voice-status">
+            <div class="home-title-line"><h2>语音输入</h2><span id="homeReadyBadge" class="connection-badge">正在检查</span></div>
+            <span class="home-label">当前快捷键</span>
+            <button id="homeHotkeyEdit" class="home-hotkey" title="修改语音输入快捷键" aria-label="修改语音输入快捷键"><span id="homeHotkeyKeys"></span><span class="ui-icon icon-edit" aria-hidden="true"></span></button>
+            <span id="homeModeLabel" class="home-muted">快速模式</span>
+          </div>
+          <div class="home-stat"><span class="home-label">今日输入</span><p><strong id="homeTodayCount">—</strong><span>次</span></p><span class="home-muted"><b id="homeTodayChars">—</b> 字</span></div>
+          <div class="home-stat"><span class="home-label">本周输入</span><p><strong id="homeWeekCount">—</strong><span>次</span></p><span class="home-muted"><b id="homeWeekChars">—</b> 字</span></div>
+        </div>
+        <div id="homeSetupNotice" class="home-notice" hidden><span class="ui-icon icon-info" aria-hidden="true"></span><span>尚未配置语音识别</span><button id="homeSetupStart" type="button">快速上手<span class="ui-icon icon-arrow" aria-hidden="true"></span></button></div>
+        <div class="home-feature-grid">
+          <article class="home-feature"><img src="./brand/file.svg" alt="" /><div><h2>文件转写</h2><span class="home-muted">音频 / 视频</span></div><button id="homeFileOpen" type="button">选择文件<span class="ui-icon icon-arrow" aria-hidden="true"></span></button></article>
+          <article class="home-feature home-feature-meeting"><img src="./brand/meeting.svg" alt="" /><div><h2>实时会议转录</h2><span class="home-muted">麦克风 / 系统声音</span></div><button id="homeMeetingOpen" type="button">开始会议<span class="ui-icon icon-arrow" aria-hidden="true"></span></button></article>
+        </div>
+        <section class="home-recent" aria-labelledby="homeRecentTitle"><div class="home-section-heading"><h2 id="homeRecentTitle">最近记录</h2><button id="homeRefresh" class="icon-btn" type="button" title="刷新主页" aria-label="刷新主页"><span class="ui-icon icon-refresh" aria-hidden="true"></span></button></div><div id="homeRecentList"></div><p id="homeRecentEmpty" class="home-muted">暂无文件或会议记录</p></section>
+        <div class="home-footer"><div><span id="homeAsrConnection" class="connection-badge">语音识别未配置</span><span id="homeCleanerConnection" class="connection-badge">表达整理未配置</span></div><button id="homeGuideOpen" type="button"><span class="ui-icon icon-info" aria-hidden="true"></span>快速上手</button><span class="home-muted">统计保存在本机</span></div>
+        <p id="homeError" class="inline-error" role="status" hidden></p>
+      </section>
+
+      <section id="onboardingPanel" class="onboarding-panel" hidden aria-label="快速上手">
+        <div class="onboarding-heading"><h2>快速上手</h2><span id="onboardingProgress">1 / 3</span></div>
+        <ol class="onboarding-steps"><li data-guide-step="0">语音识别</li><li data-guide-step="1">表达整理<span>可选</span></li><li data-guide-step="2">麦克风与快捷键</li></ol>
+        <div class="onboarding-body">
+          <section data-guide-panel="0"><h3>连接语音识别</h3>
+            <label class="field"><span>供应商</span><select id="guideAsrProvider"><option value="mimo">MiMo</option><option value="qwen3-asr">千问 ASR</option><option value="fun-asr">Fun-ASR</option></select></label>
+            <label class="field"><span>API 地址</span><input id="guideAsrUrl" type="url" autocomplete="off" placeholder="https://example.com/v1" /></label>
+            <label class="field"><span>API Key</span><div class="secret-control"><input id="guideAsrKey" type="password" autocomplete="off" /><button type="button" data-secret-toggle="guideAsrKey" class="secret-action" title="显示或隐藏 API Key">显示</button><button type="button" data-secret-copy="guideAsrKey" class="secret-action" title="复制 API Key">复制</button></div></label>
+            <label class="field"><span>模型</span><input id="guideAsrModel" type="text" list="guideAsrPresets" autocomplete="off" /><datalist id="guideAsrPresets"></datalist></label>
+            <div class="guide-action-row"><button id="guideAsrTest" type="button"><span class="ui-icon icon-link" aria-hidden="true"></span>测试连接</button><span id="guideAsrTestStatus" role="status" class="home-muted">尚未测试</span></div>
+          </section>
+          <section data-guide-panel="1" hidden><h3>表达整理</h3>
+            <label class="guide-toggle"><input id="guideCleanupEnabled" type="checkbox" /><span>启用转写后的表达整理</span></label>
+            <div id="guideCleanerFields" hidden>
+              <label class="field"><span>文本供应商</span><select id="guideCleanerSupplier"></select></label>
+              <label class="field"><span>显示名称</span><input id="guideCleanerName" type="text" autocomplete="off" /></label>
+              <label class="field"><span>API 地址</span><input id="guideCleanerUrl" type="url" autocomplete="off" placeholder="https://example.com/v1" /></label>
+              <label class="field"><span>API Key</span><div class="secret-control"><input id="guideCleanerKey" type="password" autocomplete="off" /><button type="button" data-secret-toggle="guideCleanerKey" class="secret-action" title="显示或隐藏 API Key">显示</button><button type="button" data-secret-copy="guideCleanerKey" class="secret-action" title="复制 API Key">复制</button></div></label>
+              <label class="field"><span>接口协议</span><select id="guideCleanerStyle"><option value="chat-completions">Chat Completions</option><option value="responses">Responses</option></select></label>
+              <label class="field"><span>模型</span><div class="guide-model-control"><input id="guideCleanerModel" list="guideCleanerModels" type="text" placeholder="选择或填写模型 ID" autocomplete="off" /><button id="guideCleanerFetch" type="button">获取模型</button></div><datalist id="guideCleanerModels"></datalist></label>
+            </div><p id="guideCleanerNote" class="home-muted">未启用时使用快速模式，只进行语音识别。</p>
+          </section>
+          <section data-guide-panel="2" hidden><h3>麦克风与快捷键</h3>
+            <label class="field"><span>麦克风</span><div class="guide-model-control"><select id="guideMicrophone"><option value="">系统默认麦克风</option></select><button id="guideMicrophoneRefresh" type="button" title="授权并刷新麦克风"><span class="ui-icon icon-mic" aria-hidden="true"></span>检查权限</button></div></label>
+            <div class="guide-meter" aria-label="麦克风输入电平"><div id="guideMeterFill"></div></div><div class="guide-action-row"><button id="guideMicrophoneTest" type="button">测试麦克风</button><span id="guideMicrophoneStatus" class="home-muted" role="status">尚未测试</span></div>
+            <label class="field"><span>语音输入快捷键</span><input id="guideHotkey" type="text" readonly placeholder="点击后按下快捷键组合" /></label>
+            <span id="guideHotkeyStatus" class="home-muted" role="status"></span>
+            <label class="field"><span>实时会议快捷键</span><input id="guideMeetingHotkey" type="text" readonly placeholder="点击后按下快捷键组合" /></label>
+            <span id="guideMeetingHotkeyStatus" class="home-muted" role="status"></span>
+          </section>
+          <p id="guideError" class="inline-error" role="alert" hidden></p>
+        </div>
+        <div class="onboarding-nav"><button id="guideSkip" type="button">跳过，稍后配置</button><div><button id="guideBack" type="button">上一步</button><button id="guideNext" type="button" class="primary">下一步<span class="ui-icon icon-arrow" aria-hidden="true"></span></button></div></div>
+      </section>
 
       <div id="recordingChrome" class="recording-chrome" aria-label="录音控制">
         <span>Enter 停止 · Esc 取消</span>
@@ -58,11 +120,12 @@
             <span>按供应商统一配置连接；模型只保存自身参数。</span>
           </div>
           <div class="settings-head-actions">
-            <button id="testConnectionBtn">测试连接</button>
+            <button id="settingsGuideOpen" class="icon-btn" type="button" title="重新打开快速上手" aria-label="重新打开快速上手"><span class="ui-icon icon-info" aria-hidden="true"></span></button>
             <button id="saveSettingsBtn" class="primary">保存</button>
           </div>
         </div>
 
+        <p id="settingsFeedback" class="settings-feedback" role="status" hidden></p>
         <nav class="settings-tabs" role="tablist" aria-label="设置分类">
           <button type="button" class="settings-tab is-active" role="tab" aria-selected="true" data-settings-tab="general">常规</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="connections">供应商连接</button>
@@ -123,6 +186,42 @@
           </div>
 
           <div class="settings-tab-panel" role="tabpanel" data-settings-panel="connections" hidden>
+            <section class="settings-group text-supplier-group" aria-labelledby="textSupplierTitle">
+              <div class="section-title">
+                <strong id="textSupplierTitle">文本模型供应商</strong>
+                <span>表达整理和会议摘要可分别选择供应商。每个供应商的地址、协议和密钥独立保存。</span>
+              </div>
+              <div class="text-supplier-toolbar">
+                <label class="field">
+                  <span>已添加的供应商</span>
+                  <select id="textSupplierList" aria-label="已添加的文本模型供应商"></select>
+                </label>
+                <button id="textSupplierAdd" type="button">添加供应商</button>
+                <button id="textSupplierDelete" type="button">删除</button>
+              </div>
+              <div class="provider-grid">
+                <label class="field"><span>供应商 ID</span><input id="textSupplierId" type="text" maxlength="64" autocomplete="off" placeholder="例如 my-provider" /></label>
+                <label class="field"><span>显示名称</span><input id="textSupplierName" type="text" maxlength="120" autocomplete="off" placeholder="供应商名称" /></label>
+              </div>
+              <div class="provider-grid">
+                <label class="field"><span>API Base URL</span><input id="textSupplierBaseUrl" type="url" autocomplete="off" placeholder="https://example.com/v1" /></label>
+                <label class="field"><span>接口协议</span><select id="textSupplierApiStyle"><option value="chat-completions">Chat Completions</option><option value="responses">Responses</option></select></label>
+              </div>
+              <div class="field">
+                <label for="textSupplierApiKey">API Key</label>
+                <div class="secret-control">
+                  <input id="textSupplierApiKey" type="password" autocomplete="off" />
+                  <button type="button" class="secret-action" data-secret-toggle="textSupplierApiKey" title="显示或隐藏 API Key">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="textSupplierApiKey" title="复制 API Key">复制</button>
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button id="textSupplierSave" type="button" class="primary">保存供应商</button>
+                <button id="textSupplierTest" type="button">测试连接</button>
+                <button id="textSupplierRefresh" type="button">获取模型</button>
+                <span id="textSupplierStatus" class="provider-test-result" role="status" aria-live="polite"></span>
+              </div>
+            </section>
             <section class="settings-group provider-connection-group" aria-labelledby="mimoConnectionTitle">
               <div class="section-title">
                 <strong id="mimoConnectionTitle">MiMo</strong>
@@ -298,17 +397,17 @@
                 <strong>第二步：表达整理</strong>
                 <span>理解本次转写语境，保留原意并整理成清晰、连贯、可直接使用的段落。</span>
               </div>
-              <div class="provider-grid">
+              <div class="provider-grid text-model-picker">
+                <label class="field"><span>供应商</span><select id="cleanupSupplierSelect"></select></label>
+                <label class="field"><span>模型</span><select id="cleanupModelSelect"></select></label>
+              </div>
+              <label id="cleanupCustomModelField" class="field" hidden><span>自定义模型 ID</span><input id="cleanupCustomModelInput" type="text" maxlength="256" autocomplete="off" /></label>
+              <small id="cleanupModelHint" class="model-catalog-status" role="status"></small>
+              <div class="provider-grid legacy-text-config" hidden>
                 <div class="field">
                   <label for="cleanerModelPresetSelect">表达整理模型</label>
                   <div class="model-select-control">
-                    <select id="cleanerModelPresetSelect">
-                      <option value="gpt-5.4-mini">GPT-5.4 mini（推荐）</option>
-                      <option value="grok-4.5">Grok 4.5</option>
-                      <option value="mimo-v2.5">MiMo V2.5</option>
-                      <option value="mimo-v2.5-pro">MiMo V2.5 Pro</option>
-                      <option value="__custom__">自定义模型</option>
-                    </select>
+                    <select id="cleanerModelPresetSelect"><option value="__custom__">自定义模型</option></select>
                     <button type="button" class="model-refresh-btn" data-provider-model-refresh="cleaner" title="从当前供应商接口获取模型列表">获取模型</button>
                   </div>
                   <small class="model-catalog-status" data-provider-model-status="cleaner" aria-live="polite"></small>
@@ -323,11 +422,11 @@
                   </select>
                 </label>
               </div>
-              <label id="cleanerCustomModelField" class="field" hidden>
+              <label id="cleanerCustomModelField" class="field legacy-text-config" hidden>
                 <span>自定义模型名称</span>
                 <input id="cleanerModelInput" type="text" placeholder="输入接口支持的模型 ID" />
               </label>
-              <div id="cleanerCustomConnectionFields" class="custom-connection-fields" hidden>
+              <div id="cleanerCustomConnectionFields" class="custom-connection-fields legacy-text-config" hidden>
                 <p class="settings-note">仅此模型使用以下自定义连接，不会修改 OpenAI 或 MiMo 配置。</p>
                 <label class="field">
                   <span>自定义 Base URL</span>
@@ -421,7 +520,7 @@
                 <span>自定义文件 ASR 模型 ID</span>
                 <input id="meetingFileAsrModelInput" type="text" placeholder="输入模型 ID" autocomplete="off" />
               </label>
-              <p class="settings-note">导入完成后点击“生成原文”，会使用这里选择的模型；完成后可继续“校订并总结”。</p>
+              <p class="settings-note">导入完成后点击“生成原文”，会使用这里选择的模型；完成后可点击“生成摘要”。</p>
             </section>
             <section class="settings-group legacy-meeting-settings" hidden>
               <div class="section-title">
@@ -493,25 +592,24 @@
             </section>
             <section class="settings-group">
               <div class="section-title">
-                <strong>会议校订与总结</strong>
-                <span>模型参数独立保存；GPT 与 MiMo 使用供应商连接。无需 OSS。</span>
+                <strong>会议与文件摘要</strong>
+                <span>生成摘要时使用此模型；实时会议与文件转写共用选择。</span>
               </div>
-              <div class="field">
+              <div class="provider-grid text-model-picker">
+                <label class="field"><span>供应商</span><select id="summarySupplierSelect"></select></label>
+                <label class="field"><span>模型</span><select id="summaryModelSelect"></select></label>
+              </div>
+              <label id="summaryCustomModelField" class="field" hidden><span>自定义模型 ID</span><input id="summaryCustomModelInput" type="text" maxlength="256" autocomplete="off" /></label>
+              <small id="summaryModelHint" class="model-catalog-status" role="status"></small>
+              <div class="field legacy-text-config" hidden>
                 <label for="meetingAnalysisModelPresetSelect">分析模型</label>
                 <div class="model-select-control">
-                  <select id="meetingAnalysisModelPresetSelect">
-                    <option value="gpt-5.4-mini">GPT-5.4 mini</option>
-                    <option value="gpt-5.5">GPT-5.5</option>
-                    <option value="grok-4.5">Grok 4.5</option>
-                    <option value="glm-5.2">GLM 5.2</option>
-                    <option value="mimo-v2.5-pro">MiMo V2.5 Pro</option>
-                    <option value="__custom__">自定义模型</option>
-                  </select>
+                  <select id="meetingAnalysisModelPresetSelect"><option value="__custom__">自定义模型</option></select>
                     <button type="button" class="model-refresh-btn" data-provider-model-refresh="analysis" title="从当前供应商接口获取模型列表">获取模型</button>
                   </div>
                 <small class="model-catalog-status" data-provider-model-status="analysis" aria-live="polite"></small>
               </div>
-              <label class="field">
+              <label class="field legacy-text-config" hidden>
                 <span>连接类型</span>
                 <select id="meetingAnalysisProviderSelect">
                   <option value="openai-compatible">OpenAI</option>
@@ -520,11 +618,11 @@
                   <option value="custom">自定义兼容接口</option>
                 </select>
               </label>
-              <label id="meetingAnalysisCustomModelField" class="field" hidden>
+              <label id="meetingAnalysisCustomModelField" class="field legacy-text-config" hidden>
                 <span>自定义分析模型 ID</span>
                 <input id="meetingAnalysisModelInput" type="text" placeholder="输入模型 ID" autocomplete="off" />
               </label>
-              <div id="meetingAnalysisCustomConnectionFields" class="custom-connection-fields" hidden>
+              <div id="meetingAnalysisCustomConnectionFields" class="custom-connection-fields legacy-text-config" hidden>
                 <p class="settings-note">仅此模型使用以下自定义连接，不会修改 OpenAI 或 MiMo 配置。</p>
                 <label class="field">
                   <span>自定义 Base URL</span>
@@ -610,7 +708,12 @@
         </aside>
 
         <div class="file-main">
-          <section class="file-console" aria-label="文件选择">
+          <details id="fileSetupDetails" class="setup-details" open>
+            <summary class="setup-summary">
+              <span class="setup-summary-label">文件与模型设置</span>
+              <span id="fileSetupSummaryMeta" class="setup-summary-meta"></span>
+            </summary>
+            <section class="file-console" aria-label="文件选择">
             <div class="file-console-head">
               <div>
                 <span class="file-eyebrow">独立文件处理</span>
@@ -651,6 +754,7 @@
             </div>
             <p id="fileHint" class="file-hint">选择一个文件后，会在本地建立独立记录，再按当前文件 ASR 配置转写。</p>
           </section>
+          </details>
 
           <section class="file-process" aria-label="文件处理">
             <div class="file-process-row">
@@ -667,28 +771,30 @@
             </div>
             <div class="file-process-row">
               <div>
-                <span class="file-section-label">第二步 · 校订与总结</span>
+                <span class="file-section-label">第二步 · 生成摘要</span>
                 <strong id="fileAnalysisLabel">尚未开始</strong>
               </div>
-              <select id="fileAnalysisTemplateSelect" title="总结模板">
-                <option value="auto">自动判断</option>
-                <option value="meeting">会议纪要</option>
-                <option value="personal">个人思考</option>
-              </select>
+              <label class="field inline file-summary-model-field">
+                <span>摘要模型</span>
+                <select id="fileSummaryModelSelect" title="选择摘要模型"></select>
+              </label>
+              <label class="file-check" title="勾选后先用 MiMo 对保留音频分块复核，再与文件 ASR 证据比对；默认关闭">
+                <input id="fileAnalysisMimoReview" type="checkbox" />
+                <span>MiMo 音频复核</span>
+              </label>
               <div class="file-action-group">
-                <button type="button" id="fileAnalysisStartBtn" disabled>校订并总结</button>
-                <button type="button" id="fileAnalysisRetryBtn" disabled>重试分析</button>
+                <button type="button" id="fileAnalysisStartBtn" class="primary" disabled>生成摘要</button>
+                <button type="button" id="fileAnalysisRetryBtn" disabled>重试摘要</button>
                 <button type="button" id="fileAnalysisCancelBtn" disabled>取消</button>
               </div>
             </div>
           </section>
 
-          <section class="file-results" aria-label="文件结果">
+          <section id="fileResults" class="file-results reading-resizable" aria-label="文件结果">
             <div class="file-results-head">
               <div class="file-tabs" role="tablist" aria-label="文件结果视图">
                 <button type="button" class="file-tab is-active" role="tab" aria-selected="true" data-file-tab="raw">原始转写</button>
-                <button type="button" class="file-tab" role="tab" aria-selected="false" data-file-tab="corrected">校订文本</button>
-                <button type="button" class="file-tab" role="tab" aria-selected="false" data-file-tab="summary">结构化总结</button>
+                <button type="button" class="file-tab" role="tab" aria-selected="false" data-file-tab="summary">摘要</button>
               </div>
               <div class="file-export-controls">
                 <label class="field inline">
@@ -696,8 +802,7 @@
                   <select id="fileExportScopeSelect" title="选择导出内容">
                     <option value="all">全部</option>
                     <option value="raw">原始转写</option>
-                    <option value="corrected">校订文本</option>
-                    <option value="summary">结构化总结</option>
+                    <option value="summary">摘要</option>
                   </select>
                 </label>
                 <label class="field inline">
@@ -717,6 +822,7 @@
               <div id="fileResultContent" class="file-result-content" hidden></div>
             </div>
           </section>
+          <div class="reading-resize-grip" role="separator" tabindex="0" aria-label="调整文件结果区域高度" aria-orientation="horizontal" data-resize-target="fileResults" title="拖动调整结果区域高度，双击恢复自动大小"></div>
         </div>
       </section>
 
@@ -726,10 +832,8 @@
             <div><span class="live-eyebrow">会议实时转录</span><h2 id="liveSessionTitle">实时会议</h2></div>
             <div class="live-window-tools" role="group" aria-label="窗口控制">
               <button id="liveHistoryToggle" class="live-history-toggle" type="button" aria-expanded="false" aria-controls="liveHistoryBrowser">历史记录 <span id="liveHistoryCount">0</span></button>
-              <button id="liveFloat" type="button" title="切换到悬浮窗" hidden>悬浮窗</button>
-              <label id="livePinField" class="live-check" hidden><input id="liveAlwaysOnTop" type="checkbox" />置顶</label>
-              <button id="liveCompact" type="button" aria-pressed="false" hidden>精简</button>
-              <button id="liveDetail" type="button" title="返回详细视图" hidden>返回详细</button>
+              <button id="liveAlwaysOnTop" class="icon-btn live-icon-tool" type="button" title="置顶显示" aria-label="置顶显示" aria-pressed="false" hidden><span class="ui-icon icon-pin" aria-hidden="true"></span></button>
+              <button id="liveDetail" class="icon-btn live-icon-tool" type="button" title="返回详细视图" aria-label="返回详细视图" hidden><span class="ui-icon icon-panels" aria-hidden="true"></span></button>
             </div>
           </header>
           <section id="liveHistoryBrowser" class="live-history-browser" aria-labelledby="liveHistoryHeading" hidden>
@@ -747,7 +851,12 @@
             <div id="liveHistoryList" class="live-history-list" role="listbox" aria-label="实时会议历史"></div>
             <p id="liveHistoryEmpty" class="live-history-empty">暂无实时会议记录。</p>
           </section>
-          <div class="live-setup">
+          <details id="liveSetupDetails" class="setup-details" open>
+            <summary class="setup-summary">
+              <span class="setup-summary-label">会议设置与保存位置</span>
+              <span id="liveSetupSummaryMeta" class="setup-summary-meta"></span>
+            </summary>
+            <div class="live-setup">
             <label class="field live-title-field">
               <span>会议标题</span>
               <input id="liveTitle" type="text" maxlength="200" placeholder="未命名会议" autocomplete="off" />
@@ -778,11 +887,13 @@
             <button id="liveChooseDestination" type="button">选择文件…</button>
             <button id="liveDefaultDestination" type="button">使用默认位置</button>
           </div>
+          </details>
           <div class="live-transport">
             <button id="liveStart" type="button" class="primary" disabled>开始实时转录</button>
             <button id="livePause" type="button" disabled hidden>暂停</button>
             <button id="liveStop" type="button" class="live-stop" disabled>停止并保存</button>
-            <span id="liveStatus" class="meeting-pill" role="status" data-kind="idle">等待连接</span>
+            <span id="liveStatus" class="live-status-light" role="status" data-kind="idle" title="等待连接" aria-label="等待连接"></span>
+            <label id="liveFontControl" class="live-font-control" hidden><span class="ui-icon icon-type" aria-hidden="true"></span><input id="liveFontSize" type="range" min="12" max="28" value="14" step="1" aria-label="转录字体大小" title="转录字体大小" /><output id="liveFontValue">14</output></label>
             <span class="live-clock"><span id="liveElapsedLabel">本页计时</span><strong id="liveElapsed">00:00</strong></span>
           </div>
           <div class="live-health" role="status" aria-live="polite">
@@ -798,44 +909,43 @@
             <button id="liveOpenMarkdown" type="button" disabled>打开原文 Markdown</button>
             <div id="liveAudioOutputs" class="live-audio-outputs"></div>
           </div>
-          <div id="liveResults" class="live-results">
+          <div class="live-reading-tools"><button id="liveFloat" type="button" title="切换到悬浮窗" hidden><span class="ui-icon icon-float" aria-hidden="true"></span>悬浮窗</button></div>
+          <div id="liveResults" class="live-results reading-resizable">
             <section class="live-text-section" aria-labelledby="liveRawHeading">
               <h2 id="liveRawHeading">原始转写</h2>
               <pre id="liveRaw" class="live-transcript" tabindex="0">尚无转写内容</pre>
+              <div id="liveDraftResize" class="reading-resize-grip draft-resize-grip" role="separator" tabindex="0" aria-label="调整实时草稿占比" aria-orientation="horizontal" data-resize-target="liveResults" data-resize-axis="draft" title="拖动调整实时草稿占比" hidden></div>
               <div id="livePreviewSection" class="live-preview" hidden>
                 <span id="livePreviewStatus" role="status">实时草稿</span>
                 <pre id="livePreview" tabindex="0"></pre>
               </div>
             </section>
-            <section id="liveCorrectedSection" class="live-text-section" aria-labelledby="liveCorrectedHeading" hidden>
-              <h2 id="liveCorrectedHeading">校订文本</h2>
-              <pre id="liveCorrected" class="live-transcript" tabindex="0"></pre>
-            </section>
-            <section id="liveReviewedSection" class="live-text-section" aria-labelledby="liveReviewedHeading" hidden>
-              <h2 id="liveReviewedHeading">音频复核文本</h2>
-              <pre id="liveReviewed" class="live-transcript" tabindex="0"></pre>
-            </section>
           </div>
+          <div class="reading-resize-grip live-result-resize" role="separator" tabindex="0" aria-label="调整转录区域高度" aria-orientation="horizontal" data-resize-target="liveResults" title="拖动调整转录区域高度，双击恢复自动大小"></div>
           <div id="liveCleanupSection" class="live-cleanup" hidden>
-            <label class="field"><span>校订 / 摘要模型</span><select id="liveCleanerModel" aria-label="校订和摘要模型"></select></label>
-            <label class="live-check"><input id="liveUseMimoReview" type="checkbox" />MiMo 音频复核</label>
+            <label class="field"><span>摘要模型</span><select id="liveCleanerModel" aria-label="摘要模型"></select></label>
+            <label class="live-check" title="勾选后先用 MiMo 对保留音频分块复核，再与实时转写证据比对；默认关闭">
+              <input id="liveUseMimoReview" type="checkbox" />MiMo 音频复核
+            </label>
             <label id="liveReviewModelField" class="field" hidden><span>音频复核模型</span><select id="liveReviewModel" aria-label="音频复核模型"></select></label>
-            <button id="liveCleanup" type="button" disabled>校订原文</button>
-            <button id="liveSummarize" type="button" disabled>生成摘要</button>
-            <span id="liveCleanupStatus" role="status">未校订</span>
+            <button id="liveSummarize" type="button" class="primary" disabled>生成摘要</button>
+            <span id="liveCleanupStatus" role="status">未生成摘要</span>
             <span id="livePostprocessStatus" role="status"></span>
-            <button id="liveOpenCleaned" type="button" disabled>打开校订 Markdown</button>
-            <button id="liveOpenReviewed" type="button" disabled>打开复核稿</button>
             <button id="liveOpenSummary" type="button" disabled>打开摘要</button>
-            <output id="liveCleanedPath" class="live-cleaned-path"></output>
           </div>
-          <section id="liveSummarySection" class="live-summary" aria-labelledby="liveSummaryHeading" hidden>
+          <section id="liveSummarySection" class="live-summary reading-resizable" aria-labelledby="liveSummaryHeading" hidden>
             <h2 id="liveSummaryHeading">会议摘要</h2>
             <div class="live-summary-layout">
               <section aria-labelledby="liveMindmapHeading"><h3 id="liveMindmapHeading">会议脉络</h3><div id="liveMindmap" class="live-mindmap"></div></section>
               <section aria-labelledby="liveDetailHeading"><h3 id="liveDetailHeading">详细纪要</h3><div id="liveSummaryDetail" class="live-summary-detail"></div></section>
             </div>
           </section>
+          <div id="liveSummaryResize" class="reading-resize-grip" role="separator" tabindex="0" aria-label="调整摘要区域高度" aria-orientation="horizontal" data-resize-target="liveSummarySection" title="拖动调整摘要区域高度，双击恢复自动大小" hidden></div>
+          <button id="liveRestoreNormal" class="icon-btn live-minimal-restore" type="button" title="恢复悬浮窗" aria-label="恢复悬浮窗" hidden><span class="ui-icon icon-expand" aria-hidden="true"></span></button>
+          <div id="liveMinimalControls" class="live-minimal-controls" hidden>
+            <label title="转录字体大小"><span class="ui-icon icon-type" aria-hidden="true"></span><input id="liveMinimalFontSize" type="range" min="12" max="28" value="14" step="1" aria-label="转录字体大小" /></label>
+            <label title="鼠标移出后的背景不透明度"><span class="ui-icon icon-opacity" aria-hidden="true"></span><input id="liveOpacity" type="range" min="0" max="100" value="90" step="5" aria-label="背景不透明度" /></label>
+          </div>
         </section>
         <div id="legacyMeetingHistoryPanel" class="meeting-history legacy-meeting-workbench" aria-hidden="true" inert hidden>
         <aside class="meeting-sidebar">
@@ -1006,8 +1116,12 @@
     </main>
     <script src="../audio-utils.js"></script>
     <script src="./meeting-ui.js"></script>
+    <script src="./text-supplier-ui.js"></script>
+    <script src="./reading-layout.js"></script>
     <script src="./file-ui.js"></script>
     <script src="./live-meeting-ui.js"></script>
+    <script src="./home-ui.js"></script>
+    <script src="./onboarding-ui.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

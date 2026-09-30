@@ -112,6 +112,11 @@ const settingsTabButtons = [...document.querySelectorAll("[data-settings-tab]")]
 const settingsTabPanels = [...document.querySelectorAll("[data-settings-panel]")];
 const secretToggleButtons = [...document.querySelectorAll("[data-secret-toggle]")];
 const secretCopyButtons = [...document.querySelectorAll("[data-secret-copy]")];
+const textSupplierUi = window.TextSupplierUi;
+const textSupplierList = document.getElementById("textSupplierList");
+const textSupplierStatus = document.getElementById("textSupplierStatus");
+let activeTextSupplierId = "";
+let textSupplierDraftDirty = false;
 const audioTools = window.OpenVoiceAudio;
 
 const desktopPlatform = /Mac/i.test(navigator.userAgentData?.platform || navigator.platform || "")
@@ -474,6 +479,8 @@ let recordingTranscriptionMode = "stable";
 let recordingShortContext = "";
 let recordingAsrMode = "batch";
 let lastVoiceRequest = null;
+let voiceUsageRequestId = "";
+let lastVoiceUsageRequestId = "";
 let resizeTimer = 0;
 let mimoPreviewTimer = 0;
 let mimoPreviewInFlight = false;
@@ -1313,6 +1320,12 @@ function setStatus(kind, title, detail) {
   pulse.dataset.kind = kind;
   statusTitle.textContent = title;
   statusDetail.textContent = detail;
+  const feedback = document.getElementById("settingsFeedback");
+  if (feedback && currentWindowMode === "settings") {
+    feedback.textContent = `${title}${detail ? `：${detail}` : ""}`;
+    feedback.dataset.kind = kind;
+    feedback.hidden = kind === "ready" && title === "就绪";
+  }
   scheduleRecordingResize();
 }
 
@@ -1395,6 +1408,7 @@ async function startRecording({ autoSend = true } = {}) {
   recordingShortContext = buildShortContext();
   recordingAudioPolicy = status?.audioPolicy || recordingAudioPolicy;
   resultText.value = "";
+  voiceUsageRequestId = window.crypto.randomUUID();
   setButtons("recording");
   setStatus("recording", "正在录音", "");
   levelMeter.hidden = false;
@@ -1567,6 +1581,7 @@ async function stopRecording() {
       autoSendAfterTranscript
     };
     lastVoiceRequest = transcriptionRequest;
+    lastVoiceUsageRequestId = voiceUsageRequestId;
 
     if (realtimeSucceeded) {
       await completeRawTranscript(realtimeText, transcriptionRequest);
@@ -1778,6 +1793,7 @@ async function retryLastVoiceRequest() {
     setButtons("ready");
     return;
   }
+  voiceUsageRequestId = lastVoiceUsageRequestId;
   await runVoiceRequest(
     {
       ...lastVoiceRequest,
@@ -1972,7 +1988,8 @@ async function copyResult({ silent = false } = {}) {
   const text = resultText.value.trim();
   if (!text) return;
   try {
-    await window.mimoInput.copyText(text);
+    const response = await window.mimoInput.copyText(text, { requestId: voiceUsageRequestId });
+    if (response?.ok === false) throw new Error("无法写入剪贴板。");
     if (!silent) {
       setStatus("ready", "已复制", "结果已写入剪贴板。");
     }
@@ -1988,7 +2005,8 @@ async function sendResult({ hideAfterSend = false } = {}) {
   if (!text) return;
   setStatus("transcribing", "正在写入", "正在粘贴到上一个焦点应用。");
   try {
-    await window.mimoInput.injectText(text);
+    const response = await window.mimoInput.injectText(text, { requestId: voiceUsageRequestId });
+    if (response?.ok === false) throw new Error("结果已复制，但无法粘贴；请检查辅助功能权限或焦点应用。");
     setStatus("ready", "已发送", "按快捷键开始下一次录音。");
     if (hideAfterSend) {
       await window.mimoInput.hide();
@@ -2241,8 +2259,152 @@ function fillSettingsForm() {
   renderMeetingSettingsMode(settingsMode);
   loadMeetingFileAsrProfileDraft(appSettings.meetingFileAsrModel || MIMO_ASR_MODEL);
   loadMeetingAnalysisProfileDraft(appSettings.meetingAnalysisModel || "gpt-5.4-mini");
+  renderTextSupplierEditor(activeTextSupplierId);
+  renderTextModelPicker("cleanup");
+  renderTextModelPicker("summary");
   if (updateAutoCheckInput) updateAutoCheckInput.checked = appSettings.updateAutoCheck !== false;
   syncWorkbenchProcessModeFromSettings({ silent: true });
+}
+
+function textPickerElements(slot) {
+  const prefix = slot === "cleanup" ? "cleanup" : "summary";
+  return {
+    supplier: document.getElementById(`${prefix}SupplierSelect`),
+    model: document.getElementById(`${prefix}ModelSelect`),
+    customField: document.getElementById(`${prefix}CustomModelField`),
+    customInput: document.getElementById(`${prefix}CustomModelInput`),
+    hint: document.getElementById(`${prefix}ModelHint`)
+  };
+}
+
+function appendOption(select, value, label) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  select.appendChild(option);
+}
+
+function renderTextSupplierEditor(preferredId = "") {
+  if (!textSupplierList || !textSupplierUi) return;
+  const suppliers = textSupplierUi.listSuppliers(appSettings);
+  const selectedId = suppliers.some(supplier => supplier.id === preferredId)
+    ? preferredId : suppliers[0]?.id || "";
+  activeTextSupplierId = selectedId;
+  textSupplierList.replaceChildren();
+  if (!suppliers.length) appendOption(textSupplierList, "", "尚未添加供应商");
+  for (const supplier of suppliers) appendOption(textSupplierList, supplier.id, textSupplierUi.supplierOptionLabel(supplier));
+  textSupplierList.value = selectedId;
+  const entry = (appSettings.textSuppliers || []).find(supplier => supplier.id === selectedId);
+  document.getElementById("textSupplierId").value = entry?.id || "";
+  document.getElementById("textSupplierId").readOnly = Boolean(entry);
+  document.getElementById("textSupplierName").value = entry?.name || "";
+  document.getElementById("textSupplierBaseUrl").value = entry?.baseUrl || "";
+  document.getElementById("textSupplierApiStyle").value = entry?.apiStyle || "chat-completions";
+  document.getElementById("textSupplierApiKey").value = entry?.apiKey || "";
+  document.getElementById("textSupplierDelete").disabled = !entry;
+  document.getElementById("textSupplierDelete").textContent = "删除";
+  delete document.getElementById("textSupplierDelete").dataset.confirm;
+  textSupplierDraftDirty = false;
+}
+
+function renderTextModelPicker(slot, selection = textSupplierUi.selectionFor(appSettings, slot)) {
+  if (!textSupplierUi) return;
+  const elements = textPickerElements(slot);
+  const suppliers = textSupplierUi.listSuppliers(appSettings);
+  elements.supplier.replaceChildren();
+  appendOption(elements.supplier, textSupplierUi.LEGACY_SUPPLIER_ID, "已有连接（兼容）");
+  for (const supplier of suppliers) appendOption(elements.supplier, supplier.id, textSupplierUi.supplierOptionLabel(supplier));
+  if (selection.supplierId && selection.supplierId !== textSupplierUi.LEGACY_SUPPLIER_ID
+    && !suppliers.some(supplier => supplier.id === selection.supplierId)) {
+    appendOption(elements.supplier, selection.supplierId, `${selection.supplierId}（已删除）`);
+  }
+  elements.supplier.value = selection.supplierId || textSupplierUi.LEGACY_SUPPLIER_ID;
+  renderTextPickerModels(slot, selection.modelId);
+}
+
+function currentTextModelSelection(slot) {
+  const elements = textPickerElements(slot);
+  if (!elements.supplier.value) return textSupplierUi.selectionFor(appSettings, slot);
+  const modelId = elements.model.value === textSupplierUi.CUSTOM_MODEL_VALUE
+    ? elements.customInput.value : elements.model.value;
+  return { supplierId: elements.supplier.value, modelId };
+}
+
+function refreshTextModelPickers() {
+  const cleanup = currentTextModelSelection("cleanup");
+  const summary = currentTextModelSelection("summary");
+  renderTextModelPicker("cleanup", cleanup);
+  renderTextModelPicker("summary", summary);
+}
+
+function renderTextPickerModels(slot, preferredModel = "") {
+  const elements = textPickerElements(slot);
+  const supplierId = elements.supplier.value;
+  const supplier = (appSettings.textSuppliers || []).find(entry => entry.id === supplierId);
+  const models = supplierId === textSupplierUi.LEGACY_SUPPLIER_ID
+    ? textSupplierUi.legacyModels(appSettings, slot)
+    : textSupplierUi.catalogModels(appSettings, supplierId);
+  elements.model.replaceChildren();
+  for (const model of models) appendOption(elements.model, model, model);
+  if (preferredModel && !models.includes(preferredModel)) appendOption(elements.model, preferredModel, `${preferredModel}（手动）`);
+  appendOption(elements.model, textSupplierUi.CUSTOM_MODEL_VALUE, "自定义模型 ID…");
+  elements.model.value = preferredModel || (models[0] || textSupplierUi.CUSTOM_MODEL_VALUE);
+  elements.customField.hidden = elements.model.value !== textSupplierUi.CUSTOM_MODEL_VALUE;
+  if (preferredModel) elements.customInput.value = preferredModel;
+  else if (elements.customField.hidden) elements.customInput.value = "";
+  elements.hint.textContent = supplierId !== textSupplierUi.LEGACY_SUPPLIER_ID && !supplier
+    ? "该供应商已删除。请重新选择后保存。"
+    : supplier && !models.length ? "此供应商没有缓存模型；可手动填写模型 ID。" : "";
+}
+
+function selectedTextModel(slot, { allowEmpty = false } = {}) {
+  const elements = textPickerElements(slot);
+  const supplierId = elements.supplier.value;
+  const modelId = textSupplierUi.modelIdOf(elements.model.value === textSupplierUi.CUSTOM_MODEL_VALUE
+    ? elements.customInput.value : elements.model.value);
+  if (!modelId && !(allowEmpty && supplierId === textSupplierUi.LEGACY_SUPPLIER_ID)) {
+    throw new Error(`${slot === "cleanup" ? "表达整理" : "会议摘要"}：请选择或填写模型 ID。`);
+  }
+  if (supplierId !== textSupplierUi.LEGACY_SUPPLIER_ID
+    && !(appSettings.textSuppliers || []).some(entry => entry.id === supplierId)) {
+    throw new Error(`供应商 ${supplierId} 已删除，请重新选择。`);
+  }
+  return { supplierId, modelId };
+}
+
+async function saveTextSupplierDraft() {
+  const id = document.getElementById("textSupplierId").value.trim();
+  const name = document.getElementById("textSupplierName").value.trim();
+  const rawUrl = document.getElementById("textSupplierBaseUrl").value.trim();
+  if (!textSupplierUi.supplierIdOf(id) || id === textSupplierUi.LEGACY_SUPPLIER_ID) throw new Error("供应商 ID 只能使用英文字母、数字、点、横线和下划线。 ");
+  let url;
+  try { url = new URL(rawUrl); } catch { throw new Error("请输入有效的 HTTPS Base URL。"); }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
+    throw new Error("Base URL 必须是无凭据、查询参数或片段的 HTTPS 地址。");
+  }
+  const existing = (appSettings.textSuppliers || []).find(entry => entry.id === id);
+  if (activeTextSupplierId && activeTextSupplierId !== id) throw new Error("供应商 ID 创建后不能修改。");
+  if (!activeTextSupplierId && existing) throw new Error("供应商 ID 已存在，请选择其他 ID。");
+  const entry = {
+    ...existing,
+    id,
+    name: name || id,
+    baseUrl: rawUrl,
+    apiStyle: document.getElementById("textSupplierApiStyle").value,
+    apiKey: document.getElementById("textSupplierApiKey").value.trim()
+  };
+  appSettings = await window.mimoInput.saveSettings({
+    textSuppliers: [...(appSettings.textSuppliers || []).filter(supplier => supplier.id !== id), entry]
+  });
+  renderTextSupplierEditor(id);
+  refreshTextModelPickers();
+  textSupplierStatus.textContent = "供应商已保存。";
+  return id;
+}
+
+async function ensureTextSupplierSaved() {
+  return textSupplierDraftDirty || !activeTextSupplierId
+    ? saveTextSupplierDraft() : activeTextSupplierId;
 }
 
 function renderMeetingSettingsMode(mode) {
@@ -2289,10 +2451,15 @@ function applyWindowMode(mode) {
   document.body.classList.toggle("result-open", mode === "result");
   document.body.classList.toggle("meeting-mode", mode === "meeting");
   document.body.classList.toggle("file-mode", mode === "file");
-  document.body.classList.toggle("secondary-window-mode", ["settings", "result", "meeting", "file"].includes(mode));
+  document.body.classList.toggle("home-mode", mode === "home");
+  document.body.classList.toggle("secondary-window-mode", ["settings", "result", "meeting", "file", "home"].includes(mode));
+  const homePanel = document.getElementById("homePanel");
+  if (homePanel) homePanel.hidden = mode !== "home" || window.OnboardingUi?.isOpen();
+  if (mode !== "home") { window.HomeUi?.close(); if (window.OnboardingUi?.isOpen()) window.OnboardingUi.close(); }
+  else void window.HomeUi?.open();
   if (meetingPanel) meetingPanel.hidden = mode !== "meeting";
   if (filePanel) filePanel.hidden = mode !== "file";
-  if (mode === "recording" || mode === "compact" || mode === "result" || mode === "meeting" || mode === "file") {
+  if (mode === "recording" || mode === "compact" || mode === "result" || mode === "meeting" || mode === "file" || mode === "home") {
     settingsPanel.hidden = true;
   }
   if (mode !== "meeting") {
@@ -2320,6 +2487,7 @@ function renderWindowMaximizeButton(maximized) {
 }
 
 window.applyWindowMode = applyWindowMode;
+window.formatShortcutEvent = formatHotkey;
 
 async function showResultWindow() {
   await window.mimoInput.openResultWindow();
@@ -2328,19 +2496,18 @@ async function showResultWindow() {
 }
 
 async function saveAllSettings() {
+  if (textSupplierDraftDirty) await saveTextSupplierDraft();
+  const cleanupSelection = selectedTextModel("cleanup");
+  const summarySelection = selectedTextModel("summary", { allowEmpty: true });
   normalizeProviderSettingsDraft();
   const asrModel = normalizeAsrModelForSelectedProvider(selectedAsrModel());
   if (!asrModel) throw new Error("请填写 ASR 模型 ID。");
   fillAsrModel(asrModel);
   cacheAsrProfileDraft(asrModel);
-  const cleanerModel = selectedCleanerModel();
-  if (!cleanerModel) throw new Error("请填写表达整理模型 ID。");
-  cacheCleanerProfileDraft(cleanerModel);
   const meetingQwenModel = selectedProfileModel(meetingQwenModelPresetSelect, meetingQwenModelInput);
   const meetingFileAsrModel = selectedProfileModel(meetingFileAsrModelPresetSelect, meetingFileAsrModelInput);
   const meetingFunModel = selectedProfileModel(meetingFunAsrModelPresetSelect, meetingFunAsrModelInput);
-  const meetingAnalysisModel = selectedProfileModel(meetingAnalysisModelPresetSelect, meetingAnalysisModelInput);
-  if (!meetingQwenModel || !meetingFileAsrModel || !meetingFunModel || !meetingAnalysisModel) {
+  if (!meetingQwenModel || !meetingFileAsrModel || !meetingFunModel) {
     throw new Error("请填写所有已选择的自定义模型 ID。");
   }
   if (!isSupportedMeetingLiveModel(meetingQwenModel)) {
@@ -2349,7 +2516,6 @@ async function saveAllSettings() {
   cacheMeetingQwenProfileDraft(meetingQwenModel);
   cacheMeetingFileAsrProfileDraft(meetingFileAsrModel);
   cacheMeetingFunProfileDraft(meetingFunModel);
-  cacheMeetingAnalysisProfileDraft(meetingAnalysisModel);
   const voiceHotkey = hotkeyInput.value.trim() || "CommandOrControl+Alt+M";
   const longHotkey = meetingHotkeyInput.value.trim() || "CommandOrControl+Alt+Shift+M";
   const [voiceCheck, meetingCheck] = await Promise.all([
@@ -2373,13 +2539,9 @@ async function saveAllSettings() {
     asrLanguage: asrLanguageInput.value.trim(),
     asrEnableItn: asrEnableItnInput.checked,
     asrProfiles: appSettings.asrProfiles || {},
-    cleanerProvider: cleanerProviderSelect.value === "mimo"
-      ? "mimo"
-      : cleanerProviderSelect.value === "opencode-go"
-        ? "opencode-go"
-        : "openai-compatible",
-    cleanerProviderFamily: cleanerProviderSelect.value,
-    cleanerModel,
+    cleanerProvider: appSettings.cleanerProvider || "openai-compatible",
+    cleanerProviderFamily: appSettings.cleanerProviderFamily || cleanerProviderSelect.value,
+    cleanerModel: appSettings.cleanerModel || "",
     cleanerProfiles: appSettings.cleanerProfiles || {},
     hotkey: voiceCheck.accelerator || voiceHotkey,
     meetingHotkey: meetingCheck.accelerator || longHotkey,
@@ -2420,8 +2582,8 @@ async function saveAllSettings() {
     meetingOssPrefix: meetingOssPrefixInput?.value.trim() || "meeting",
     meetingOssAccessKeyId: meetingOssAccessKeyIdInput?.value.trim() || "",
     meetingOssAccessKeySecret: meetingOssAccessKeySecretInput?.value.trim() || "",
-    meetingAnalysisModel,
-    meetingAnalysisProviderFamily: meetingAnalysisProviderSelect.value,
+    meetingAnalysisModel: appSettings.meetingAnalysisModel || "",
+    meetingAnalysisProviderFamily: appSettings.meetingAnalysisProviderFamily || meetingAnalysisProviderSelect.value,
     meetingAnalysisProfiles: appSettings.meetingAnalysisProfiles || {},
     meetingAnalysisContextWindow: Number(meetingAnalysisContextInput?.value) || GENERIC_ANALYSIS_CAPABILITY.contextWindow,
     meetingAnalysisMaxOutput: Number(meetingAnalysisMaxOutputInput?.value) || GENERIC_ANALYSIS_CAPABILITY.maxOutput,
@@ -2429,9 +2591,24 @@ async function saveAllSettings() {
     meetingAnalysisTimeoutMs: Number(meetingAnalysisTimeoutInput?.value) || GENERIC_ANALYSIS_CAPABILITY.timeoutMs,
     updateAutoCheck: updateAutoCheckInput?.checked !== false
   };
+  nextSettings.textModelSelections = {
+    ...appSettings.textModelSelections,
+    cleanup: cleanupSelection.supplierId === textSupplierUi.LEGACY_SUPPLIER_ID
+      ? null : cleanupSelection,
+    summary: summarySelection.supplierId === textSupplierUi.LEGACY_SUPPLIER_ID
+      ? null : summarySelection
+  };
+  if (cleanupSelection.supplierId === textSupplierUi.LEGACY_SUPPLIER_ID) {
+    nextSettings.cleanerModel = cleanupSelection.modelId;
+  }
+  if (summarySelection.supplierId === textSupplierUi.LEGACY_SUPPLIER_ID && summarySelection.modelId) {
+    nextSettings.meetingAnalysisModel = summarySelection.modelId;
+  }
   appSettings = await window.mimoInput.saveSettings({
     ...nextSettings
   });
+  renderTextModelPicker("cleanup");
+  renderTextModelPicker("summary");
   syncWorkbenchProcessModeFromSettings({ silent: true });
   await refreshStatus();
   setStatus("ready", "设置已保存", "API、URL、快捷键和麦克风设置已更新。");
@@ -2536,7 +2713,7 @@ async function testConnection() {
   const meetingTest = activeSettingsTab === "meeting";
   const modelId = meetingTest ? selectedProfileModel(meetingQwenModelPresetSelect, meetingQwenModelInput) : null;
   setStatus("transcribing", "正在测试", meetingTest ? "正在检查所选会议实时模型。" : "正在检查短语音 API 配置。");
-  testConnectionBtn.disabled = true;
+  if (testConnectionBtn) testConnectionBtn.disabled = true;
   try {
     await saveAllSettings();
     if (meetingTest) {
@@ -2556,7 +2733,7 @@ async function testConnection() {
   } catch (error) {
     setStatus("error", "连接测试失败", error.message || String(error));
   } finally {
-    testConnectionBtn.disabled = false;
+    if (testConnectionBtn) testConnectionBtn.disabled = false;
     setButtons("ready");
   }
 }
@@ -2621,6 +2798,94 @@ meetingAnalysisProviderSelect.addEventListener("change", () => {
     { providerFamily: meetingAnalysisProviderSelect.value }
   );
 });
+textSupplierList?.addEventListener("change", () => renderTextSupplierEditor(textSupplierList.value));
+document.getElementById("textSupplierAdd")?.addEventListener("click", () => {
+  activeTextSupplierId = "";
+  textSupplierList.replaceChildren();
+  appendOption(textSupplierList, "", "新供应商");
+  for (const supplier of textSupplierUi.listSuppliers(appSettings)) {
+    appendOption(textSupplierList, supplier.id, textSupplierUi.supplierOptionLabel(supplier));
+  }
+  textSupplierList.value = "";
+  for (const id of ["textSupplierId", "textSupplierName", "textSupplierBaseUrl", "textSupplierApiKey"]) {
+    document.getElementById(id).value = "";
+  }
+  document.getElementById("textSupplierId").readOnly = false;
+  document.getElementById("textSupplierApiStyle").value = "chat-completions";
+  document.getElementById("textSupplierDelete").disabled = true;
+  textSupplierDraftDirty = false;
+  textSupplierStatus.textContent = "填写供应商配置后保存。";
+  document.getElementById("textSupplierId").focus();
+});
+for (const id of ["textSupplierId", "textSupplierName", "textSupplierBaseUrl", "textSupplierApiStyle", "textSupplierApiKey"]) {
+  document.getElementById(id)?.addEventListener("input", () => {
+    textSupplierDraftDirty = true;
+    textSupplierStatus.textContent = "有未保存的修改。";
+  });
+}
+document.getElementById("textSupplierSave")?.addEventListener("click", async () => {
+  try { await saveTextSupplierDraft(); }
+  catch (error) { textSupplierStatus.textContent = error.message || String(error); }
+});
+document.getElementById("textSupplierDelete")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  if (!activeTextSupplierId) return;
+  if (button.dataset.confirm !== activeTextSupplierId) {
+    button.dataset.confirm = activeTextSupplierId;
+    button.textContent = "确认删除";
+    textSupplierStatus.textContent = "再次点击确认删除此供应商；已生成的内容不会删除。";
+    return;
+  }
+  try {
+    const deletedId = activeTextSupplierId;
+    appSettings = await window.mimoInput.saveSettings({
+      textSuppliers: (appSettings.textSuppliers || []).filter(entry => entry.id !== deletedId)
+    });
+    renderTextSupplierEditor();
+    refreshTextModelPickers();
+    textSupplierStatus.textContent = "供应商已删除；引用它的模型选择需要重新设置。";
+  } catch (error) { textSupplierStatus.textContent = error.message || String(error); }
+});
+document.getElementById("textSupplierTest")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  textSupplierStatus.textContent = "正在测试连接…";
+  try {
+    const supplierId = await ensureTextSupplierSaved();
+    const modelId = textSupplierUi.catalogModels(appSettings, supplierId)[0]
+      || ["cleanup", "summary"].map(slot => {
+        const selected = textSupplierUi.selectionFor(appSettings, slot);
+        return selected.supplierId === supplierId ? selected.modelId : "";
+      }).find(Boolean) || "";
+    if (!modelId) throw new Error("请先获取模型列表，或在表达整理/摘要设置中填写模型 ID 并保存。");
+    const result = await window.mimoInput.testProviderConnection({ supplierId, modelId });
+    if (!result?.ok || result.supplierId !== supplierId) throw new Error(result?.error?.message || "连接测试失败。");
+    textSupplierStatus.textContent = `连接可用 · ${result.latencyMs || 0}ms`;
+  } catch (error) { textSupplierStatus.textContent = error.message || String(error); }
+  finally { button.disabled = false; }
+});
+document.getElementById("textSupplierRefresh")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  textSupplierStatus.textContent = "正在获取模型…";
+  try {
+    const supplierId = await ensureTextSupplierSaved();
+    const result = await window.mimoInput.listProviderModels({ supplierId });
+    if (!result?.ok || result.supplierId !== supplierId) throw new Error(result?.error?.message || "获取模型失败。");
+    appSettings = await window.mimoInput.getSettings();
+    refreshTextModelPickers();
+    textSupplierStatus.textContent = `已获取 ${result.count || result.models?.length || 0} 个模型。`;
+  } catch (error) { textSupplierStatus.textContent = error.message || String(error); }
+  finally { button.disabled = false; }
+});
+for (const slot of ["cleanup", "summary"]) {
+  const elements = textPickerElements(slot);
+  elements.supplier?.addEventListener("change", () => renderTextPickerModels(slot));
+  elements.model?.addEventListener("change", () => {
+    elements.customField.hidden = elements.model.value !== textSupplierUi.CUSTOM_MODEL_VALUE;
+    if (!elements.customField.hidden) elements.customInput.focus();
+  });
+}
 for (const input of [
   meetingAnalysisContextInput,
   meetingAnalysisMaxOutputInput,
@@ -2660,7 +2925,7 @@ fastModeBtn.addEventListener("click", () => setTranscriptionMode("fast"));
 saveSettingsBtn.addEventListener("click", () => {
   saveAllSettings().catch((error) => setStatus("error", "设置保存失败", error.message || String(error)));
 });
-testConnectionBtn.addEventListener("click", testConnection);
+testConnectionBtn?.addEventListener("click", testConnection);
 resultText.addEventListener("input", () => setButtons("ready"));
 hotkeyInput.addEventListener("focus", () => beginHotkeyCapture("short", hotkeyInput, hotkeyHint, hotkeyStatus));
 hotkeyInput.addEventListener("click", () => beginHotkeyCapture("short", hotkeyInput, hotkeyHint, hotkeyStatus));
@@ -2730,8 +2995,13 @@ window.mimoInput.onOpenSettings(async (tabName) => {
   if (meetingPanel) meetingPanel.hidden = true;
   setSettingsTab(typeof tabName === "string" && tabName ? tabName : activeSettingsTab);
   await refreshStatus();
-  await refreshMicrophones({ requestPermission: true });
+  await refreshMicrophones();
 });
+window.mimoInput.onOpenHome?.(() => {
+  applyWindowMode("home");
+  void window.HomeUi?.open();
+});
+document.getElementById("homeBtn")?.addEventListener("click", () => { void window.mimoInput.openHome(); });
 
 window.mimoInput.onUpdateStatus?.((status) => renderUpdateStatus(status));
 
@@ -4310,6 +4580,6 @@ window.mimoInput.isWindowMaximized?.().then((result) => renderWindowMaximizeButt
 
 bindMeetingUi();
 
-applyWindowMode("compact");
-refreshStatus().then(() => refreshMicrophones());
+applyWindowMode("home");
+refreshStatus().then(() => refreshMicrophones()).catch(() => {});
 setButtons("ready");

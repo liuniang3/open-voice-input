@@ -10,9 +10,13 @@ const end = source.indexOf("function configureApplicationMenu()", start);
 assert(start >= 0 && end > start, "createTray implementation must exist");
 
 const createTraySource = source.slice(start, end);
-assert.match(createTraySource, /tray\.on\("double-click",\s*showSettings\)/,
-  "double-clicking the tray icon must open the default settings view");
+assert.match(createTraySource, /tray\.on\("double-click",\s*showWindowOnly\)/,
+  "double-clicking the tray icon must open the homepage or foreground the active recording");
+const showWindowSource = source.slice(source.indexOf("function showWindowOnly()"), source.indexOf("function showSettings("));
+assert.match(showWindowSource, /captureOwner \|\| realtimeMeeting\?\.status\(\)\.recording/);
+assert.match(showWindowSource, /showHome\(\)/);
+assert.match(showWindowSource, /sendWhenLoaded\(mainWindow, "open-home"\)/);
 assert.doesNotMatch(createTraySource, /tray\.on\("click",\s*showWindowOnly\)/,
   "a tray click must not flash the compact ready window before settings opens");
 
-console.log("Tray double-click settings behavior checks passed.");
+console.log("Tray double-click homepage behavior checks passed.");

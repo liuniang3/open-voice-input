@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8" /><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'none'" /><title>Open Voice Input</title><link rel="stylesheet" href="./meeting-preview.css" /></head>
+<body>
+  <main id="previewSurface" class="preview-surface">
+    <pre id="previewText"></pre>
+    <button id="previewRestore" type="button" title="恢复悬浮窗" aria-label="恢复悬浮窗"><span class="restore-icon"></span></button>
+    <div class="preview-controls">
+      <label title="字体大小"><span class="type-icon"></span><input id="previewFont" type="range" min="12" max="28" value="14" aria-label="字体大小" /></label>
+      <label title="鼠标移出后的背景不透明度"><span class="opacity-icon"></span><input id="previewOpacity" type="range" min="0" max="100" value="0" step="5" aria-label="背景不透明度" /></label>
+    </div>
+    <i class="preview-drag"></i>
+    <i class="resize-edge n" data-edge="n"></i><i class="resize-edge ne" data-edge="ne"></i><i class="resize-edge e" data-edge="e"></i><i class="resize-edge se" data-edge="se"></i>
+    <i class="resize-edge s" data-edge="s"></i><i class="resize-edge sw" data-edge="sw"></i><i class="resize-edge w" data-edge="w"></i><i class="resize-edge nw" data-edge="nw"></i>
+  </main><script src="./meeting-preview.js"></script>
+</body></html>

@@ -39,7 +39,11 @@
     let observedAt = 0;
     let observedElapsed = 0;
     const modelIds = LIVE_MODELS;
-    let windowFlags = { floating: false, compact: false, alwaysOnTop: false };
+    let windowFlags = { floating: false, minimal: false, alwaysOnTop: false, fontSize: 14, opacity: 0.9 };
+    let unsubscribeWindow;
+    let styleTimer;
+    let stylePatch = {};
+    let latestDraft = "";
     let windowBusy = false;
     let windowRevision = 0;
     let summarySignature = "";
@@ -48,6 +52,7 @@
     let historyItems = [];
     let historyOpen = false;
     let historyLoading = false;
+    let setupCollapsedOnActive = false;
     const busy = new Set();
 
     function selectedModel() {
@@ -88,9 +93,16 @@
         ["__custom__", "自定义实时模型 ID"]
       ], chosen);
       setModel(active(dto) ? dto.modelId || chosen : chosen);
-      const cleaner = String(settings.meetingAnalysisModel || settings.cleanerModel || "mimo-v2.5");
-      const cleaners = [...new Set([cleaner, ...Object.keys(settings.cleanerProfiles || {}), ...Object.keys(settings.meetingAnalysisProfiles || {})])];
-      options($("liveCleanerModel"), cleaners.map((id) => [id, id]), cleaner);
+      const picker = win.TextSupplierUi;
+      const summaryOptions = picker.modelOptionGroups(settings, "summary");
+      const selectedSummary = picker.formatPair(summaryOptions.selected.supplierId, summaryOptions.selected.modelId);
+      const cleaners = summaryOptions.groups.flatMap(group => group.models.map(modelId => [
+        picker.formatPair(group.supplierId, modelId), `${group.label} / ${modelId}`
+      ]));
+      if (summaryOptions.selected.modelId && !cleaners.some(([value]) => value === selectedSummary)) {
+        cleaners.push([selectedSummary, `${summaryOptions.selected.supplierId} / ${summaryOptions.selected.modelId}（手动配置）`]);
+      }
+      options($("liveCleanerModel"), cleaners, selectedSummary);
       options($("liveReviewModel"), [...reviewers].map((id) => [id, id]), REVIEW_MODEL);
       destination = String(settings.meetingRealtimeDestination || "");
       $("liveCaptureMode").value = ["system", "microphone", "dual"].includes(settings.meetingCaptureMode) ? settings.meetingCaptureMode : "dual";
@@ -112,6 +124,7 @@
       if (!snapshot || snapshot.ok === false || !STATUS_LABELS[snapshot.status]) return;
       const sameSession = snapshot.sessionId === dto.sessionId;
       if (!sameSession) {
+        latestDraft = "";
         observedAt = 0;
         observedElapsed = 0;
       }
@@ -123,6 +136,8 @@
       }
       // Contract updates are complete DTO snapshots. Never carry outputs into a new session.
       dto = snapshot;
+      if (dto.previewText) latestDraft = dto.previewText;
+      else if (dto.rawText) latestDraft = String(dto.rawText).split(/\n+/).filter(Boolean).at(-1) || latestDraft;
       if (active(dto)) historyOpen = false;
       if (Array.isArray(snapshot.recoverableSessions)) historyItems = snapshot.recoverableSessions;
       if (includeWindow && snapshot.window) acceptWindow(snapshot.window);
@@ -185,11 +200,6 @@
       pane.scrollTop = atBottom ? pane.scrollHeight : previousTop;
     }
 
-    function cleanedPath() {
-      if (!dto.correctedText || dto.cleanupStatus !== "completed") return "";
-      return dto.cleanedMarkdownPath || "";
-    }
-
     function audioOutputs() {
       const paths = Array.isArray(dto.audioPaths) ? dto.audioPaths : Object.values(dto.audioPaths || {});
       return [...new Set(paths.filter((path) => typeof path === "string" && path))];
@@ -197,14 +207,33 @@
 
     function acceptWindow(flags) {
       const previous = { ...windowFlags };
-      for (const key of ["floating", "compact", "alwaysOnTop"]) {
+      for (const key of ["floating", "minimal", "alwaysOnTop"]) {
         if (typeof flags[key] === "boolean") windowFlags[key] = flags[key];
       }
-      if (!windowFlags.floating) windowFlags.compact = false;
+      for (const [key, min, max] of [["fontSize", 12, 28], ["opacity", 0, 1]]) {
+        if (Number.isFinite(flags[key])) windowFlags[key] = Math.min(max, Math.max(min, flags[key]));
+      }
+      if (!windowFlags.floating) windowFlags.minimal = false;
+      else if (Number.isFinite(win.innerWidth) && Number.isFinite(win.innerHeight)) {
+        windowFlags.minimal = win.innerWidth < 420 || win.innerHeight < 260;
+      }
       if (windowFlags.floating) setHistoryOpen(false);
-      if (previous.floating !== windowFlags.floating || previous.compact !== windowFlags.compact) {
+      if (previous.floating !== windowFlags.floating || previous.minimal !== windowFlags.minimal) {
         $("liveMeetingPanel").scrollTop = 0;
       }
+    }
+
+    function presentation(patch) {
+      Object.assign(windowFlags, patch); Object.assign(stylePatch, patch); render();
+      win.clearTimeout(styleTimer);
+      styleTimer = win.setTimeout(() => { void flushPresentation(); }, 160);
+    }
+
+    async function flushPresentation() {
+      const patch = stylePatch; stylePatch = {};
+      if (!Object.keys(patch).length) return;
+      try { await invoke("meetingLiveWindow", patch); }
+      catch (error) { if (opened) { errorText = error.message; render(); } }
     }
 
     // Window changes never participate in capture revisions or mutate the session.
@@ -230,6 +259,7 @@
     function renderSummary() {
       const summary = dto.summary;
       $("liveSummarySection").hidden = !summary;
+      $("liveSummaryResize").hidden = !summary;
       const signature = JSON.stringify(summary || null);
       if (signature === summarySignature) return;
       summarySignature = signature;
@@ -272,18 +302,29 @@
       branches($("liveMindmap"), summary.mindmap);
       const detail = $("liveSummaryDetail");
       const sections = Array.isArray(summary.sections) ? summary.sections.filter(section =>
-        section && typeof section.heading === "string" && Array.isArray(section.items)) : [];
+        section && typeof section.heading === "string"
+        && (Array.isArray(section.items) || Array.isArray(section.paragraphs))) : [];
       if (sections.length) {
         let itemsRemaining = 2000;
         for (const section of sections.slice(0, 200)) {
           add(detail, "h4", section.heading);
-          const list = doc.createElement("ul");
-          detail.appendChild(list);
-          for (const item of section.items) {
+          // Coherent prose paragraphs are the primary reading form of the shared
+          // summary schema; discrete bullet items stay available for action lists.
+          for (const paragraph of (section.paragraphs || [])) {
             if (--itemsRemaining < 0) break;
-            if (!item || typeof item.text !== "string") continue;
-            const li = add(list, "li", item.text);
-            annotations(li, item);
+            if (!paragraph || typeof paragraph.text !== "string") continue;
+            const prose = add(detail, "p", paragraph.text);
+            annotations(prose, paragraph);
+          }
+          const items = (section.items || []).filter(item => item && typeof item.text === "string");
+          if (items.length) {
+            const list = doc.createElement("ul");
+            detail.appendChild(list);
+            for (const item of items) {
+              if (--itemsRemaining < 0) break;
+              const li = add(list, "li", item.text);
+              annotations(li, item);
+            }
           }
         }
         return;
@@ -431,6 +472,20 @@
       $("livePause").textContent = busy.has("pause") ? "正在切换…" : isPaused ? "继续录制" : "暂停";
       $("liveStart").textContent = busy.has("start") ? "正在开始…"
         : batchModel(selectedModel()) ? "开始分段转录" : "开始实时转录";
+      const setupDetails = $("liveSetupDetails");
+      if (setupDetails) {
+        // Collapse setup once when a capture becomes active so the transcript keeps the space.
+        if (isActive && !setupCollapsedOnActive) {
+          setupDetails.open = false;
+          setupCollapsedOnActive = true;
+        }
+        if (!isActive) setupCollapsedOnActive = false;
+      }
+      const setupMeta = $("liveSetupSummaryMeta");
+      if (setupMeta) {
+        const modelLabel = $("liveModel").selectedOptions?.[0]?.textContent || selectedModel() || "";
+        setupMeta.textContent = [dto.title || "未命名会议", modelLabel].filter(Boolean).join(" · ");
+      }
       $("liveStop").textContent = stopFailed ? "重试停止并保存" : busy.has("stop") || dto.status === "stopping" ? "正在停止并保存…" : "停止并保存";
       for (const id of ["liveTitle", "liveModel", "liveCustomModel", "liveCaptureMode", "liveTranscriptionInterval", "liveSaveInterval", "liveChooseDestination", "liveDefaultDestination"]) $(id).disabled = locked;
       $("liveChooseDestination").disabled ||= !can("meetingLiveChooseDestination");
@@ -438,20 +493,35 @@
       $("liveCustomModelField").hidden = $("liveModel").value !== "__custom__";
       $("liveTranscriptionIntervalField").hidden = !batchModel(selectedModel());
       $("liveTranscriptionInterval").disabled = locked || !batchModel(selectedModel());
-      $("liveStatus").textContent = loaded ? isPaused ? "已暂停" : STATUS_LABELS[dto.status] : "等待连接";
-      if (dto.status === "recording" && batchModel(dto.modelId || selectedModel())) $("liveStatus").textContent = "分段转录中";
-      if (dto.status === "stopping" && !dto.recording) $("liveStatus").textContent = "录音已停止 · 识别收尾中";
+      const stateLabel = dto.status === "stopping" && !dto.recording ? "录音已停止 · 识别收尾中"
+        : loaded ? isPaused ? "已暂停" : STATUS_LABELS[dto.status] : "等待连接";
+      $("liveStatus").textContent = "";
+      $("liveStatus").title = stateLabel;
+      $("liveStatus").setAttribute("aria-label", stateLabel);
+      const connectionProblem = ["failed", "needs_retry", "unavailable"].includes(dto.previewStatus) || Boolean(dto.error);
+      $("liveStatus").dataset.light = connectionProblem || ["failed", "interrupted", "needs_retry"].includes(dto.status) ? "red"
+        : !loaded || isPaused || ["starting", "stopping"].includes(dto.status) || ["connecting", "reconnecting", "rotating", "retrying"].includes(dto.previewStatus) ? "yellow" : "green";
       $("liveStatus").dataset.kind = isPaused ? "paused" : dto.status;
       $("liveSessionTitle").textContent = dto.title || "实时会议";
       $("meetingPanel").classList.toggle("live-floating", windowFlags.floating);
-      $("meetingPanel").classList.toggle("live-compact", windowFlags.compact);
-      $("liveFloat").hidden = windowFlags.floating || !isActive || dto.status === "starting";
+      $("meetingPanel").classList.toggle("live-minimal", windowFlags.floating && windowFlags.minimal);
+      $("meetingPanel").classList.toggle("live-background-clear", windowFlags.opacity === 0);
+      const shell = doc.querySelector?.(".shell");
+      if (shell?.style) {
+        shell.style.setProperty("--live-opacity", String(windowFlags.opacity));
+        shell.style.setProperty("--live-font-size", `${windowFlags.fontSize}px`);
+      }
+      $("liveFloat").hidden = windowFlags.floating || !dto.sessionId || dto.status === "starting";
       $("liveFloat").disabled = windowBusy || !can("meetingLiveWindow");
-      for (const id of ["liveCompact", "liveDetail", "livePinField"]) $(id).hidden = !windowFlags.floating;
-      for (const id of ["liveCompact", "liveDetail", "liveAlwaysOnTop"]) $(id).disabled = windowBusy || !can("meetingLiveWindow");
-      $("liveAlwaysOnTop").checked = windowFlags.alwaysOnTop;
-      $("liveCompact").setAttribute("aria-pressed", String(windowFlags.compact));
-      $("liveCompact").textContent = windowFlags.compact ? "展开" : "精简";
+      for (const id of ["liveDetail", "liveAlwaysOnTop", "liveFontControl"]) $(id).hidden = !windowFlags.floating;
+      for (const id of ["liveDetail", "liveAlwaysOnTop", "liveRestoreNormal"]) $(id).disabled = windowBusy || !can("meetingLiveWindow");
+      $("liveAlwaysOnTop").setAttribute("aria-pressed", String(windowFlags.alwaysOnTop));
+      $("liveAlwaysOnTop").title = windowFlags.alwaysOnTop ? "取消置顶" : "置顶显示";
+      $("liveRestoreNormal").hidden = !(windowFlags.floating && windowFlags.minimal);
+      $("liveMinimalControls").hidden = !(windowFlags.floating && windowFlags.minimal);
+      for (const id of ["liveFontSize", "liveMinimalFontSize"]) $(id).value = String(windowFlags.fontSize);
+      $("liveFontValue").textContent = String(windowFlags.fontSize);
+      $("liveOpacity").value = String(Math.round(windowFlags.opacity * 100));
       $("liveQueue").textContent = `待识别 ${pending} 段 · 失败 ${failed} 段`;
       $("liveRetry").disabled = !loaded || isActive || busy.size > 0 || isCleaning
         || !(pending || failed || dto.finalizationPending || dto.error?.code === "live_save_failed"
@@ -485,39 +555,38 @@
       }
       transcript("liveRaw", dto.rawText, "尚无转写内容");
       const isBatch = batchModel(selectedModel());
-      transcript("livePreview", dto.previewText,
+      transcript("livePreview", dto.previewText || (windowFlags.minimal ? latestDraft : ""), windowFlags.floating ? "" :
         isPaused ? "录制已暂停" : dto.status === "stopping" ? "正在确认末尾转写…" : isBatch
           ? "录音持续保存，每 " + $("liveTranscriptionInterval").value + " 秒提交一段 MiMo 转写…" : "正在聆听…");
-      $("livePreviewSection").hidden = !isActive && !dto.previewText;
+      $("livePreviewSection").hidden = !windowFlags.minimal && !isActive && !dto.previewText;
+      $("liveDraftResize").hidden = !windowFlags.floating || windowFlags.minimal || $("livePreviewSection").hidden;
       $("livePreviewStatus").textContent = isPaused ? "已暂停" : isBatch ? "非实时分段转录"
         : ({ connecting: "实时连接中", listening: "正在聆听", streaming: "实时草稿", draft: "实时草稿", reconnecting: "正在重连", draining: "正在确认末尾转写", retrying: "正在补转写", needs_retry: "部分转写待重试", closed: "实时连接已关闭", failed: "实时连接失败", unavailable: "实时预览不可用", completed: "本段已确认" })[dto.previewStatus] || "实时草稿";
       $("livePreviewSection").dataset.kind = dto.previewStatus || "idle";
-      transcript("liveCorrected", dto.correctedText, "尚无校订文本");
-      transcript("liveReviewed", dto.reviewedText, "尚无复核文本");
-      $("liveCorrectedSection").hidden = !dto.correctedText;
-      $("liveReviewedSection").hidden = !dto.reviewedText;
-      $("liveResults").classList.toggle("has-corrected", Boolean(dto.correctedText || dto.reviewedText));
       $("liveCleanupSection").hidden = isActive || !dto.sessionId || dto.status === "idle";
       $("liveCleanerModel").disabled = isCleaning || busy.size > 0;
       $("liveUseMimoReview").disabled = locked;
       $("liveReviewModel").disabled = locked || !$("liveUseMimoReview").checked;
       $("liveReviewModelField").hidden = !$("liveUseMimoReview").checked;
-      const postprocessBlocked = locked || !dto.sessionId || pending > 0 || failed > 0 || dto.finalizationPending || dto.error?.code === "live_save_failed";
-      $("liveCleanup").disabled = postprocessBlocked
-        || !dto.rawText || !$("liveCleanerModel").value || !can("meetingLiveCleanup");
-      $("liveSummarize").disabled = postprocessBlocked || !dto.rawText || !$("liveCleanerModel").value || !can("meetingLiveSummarize");
-      $("liveCleanup").textContent = dto.cleanupStatus === "failed" ? "重试校订" : "校订原文";
-      $("liveCleanupStatus").textContent = processing(dto.cleanupStatus) || busy.has("cleanup") ? `正在校订 ${count(dto.cleanupProgress?.completed)} / ${count(dto.cleanupProgress?.total)} 段`
-        : ({ completed: "校订已另存", failed: "校订失败，原文保留" })[dto.cleanupStatus] || "未校订";
+      const canReviewAudio = $("liveUseMimoReview").checked && audioOutputs().length > 0;
+      const postprocessBlocked = locked || !dto.sessionId || pending > 0 || (failed > 0 && !canReviewAudio)
+        || dto.finalizationPending || dto.error?.code === "live_save_failed";
+      $("liveSummarize").disabled = postprocessBlocked || (!dto.rawText && !canReviewAudio)
+        || !$("liveCleanerModel").value || !can("meetingLiveSummarize");
+      $("liveSummarize").textContent = busy.has("summarize") ? "正在生成摘要…"
+        : dto.summary ? "重新生成摘要" : "生成摘要";
+      $("liveCleanupStatus").textContent = dto.summary ? "摘要已生成"
+        : processing(dto.postprocessStatus) || busy.has("summarize") ? "正在生成摘要"
+        : dto.postprocessStatus === "failed" ? "摘要失败，原文保留"
+        : dto.postprocessStatus === "needs_retry" ? "摘要未完成，可重试"
+        : "未生成摘要";
       const progress = dto.postprocessProgress;
       const operation = progress?.kind === "summary" ? "生成摘要" : progress?.kind === "reconcile" ? "校订" : "处理";
       $("livePostprocessStatus").textContent = ({ queued: "等待处理", running: `正在${operation}`, processing: `正在${operation}`, reviewing: "正在复核音频", cleaning: "正在校订", summarizing: "正在生成摘要", completed: "处理完成", needs_retry: "部分处理待重试", interrupted: "处理已中断，可重试", failed: "处理失败，可重试" })[dto.postprocessStatus]
         || (busy.has("summarize") ? "正在生成摘要" : "");
       if (processing(dto.postprocessStatus) && progress?.total) $("livePostprocessStatus").textContent += ` ${count(progress.completed)} / ${count(progress.total)}`;
       if (progress?.failed) $("livePostprocessStatus").textContent += ` · 失败 ${count(progress.failed)} 段`;
-      $("liveOpenCleaned").disabled = !cleanedPath() || !can("meetingLiveOpenPath");
-      $("liveCleanedPath").textContent = cleanedPath();
-      for (const [id, path] of [["liveOpenReviewed", dto.reviewedMarkdownPath], ["liveOpenSummary", dto.summaryMarkdownPath]]) {
+      for (const [id, path] of [["liveOpenSummary", dto.summaryMarkdownPath]]) {
         $(id).disabled = !path || !can("meetingLiveOpenPath");
         $(id).title = path || "尚未生成";
       }
@@ -540,6 +609,9 @@
           revision += 1;
           accept(snapshot);
         });
+      }
+      if (!unsubscribeWindow && typeof api.onMeetingLiveWindowChanged === "function") {
+        unsubscribeWindow = api.onMeetingLiveWindowChanged(flags => { if (opened) { windowRevision++; acceptWindow(flags); render(); } });
       }
       if (!timer) timer = every(() => {
         renderClock();
@@ -570,6 +642,8 @@
       revision += 1;
       if (typeof unsubscribe === "function") unsubscribe();
       unsubscribe = null;
+      unsubscribeWindow?.(); unsubscribeWindow = null;
+      win.clearTimeout?.(styleTimer); void flushPresentation();
       if (timer) cancel(timer);
       timer = null;
       pollFlight = null;
@@ -598,13 +672,14 @@
     for (const [id, name, method, payload] of [
       ["liveStop", "stop", "meetingLiveStop", () => undefined],
       ["liveRetry", "retry", "meetingLiveRetry", () => ({ sessionId: dto.sessionId })],
-      ["liveCleanup", "cleanup", "meetingLiveCleanup", () => ({ sessionId: dto.sessionId, modelId: $("liveCleanerModel").value,
-        useMimoReview: Boolean($("liveUseMimoReview").checked), reviewModelId: $("liveReviewModel").value })],
-      ["liveSummarize", "summarize", "meetingLiveSummarize", () => ({ sessionId: dto.sessionId, modelId: $("liveCleanerModel").value })],
+      ["liveSummarize", "summarize", "meetingLiveSummarize", () => {
+        const selected = win.TextSupplierUi.parsePair($("liveCleanerModel").value);
+        return { sessionId: dto.sessionId, supplierId: selected.supplierId || win.TextSupplierUi.LEGACY_SUPPLIER_ID,
+          modelId: selected.modelId, useMimoReview: Boolean($("liveUseMimoReview").checked),
+          reviewModelId: $("liveReviewModel").value };
+      }],
       ["liveOpenMarkdown", "open", "meetingLiveOpenPath", () => ({ path: dto.markdownPath })],
-      ["liveOpenReviewed", "open", "meetingLiveOpenPath", () => ({ path: dto.reviewedMarkdownPath })],
-      ["liveOpenSummary", "open", "meetingLiveOpenPath", () => ({ path: dto.summaryMarkdownPath })],
-      ["liveOpenCleaned", "open", "meetingLiveOpenPath", () => ({ path: cleanedPath() })]
+      ["liveOpenSummary", "open", "meetingLiveOpenPath", () => ({ path: dto.summaryMarkdownPath })]
     ]) $(id).addEventListener("click", () => {
       if (!$(id).disabled) void action(name, () => invoke(method, payload()));
     });
@@ -612,16 +687,21 @@
       if (!$("livePause").disabled) void action("pause", () => invoke(dto.paused || dto.status === "paused" ? "meetingLiveResume" : "meetingLivePause"));
     });
     $("liveFloat").addEventListener("click", () => {
-      if (!$("liveFloat").disabled) void changeWindow({ floating: true, compact: false });
+      if (!$("liveFloat").disabled) void changeWindow({ floating: true });
     });
     $("liveDetail").addEventListener("click", () => {
-      if (!$("liveDetail").disabled) void changeWindow({ floating: false, compact: false });
+      if (!$("liveDetail").disabled) void changeWindow({ floating: false });
     });
-    $("liveCompact").addEventListener("click", () => {
-      if (!$("liveCompact").disabled) void changeWindow({ compact: !windowFlags.compact });
+    $("liveAlwaysOnTop").addEventListener("click", () => {
+      if (!$("liveAlwaysOnTop").disabled) void changeWindow({ alwaysOnTop: !windowFlags.alwaysOnTop });
     });
-    $("liveAlwaysOnTop").addEventListener("change", () => {
-      if (!$("liveAlwaysOnTop").disabled) void changeWindow({ alwaysOnTop: $("liveAlwaysOnTop").checked });
+    $("liveRestoreNormal").addEventListener("click", () => { if (!windowBusy) void changeWindow({ restoreNormal: true }); });
+    for (const id of ["liveFontSize", "liveMinimalFontSize"]) $(id).addEventListener("input", () => presentation({ fontSize: Number($(id).value) }));
+    $("liveOpacity").addEventListener("input", () => presentation({ opacity: Number($("liveOpacity").value) / 100 }));
+    win.addEventListener("resize", () => {
+      if (!windowFlags.floating) return;
+      const minimal = win.innerWidth < 420 || win.innerHeight < 260;
+      if (minimal !== windowFlags.minimal) { windowFlags.minimal = minimal; render(); }
     });
     $("liveUseMimoReview").addEventListener("change", render);
     $("liveCleanerModel").addEventListener("change", render);
@@ -670,7 +750,7 @@
     });
     win.addEventListener("beforeunload", close);
     render();
-    return { open, close };
+    return { open, close, openSession: sessionId => action("history", () => invoke("meetingLiveOpenSession", { sessionId })) };
   }
 
   if (typeof module === "object" && module.exports) module.exports = { createLiveMeetingUi };

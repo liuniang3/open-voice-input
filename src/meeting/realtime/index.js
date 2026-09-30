@@ -6,6 +6,7 @@ const { RATE, HEADER_BYTES, normalizeChunk, ensureWave, writePcm, repairWave, re
 const { atomicWrite, readJson, reserveMarkdown, markdown } = require("./storage");
 const {
   profileFor,
+  meetingTextProfile,
   transcriber,
   cleaner,
   previewProfileFor,
@@ -733,8 +734,13 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     if (state.segments.some(s => ["running", "pending"].includes(s.status))) throw new Error("live_cleanup_not_ready");
     const current = state;
     const settings = structuredClone(getSettings());
-    const modelId = options.modelId || settings.meetingAnalysisModel || settings.cleanerModel || "gpt-5.4-mini";
-    const modelProfile = llmImpl ? { provider: "test", modelId } : profileFor(settings, modelId, true);
+    const requestedModel = options.modelId || settings.meetingAnalysisModel || settings.cleanerModel || "gpt-5.4-mini";
+    // A persisted supplier+model pair routes through the supplier registry;
+    // otherwise the legacy family profiles apply unchanged. Shared with the
+    // file summary adapter via meetingTextProfile.
+    const modelProfile = llmImpl ? { provider: "test", modelId: requestedModel }
+      : meetingTextProfile(settings, { slot: "summary", supplierId: options.supplierId, modelId: requestedModel });
+    const modelId = modelProfile.modelId || requestedModel;
     const call = llmImpl || languageModel(modelProfile);
     const providerRequestTimeoutMs = Number.isFinite(Number(modelProfile.requestTimeoutMs))
       && Number(modelProfile.requestTimeoutMs) > 0
@@ -746,7 +752,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       ? Math.floor(Number(modelProfile.maxOutputTokens))
       : 8192;
     const failureCode = kind === "summary" ? "live_summary_failed" : "live_cleanup_failed";
-    const useMimoReview = kind === "reconcile" && options.useMimoReview === true;
+    const useMimoReview = options.useMimoReview === true;
     const reviewModelId = options.reviewModelId || "mimo-v2.5-asr";
     if (useMimoReview && !/^mimo-.*asr/i.test(reviewModelId)) throw new Error("live_model_unsupported");
     const reviewProfile = useMimoReview && !reviewImpl ? profileFor(settings, reviewModelId) : null;
@@ -772,7 +778,9 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       asr: review ? { modelId: reviewModelId, revision: digest(JSON.stringify([reviewProfile?.provider, reviewProfile?.baseUrl])),
         limits: { maxSeconds: 30, maxBytes: 2 * 1024 * 1024 },
         transcribe: ({ audio, signal, segmentIndex }) => review({ audioDataUrl: `data:audio/wav;base64,${audio.toString("base64")}`, signal, segmentIndex }) } : null,
-      llm: { modelId, revision: digest(JSON.stringify([modelProfile.provider, modelProfile.baseUrl])),
+      llm: { modelId, revision: modelProfile.supplierId
+        ? digest(JSON.stringify([modelProfile.provider, modelProfile.baseUrl, modelProfile.supplierId]))
+        : digest(JSON.stringify([modelProfile.provider, modelProfile.baseUrl])),
         complete: ({ messages, signal }) => call({ messages, signal, maxTokens: maxOutputTokens }) },
       limits: { maxRequestsPerRun: 1000, requestTimeoutMs: taskRequestTimeoutMs },
       onUpdate: (update) => {
@@ -790,7 +798,8 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       await persist(); emit();
       const outcome = kind === "reconcile"
         ? await processor.reconcile({ reviewAudio: useMimoReview, retryFailed: true, signal })
-        : await processor.summarize({ source: current.cleanupStatus === "completed" ? "reconciled" : "original", retryFailed: true, signal });
+        : await processor.summarize({ useMimoReview, retryFailed: true, signal,
+          source: "original" });
       if (outcome.status !== "completed" || !outcome.result) {
         current.postprocessStatus = "failed";
         if (kind === "reconcile") current.cleanupStatus = "failed";
@@ -811,7 +820,12 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         current.cleanupStatus = "completed";
         current.summary = null; current.summaryMarkdownPath = "";
       } else {
-        const sections = result.sections.map(section => `## ${section.heading}\n\n${section.items.map(item => `- ${item.text}${item.uncertain ? "（待确认）" : ""}`).join("\n")}\n`).join("\n");
+        const sections = result.sections.map(section => {
+          const paragraphs = (section.paragraphs || []).map(paragraph =>
+            `${paragraph.text}${paragraph.uncertain ? "（待确认）" : ""}`).join("\n\n");
+          const items = (section.items || []).map(item => `- ${item.text}${item.uncertain ? "（待确认）" : ""}`).join("\n");
+          return `## ${section.heading}\n\n${paragraphs}${items ? `${paragraphs ? "\n\n" : ""}${items}` : ""}\n`;
+        }).join("\n");
         current.summary = { mindmap: result.mindmap, sections: result.sections, markdown: sections, title: result.title };
         current.summaryMarkdownPath = await writeResult("summary", result.markdown);
       }

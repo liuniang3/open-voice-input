@@ -238,11 +238,62 @@ function appendTranscriptSection(lines, title, transcript, speakerMap, { preferS
   }
 }
 
+function sharedSummaryClaimText(claim) {
+  const text = String(claim && typeof claim.text === "string" ? claim.text : "").trim();
+  return text ? `${text}${claim.uncertain === true ? "（待确认）" : ""}` : "";
+}
+
+function isSharedSummary(summary) {
+  return Boolean(summary && typeof summary === "object"
+    && ((summary.mindmap && typeof summary.mindmap === "object") || Array.isArray(summary.sections)));
+}
+
+// Shared postprocess summaries read as prose: mindmap branches plus coherent
+// paragraphs with optional discrete action items. Unknown/legacy shapes keep
+// their machine-readable JSON block so older exports stay reproducible.
+function renderSharedSummaryLines(summary, headingPrefix = "") {
+  const out = [];
+  const title = String(summary.title || "").trim();
+  if (title) out.push(`${headingPrefix}${title}`);
+  const mindmap = summary.mindmap && typeof summary.mindmap === "object" ? summary.mindmap : null;
+  if (mindmap) {
+    out.push(`${headingPrefix}脉络`);
+    const walk = (node, depth) => {
+      if (!node || typeof node !== "object" || depth > 12) return;
+      const label = sharedSummaryClaimText(node);
+      if (label) out.push(`${"  ".repeat(depth)}- ${label}`);
+      for (const child of (Array.isArray(node.children) ? node.children : [])) walk(child, depth + 1);
+    };
+    walk(mindmap, 0);
+  }
+  const sections = Array.isArray(summary.sections) ? summary.sections : [];
+  for (const section of sections) {
+    if (!section || typeof section.heading !== "string") continue;
+    out.push("");
+    out.push(`${headingPrefix}${section.heading}`);
+    for (const paragraph of (Array.isArray(section.paragraphs) ? section.paragraphs : [])) {
+      const text = sharedSummaryClaimText(paragraph);
+      if (text) { out.push(text); out.push(""); }
+    }
+    for (const item of (Array.isArray(section.items) ? section.items : [])
+      .map(sharedSummaryClaimText).filter(Boolean)) out.push(`- ${item}`);
+  }
+  if (!sections.length && !mindmap && typeof summary.markdown === "string" && summary.markdown.trim()) {
+    out.push("", summary.markdown.trim());
+  }
+  return out;
+}
+
 function appendSummarySection(lines, summary) {
   lines.push("## 结构化总结");
   lines.push("");
   if (!summary || typeof summary !== "object") {
     lines.push("_（无总结）_");
+    lines.push("");
+    return;
+  }
+  if (isSharedSummary(summary)) {
+    lines.push(...renderSharedSummaryLines(summary, "### "));
     lines.push("");
     return;
   }
@@ -294,7 +345,9 @@ function buildTxt({ transcript, corrected, summary, speakerMap, scope = "all" } 
   if (sc === "all" || sc === "corrected") pushDoc("校订文本", corrected, true);
   if (sc === "all" || sc === "summary") {
     parts.push("【结构化总结】");
-    parts.push(summary ? JSON.stringify(sanitizeExportJson(summary), null, 2) : "（无）");
+    if (!summary) parts.push("（无）");
+    else if (isSharedSummary(summary)) parts.push(renderSharedSummaryLines(summary, "").join("\n"));
+    else parts.push(JSON.stringify(sanitizeExportJson(summary), null, 2));
   }
   return `${parts.join("\n\n")}\n`;
 }

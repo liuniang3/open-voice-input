@@ -9,6 +9,10 @@ const { createOpenAiCompatibleCleanerProvider } = require("./cleaner/openai-comp
 const { createOpenCodeGoCleanerProvider } = require("./cleaner/opencode-go-cleaner-provider");
 const { createMimoClient } = require("./mimo-client");
 const { createOpenAiCompatibleClient, normalizeBaseUrl } = require("./openai-compatible-client");
+const { AsyncLocalStorage } = require("node:async_hooks");
+const { textModelSelectionFor } = require("../settings/text-suppliers");
+const { createTextSupplierChat, resolveTextLlmProfile } = require("./text-supplier-llm");
+const { buildTextCleanupMessages, parseAndValidateCleanupResponse } = require("./cleaner/text-cleanup-method");
 const { createOpenCodeGoClient } = require("./opencode-go-client");
 const { resolveProviderConnection } = require("../settings/provider-connections");
 
@@ -17,8 +21,10 @@ const QWEN_ASR_OPENAI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode
 const QWEN_ASR_MODES = new Set(["batch", "realtime"]);
 
 function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) {
-  let overrideSettings = null;
-  const readSettings = () => overrideSettings || getSettings();
+  // Per-invocation settings scope: concurrent requests each keep their own
+  // snapshot instead of clobbering a shared override mid-flight.
+  const settingsScope = new AsyncLocalStorage();
+  const readSettings = () => settingsScope.getStore() || getSettings();
   const mimoClient = createMimoClient({
     getSettings: () => {
       const settings = readSettings();
@@ -121,6 +127,22 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     "opencode-go": createOpenCodeGoCleanerProvider({ client: openCodeGoCleanerClient })
   };
 
+  function createTextSupplierCleanerProvider(profile) {
+    const chat = createTextSupplierChat(profile);
+    return {
+      id: `text-supplier:${profile.supplierId}`,
+      modelId: profile.modelId,
+      async clean({ rawText, shortContext }) {
+        const response = await chat(buildTextCleanupMessages(rawText, shortContext));
+        return {
+          provider: "text-supplier",
+          text: parseAndValidateCleanupResponse(response.content, rawText),
+          raw: response
+        };
+      }
+    };
+  }
+
   function normalizeTranscriptionMode(mode) {
     return mode === "fast" ? "fast" : "stable";
   }
@@ -130,9 +152,18 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
       const settings = readSettings();
       const mode = normalizeTranscriptionMode(transcriptionMode || settings.transcriptionMode);
       const asrProvider = resolveAsrProvider(settings);
-      const cleanerProvider = resolveCleanerProvider(settings);
       const segments = normalizeAudioSegments({ audioDataUrl, pcm16Base64, audioSegments });
-      logEvent?.("voice-pipeline: mode", `${mode} asr=${asrProvider.id}:${asrProvider.kind || "audio-chat"} cleaner=${cleanerProvider.id}`);
+      // The cleaner resolves lazily: fast mode never needs it, and a missing or
+      // deleted supplier degrades to the raw transcript instead of failing the
+      // dictation or rerouting through another supplier.
+      const cleanerLabel = () => {
+        try {
+          return resolveCleanerProvider(settings).id;
+        } catch (error) {
+          return `unavailable:${error?.code || "error"}`;
+        }
+      };
+      logEvent?.("voice-pipeline: mode", `${mode} asr=${asrProvider.id}:${asrProvider.kind || "audio-chat"} cleaner=${cleanerLabel()}`);
 
       if (mode === "fast") {
         const texts = await transcribeAudioSegments(asrProvider, "transcribeFast", segments, shortContext);
@@ -143,8 +174,9 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
       const rawTranscript = cleanTranscript(joinTranscriptSegments(rawTexts));
       if (!rawTranscript) return "";
 
-      logEvent?.("voice-pipeline: cleaner start", `${cleanerProvider.id}:${resolveCleanerModel()}`);
       try {
+        const cleanerProvider = resolveCleanerProvider(settings);
+        logEvent?.("voice-pipeline: cleaner start", `${cleanerProvider.id}:${resolveCleanerModel()}`);
         const cleanedResult = await cleanerProvider.clean({ rawText: rawTranscript, shortContext });
         logEvent?.("voice-pipeline: cleaner done", cleanedResult.text ? "accepted" : "fallback-empty-or-unsafe");
         return cleanedResult.text || rawTranscript;
@@ -160,9 +192,11 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
       const text = cleanTranscript(rawText);
       if (!text) return "";
       const settings = readSettings();
-      const cleanerProvider = resolveCleanerProvider(settings);
-      logEvent?.("voice-pipeline: cleaner start", `${cleanerProvider.id}:${resolveCleanerModel()}`);
       try {
+        // Missing/deleted suppliers throw supplier_not_found here and degrade
+        // to the raw text; they never fall through to another supplier.
+        const cleanerProvider = resolveCleanerProvider(settings);
+        logEvent?.("voice-pipeline: cleaner start", `${cleanerProvider.id}:${resolveCleanerModel()}`);
         const cleanedResult = await cleanerProvider.clean({ rawText: text, shortContext });
         logEvent?.("voice-pipeline: cleaner done", cleanedResult.text ? "accepted" : "fallback-empty-or-unsafe");
         return cleanedResult.text || text;
@@ -262,7 +296,9 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
         { role: "system", content: "Return exactly {\"text\":\"ok\"}." },
         { role: "user", content: "ok" }
       ];
-      if (settings.cleanerProvider === "opencode-go") {
+      if (textModelSelectionFor(settings, "cleanup")) {
+        await createTextSupplierChat(resolveTextLlmProfile(settings, { slot: "cleanup" }))(messages, { maxTokens: 32 });
+      } else if (settings.cleanerProvider === "opencode-go") {
         await openCodeGoCleanerClient.requestChat(messages, { maxTokens: 32 });
       } else if (["openai", "openai-compatible"].includes(settings.cleanerProvider)) {
         await openAiCleanerClient.requestChat(messages, { maxTokens: 32 });
@@ -293,6 +329,13 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   }
 
   function resolveCleanerProvider(settings) {
+    const pair = textModelSelectionFor(settings, "cleanup");
+    if (pair) {
+      // Explicit (supplierId, modelId) selection: resolve it or fail cleanly,
+      // never fall through to the family-based cleaner providers.
+      const profile = resolveTextLlmProfile(settings, { slot: "cleanup" });
+      return createTextSupplierCleanerProvider(profile);
+    }
     const provider = settings.cleanerProvider === "openai" ? "openai-compatible" : settings.cleanerProvider;
     return cleanerProviders[provider] || cleanerProviders.mimo;
   }
@@ -379,6 +422,11 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   }
 
   function resolveCleanerConnection(settings) {
+    const pair = textModelSelectionFor(settings, "cleanup");
+    if (pair) {
+      const profile = resolveTextLlmProfile(settings, { slot: "cleanup" });
+      return { apiKey: profile.apiKey, baseUrl: profile.baseUrl, apiStyle: profile.apiStyle };
+    }
     return resolveProviderConnection(settings, {
       modelId: settings.cleanerModel,
       provider: settings.cleanerProvider,
@@ -398,18 +446,14 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   }
 
   function resolveCleanerModel() {
-    return readSettings().cleanerModel || "gpt-5.4-mini";
+    const settings = readSettings();
+    const pair = textModelSelectionFor(settings, "cleanup");
+    return pair ? pair.modelId : settings.cleanerModel || "gpt-5.4-mini";
   }
 
   async function withSettingsSnapshot(settingsSnapshot, action) {
     if (!settingsSnapshot) return action();
-    const previous = overrideSettings;
-    overrideSettings = settingsSnapshot;
-    try {
-      return await action();
-    } finally {
-      overrideSettings = previous;
-    }
+    return settingsScope.run(settingsSnapshot, () => action());
   }
 }
 

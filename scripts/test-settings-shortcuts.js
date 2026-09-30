@@ -392,6 +392,8 @@ function mainHarness(platform = "darwin") {
       realpath: async (file) => controls.canonical || file, lstat: async () => ({ isFile: () => true }) },
     "./runtime-log": { createRuntimeLogWriter: () => ({ enqueue: () => {}, close: async () => {} }) },
     "./settings/connection-profiles": { ensureConnectionProfiles },
+    "./settings/text-suppliers": require("../src/settings/text-suppliers"),
+    "./settings/meeting-window": require("../src/settings/meeting-window"),
     "./hotkeys/validate-hotkey": { validateHotkey, normalizeAccelerator },
     "./meeting": { createMeetingCaptureService: () => capture,
       createMeetingSessionAnalyzer: () => { throw new Error("live must not construct legacy analyzer"); },

@@ -466,6 +466,61 @@ async function main() {
     assert.throws(() => createMeetingPreview({ state: {}, windowSeconds: NaN }), { code: "preview_limits_invalid" });
   });
 
+  await test("new live audio and drafts continue while the old rotation awaits its final receipt", async () => {
+    const receipt = deferred();
+    const x = fixture({ windowSeconds: .2, configure: (stream, number) => {
+      if (number === 1) {
+        const finish = stream.finish;
+        stream.finish = async () => { await receipt.promise; await finish(); };
+      } else {
+        const append = stream.appendPcm;
+        stream.appendPcm = async pcm => { await append(pcm); stream.callbacks.onSentence({
+          id: "draft", text: "next live window", beginMs: 0, endMs: 50, final: false
+        }); };
+      }
+    } });
+    x.api.kick(RATE * .3);
+    for (let i = 0; i < 10 && x.streams.length < 2; i++) await turn();
+    assert.equal(x.streams.length, 2, "the new socket must open before the old final receipt");
+    assert.equal(x.api.snapshot().previewText, "next live window");
+    assert.equal(x.state.preview.windows[0].status, "finishing");
+    assert.deepEqual(Buffer.concat(x.streams[1].chunks), wave(RATE * .2, RATE * .3).subarray(44));
+    receipt.resolve(); await x.api.waitForIdle();
+    await x.api.drain(RATE * .3);
+    assert.equal(x.api.snapshot().failedSegments, 0);
+    assert.deepEqual(x.state.preview.windows.map(w => [w.startFrame, w.endFrame]), [[0, RATE * .2], [RATE * .2, RATE * .3]]);
+    await x.api.shutdown();
+  });
+
+  await test("twenty-minute rotation keeps exact ordered coverage, bounded sockets and a recoverable retiring failure", async () => {
+    let opened = 0; let openCount = 0; let maxOpen = 0; const states = [];
+    const state = {};
+    const api = createMeetingPreview({ state, paceMs: 0, reconnectDelayMs: 0,
+      readAudio: async (start, end) => Buffer.concat([wavHeader((end - start) * 2, false), Buffer.alloc((end - start) * 2)]),
+      createStream: ({ onSentence }) => {
+        const id = ++opened; openCount++; maxOpen = Math.max(maxOpen, openCount);
+        let samples = 0; let closed = false;
+        return { ready: Promise.resolve(), appendPcm: async pcm => {
+          samples += pcm.length / 2;
+          onSentence({ id: "current", text: `window ${id}`, beginMs: 0, endMs: samples / RATE * 1000, final: false });
+        }, finish: async () => {
+          onSentence({ id: "current", text: `window ${id}`, beginMs: 0, endMs: samples / RATE * 1000, final: true });
+          if (id === 2) throw new Error("provider error body is not persisted");
+        }, close: () => { if (!closed) { closed = true; openCount--; } } };
+      }, onChange: value => { if (value.previewText) states.push(value.previewText); } });
+    api.kick(RATE * 1250);
+    await api.waitForIdle(); await api.drain(RATE * 1250);
+    assert.equal(opened, 3); assert(maxOpen <= 2);
+    assert(states.includes("window 3"), "preview must continue beyond twenty minutes despite the old receipt failure");
+    assert.deepEqual(state.preview.windows.map(w => [w.startFrame, w.endFrame]), [[0, RATE * 600], [RATE * 600, RATE * 1200], [RATE * 1200, RATE * 1250]]);
+    assert.equal(api.snapshot().failedSegments, 1);
+    assert.deepEqual(api.snapshot().segments.map(s => s.text), ["window 1", "window 2", "window 3"]);
+    assert(!JSON.stringify(state).includes("provider error body"));
+    await api.retry();
+    assert.equal(api.snapshot().failedSegments, 0); assert.equal(opened, 4, "only the failed interval is replayed");
+    await api.shutdown();
+  });
+
   await test("archive invalidation targets overlapping windows and retains their finals until explicit retry", async () => {
     const x = fixture({ windowSeconds: 0.2 });
     await x.api.drain(RATE * 0.4);

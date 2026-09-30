@@ -170,6 +170,22 @@ test("meeting start validates interval bounds and forwards valid independent int
 });
 
 for (const platform of ["win32", "darwin"]) {
+  test(`${platform}: start floats automatically and presentation changes never restart capture`, async () => {
+    const h = mainHarness(platform);
+    h.run(`Object.assign(testWindow, {
+      getNormalBounds: () => ({ x: 20, y: 40, width: 1180, height: 760 }), getMinimumSize: () => [720, 520],
+      isResizable: () => true, isAlwaysOnTop: () => false
+    }); windowMode = 'meeting';`);
+    assert.equal((await h.invoke("meeting:live:start")).ok, true);
+    assert.equal(h.run("liveWindowFlags.floating"), true);
+    assert.equal((await h.invoke("meeting:live:window", { opacity: "0.5" })).error.code, "invalid_payload");
+    await h.invoke("meeting:live:window", { fontSize: 24, opacity: .6 });
+    const snapshot = await h.invoke("meeting:live:status");
+    assert.equal(snapshot.window.fontSize, 24); assert.equal(snapshot.window.opacity, .6);
+    await h.invoke("meeting:live:window", { opacity: 0 });
+    assert.equal((await h.invoke("meeting:live:status")).window.opacity, 0);
+    assert.equal(h.controls.startCount, 1);
+  });
   test(`${platform}: system audio never requests microphone; pause/resume preserve ownership`, async () => {
     const h = mainHarness(platform);
     h.controls.permissions.microphone = "denied";
@@ -207,18 +223,29 @@ for (const platform of ["win32", "darwin"]) {
       maximize: () => { geometry.maximized = true; }, unmaximize: () => { geometry.maximized = false; }
     }); windowMode = 'meeting';`);
     const saved = plain(geometry);
-    const floated = await h.invoke("meeting:live:window", { floating: true, compact: true, alwaysOnTop: true });
+    const floated = await h.invoke("meeting:live:window", { floating: true, alwaysOnTop: true });
     assert.equal(floated.ok, true);
-    assert.equal(floated.window.compact, true);
+    assert.equal(floated.window.minimal, false);
     assert.equal(floated.resizable, true);
-    assert.deepEqual(plain(geometry.minimumSize), [360, 240]);
+    assert.deepEqual(plain(geometry.minimumSize), [240, 100]);
     assert.equal(geometry.top, true);
     assert.equal(h.run("windowMode"), "meeting");
     assert.equal((await h.invoke("meeting:live:status")).window.floating, true);
     h.run("enforceWindowGeometry(testWindow, 'meeting')");
-    assert.equal(geometry.bounds.width, 420);
-    await h.invoke("meeting:live:window", { compact: false });
-    assert.deepEqual(plain(geometry.minimumSize), [520, 420]);
+    assert.equal(geometry.bounds.width, 640);
+    geometry.bounds = { x: 150, y: 90, width: 720, height: 600 };
+    h.run("rememberLiveGeometry(true); observeLiveGeometry()");
+    geometry.bounds = { x: 150, y: 90, width: 450, height: 280 };
+    h.run("observeLiveGeometry()");
+    assert.equal(h.run("livePresentation.normalBounds.width"), 720);
+    assert.equal(h.run("liveWindowCandidate.width"), 450);
+    geometry.bounds = { x: 150, y: 90, width: 280, height: 150 };
+    h.run("observeLiveGeometry()");
+    assert.equal(h.run("liveWindowCandidate"), null);
+    assert.equal((await h.invoke("meeting:live:status")).window.minimal, true);
+    await h.invoke("meeting:live:window", { restoreNormal: true });
+    assert.deepEqual(plain(geometry.bounds), { x: 150, y: 90, width: 720, height: 600 });
+    assert.deepEqual(plain(geometry.minimumSize), [240, 100]);
     geometry.maximized = true;
     const restored = await h.invoke("meeting:live:window", { floating: false });
     assert.equal(restored.floating, false);
@@ -244,9 +271,9 @@ for (const platform of ["win32", "darwin"]) {
     h.run("setWindowMode('meeting')");
     geometry.maximized = true;
     const maximizedBounds = plain(geometry.bounds);
-    await h.invoke("meeting:live:window", { floating: true, compact: true, alwaysOnTop: true });
+    await h.invoke("meeting:live:window", { floating: true, alwaysOnTop: true });
     assert.equal(geometry.maximized, false);
-    await h.invoke("meeting:live:window", { floating: false, compact: false, alwaysOnTop: true });
+    await h.invoke("meeting:live:window", { floating: false, alwaysOnTop: true });
     assert.equal(geometry.maximized, true);
     assert.equal(geometry.top, true);
     assert.deepEqual(plain(geometry.bounds), maximizedBounds);
@@ -265,7 +292,7 @@ for (const platform of ["win32", "darwin"]) {
     assert.equal(h.run("windowMode"), "file");
     assert.equal(geometry.top, false);
     assert.equal(h.run("liveWindowRestore"), null);
-    assert.deepEqual(plain(h.run("liveWindowFlags")), { floating: false, compact: false, alwaysOnTop: false });
+    assert.deepEqual(plain(h.run("liveWindowFlags")), { floating: false, alwaysOnTop: false });
     assert.equal(h.controls.startCount, 0);
   });
 }

@@ -9,6 +9,13 @@ const {
   connectionBaseUrl,
   normalizeProviderConnection
 } = require("../settings/provider-connections");
+const {
+  catalogFor,
+  resolveTextSupplier,
+  sanitizeModelId,
+  sanitizeSupplierId
+} = require("../settings/text-suppliers");
+const { expandSupplierHeaders } = require("./provider-model-catalog");
 
 const TEST_AUDIO_URL = "https://dashscope.oss-cn-beijing.aliyuncs.com/audios/welcome.mp3";
 
@@ -34,7 +41,43 @@ function textModelFor(settings, family) {
   return candidates.find(model => /^(?:gpt|chatgpt|o[134](?:-|$))/i.test(String(model || ""))) || "gpt-5.4-mini";
 }
 
-async function testProviderConnection({ settings, provider, fetchImpl = null } = {}) {
+async function testProviderConnection({ settings, provider, supplierId, modelId, fetchImpl = null } = {}) {
+  const requestedSupplierId = sanitizeSupplierId(supplierId);
+  if (supplierId && !requestedSupplierId) {
+    throw Object.assign(new Error("供应商 ID 无效。"), { code: "supplier_invalid" });
+  }
+  if (requestedSupplierId) {
+    // Named text suppliers test through their own pair (supplierId, modelId);
+    // credentials never fall back to another supplier or a model-name guess.
+    const supplier = resolveTextSupplier(settings, requestedSupplierId);
+    if (!supplier) {
+      throw Object.assign(new Error("未找到指定的文本供应商。"), { code: "supplier_not_found" });
+    }
+    if (!supplier.apiKey) {
+      throw Object.assign(new Error("请先保存该供应商的 API Key。"), { code: "provider_credentials_missing" });
+    }
+    const requestedModel = sanitizeModelId(modelId);
+    const catalogModel = catalogFor(settings, supplier.id).models[0] || "";
+    const model = requestedModel || catalogModel;
+    if (!model) {
+      throw Object.assign(new Error("请选择要测试的模型。"), { code: "supplier_model_missing" });
+    }
+    const startedAt = Date.now();
+    const client = createOpenAiCompatibleClient({
+      apiKey: supplier.apiKey,
+      baseUrl: supplier.baseUrl,
+      model,
+      apiStyle: supplier.apiStyle || API_STYLES.CHAT_COMPLETIONS,
+      requestTimeoutMs: 30000,
+      fetchImpl
+    });
+    await client.requestChat([
+      { role: "system", content: "Reply with OK only." },
+      { role: "user", content: "OK" }
+    ], { maxTokens: 16, requestHeaders: expandSupplierHeaders(supplier.requestHeaders) });
+    return { ok: true, provider: "text-supplier", supplierId: supplier.id, modelId: model,
+      latencyMs: Date.now() - startedAt };
+  }
   if (!Object.values(PROVIDER_FAMILIES).includes(provider)) {
     throw Object.assign(new Error("不支持的供应商连接。"), { code: "provider_not_supported" });
   }

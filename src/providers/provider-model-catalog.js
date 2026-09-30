@@ -6,6 +6,11 @@ const {
   OPENCODE_GO_USER_AGENT,
   createOpenCodeGoSessionId
 } = require("./opencode-go-client");
+const {
+  applySupplierCatalog,
+  sanitizeSupplierId,
+  resolveTextSupplier
+} = require("../settings/text-suppliers");
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -138,7 +143,83 @@ function extractModelIds(body) {
   return extractModelCatalog(body).models;
 }
 
-async function listProviderModels({ settings, provider, fetchImpl = null } = {}) {
+// Compatibility headers for named suppliers: "auto" session tokens expand per
+// request so catalog refreshes keep the OpenCode Go contract without storing
+// generated session ids in settings.
+function expandSupplierHeaders(headers) {
+  const out = {};
+  for (const [name, value] of Object.entries(headers && typeof headers === "object" ? headers : {})) {
+    out[name] = /^x-opencode-session$/i.test(name) && String(value).trim() === "auto"
+      ? createOpenCodeGoSessionId("models")
+      : String(value);
+  }
+  return out;
+}
+
+async function listProviderModels({ settings, provider, supplierId, fetchImpl = null } = {}) {
+  const requestedSupplierId = sanitizeSupplierId(supplierId);
+  if (supplierId && !requestedSupplierId) {
+    throw Object.assign(new Error("供应商 ID 无效。"), { code: "supplier_invalid" });
+  }
+  if (requestedSupplierId) {
+    const supplier = resolveTextSupplier(settings, requestedSupplierId);
+    if (!supplier) {
+      throw Object.assign(new Error("未找到指定的文本供应商。"), { code: "supplier_not_found" });
+    }
+    if (!supplier.apiKey) {
+      throw Object.assign(new Error("请先保存该供应商的 API Key。"), { code: "provider_credentials_missing" });
+    }
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, DEFAULT_TIMEOUT_MS);
+    const startedAt = Date.now();
+    try {
+      const response = await (fetchImpl || globalThis.fetch.bind(globalThis))(modelCatalogEndpoint(supplier.baseUrl), {
+        method: "GET",
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${supplier.apiKey}`,
+          Accept: "application/json",
+          ...expandSupplierHeaders(supplier.requestHeaders)
+        }
+      });
+      if (!response.ok) {
+        throw Object.assign(new Error(`获取模型列表失败（HTTP ${response.status}）。`), {
+          code: "provider_model_catalog_http_error"
+        });
+      }
+      const text = await readTextLimited(response);
+      let body;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        throw Object.assign(new Error("模型列表接口未返回有效 JSON。"), {
+          code: "provider_model_catalog_invalid_json"
+        });
+      }
+      const { models, capabilities } = extractModelCatalog(body);
+      if (!models.length) {
+        throw Object.assign(new Error("接口已连接，但没有返回可用的模型 ID。"), {
+          code: "provider_model_catalog_empty"
+        });
+      }
+      return { ok: true, provider: "text-supplier", supplierId: supplier.id, models, capabilities,
+        count: models.length, latencyMs: Date.now() - startedAt };
+    } catch (error) {
+      if (timedOut) {
+        throw Object.assign(new Error("获取模型列表超时（30 秒）。"), { code: "provider_model_catalog_timeout" });
+      }
+      if (error?.name === "AbortError") {
+        throw Object.assign(new Error("获取模型列表已取消。"), { code: "provider_model_catalog_aborted" });
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   if (![PROVIDER_FAMILIES.OPENAI, PROVIDER_FAMILIES.OPENCODE_GO].includes(provider)) {
     throw Object.assign(new Error("该供应商连接暂不支持自动获取模型列表。"), {
       code: "provider_model_catalog_not_supported"
@@ -204,14 +285,27 @@ async function listProviderModels({ settings, provider, fetchImpl = null } = {})
   }
 }
 
+// Catalog refresh that never mutates settings on failure: the caller only
+// persists the returned copy after a successful fetch.
+async function refreshTextSupplierCatalog({ settings, supplierId, fetchImpl = null } = {}) {
+  const result = await listProviderModels({ settings, supplierId, fetchImpl });
+  return { result, settings: applySupplierCatalog(settings, result.supplierId, {
+    models: result.models,
+    capabilities: result.capabilities,
+    updatedAt: new Date().toISOString()
+  }) };
+}
+
 module.exports = {
   MAX_MODELS,
   MAX_RESPONSE_BYTES,
   UNSAFE_MODEL_IDS,
+  expandSupplierHeaders,
   extractModelCatalog,
   extractModelIds,
   extractProviderCapability,
   listProviderModels,
   modelCatalogEndpoint,
-  readTextLimited
+  readTextLimited,
+  refreshTextSupplierCatalog
 };
