@@ -473,12 +473,14 @@ async function prepareBrowser(page) {
       "/live-meeting.css": ["src/renderer/live-meeting.css", "text/css"],
       "/app-shell.css": ["src/renderer/app-shell.css", "text/css"],
       "/reading-layout.css": ["src/renderer/reading-layout.css", "text/css"],
+      "/supplier-manager.css": ["src/renderer/supplier-manager.css", "text/css"],
       "/reading-layout.js": ["src/renderer/reading-layout.js", "text/javascript"],
       "/home-ui.js": ["src/renderer/home-ui.js", "text/javascript"],
       "/onboarding-ui.js": ["src/renderer/onboarding-ui.js", "text/javascript"],
       "/audio-utils.js": ["src/audio-utils.js", "text/javascript"],
       "/meeting-ui.js": ["src/renderer/meeting-ui.js", "text/javascript"],
       "/text-supplier-ui.js": ["src/renderer/text-supplier-ui.js", "text/javascript"],
+      "/text-supplier-manager.js": ["src/renderer/text-supplier-manager.js", "text/javascript"],
       "/file-ui.js": ["src/renderer/file-ui.js", "text/javascript"],
       "/live-meeting-ui.js": ["src/renderer/live-meeting-ui.js", "text/javascript"],
       "/renderer.js": ["src/renderer/renderer.js", "text/javascript"]
@@ -516,6 +518,7 @@ async function prepareBrowser(page) {
       enumerateDevices: async () => [], getUserMedia: async () => { throw new Error("Microphone forbidden in UI test"); }
     } });
     window.mimoInput = new Proxy({}, { get(_target, name) {
+      if (window.mockApiOverrides?.[name]) return window.mockApiOverrides[name];
       if (/^on[A-Z]/.test(String(name))) return (callback) => { hooks[name] = callback; return () => { delete hooks[name]; }; };
       return async (payload) => {
         window.mockCalls.push({ name, payload });
@@ -530,7 +533,7 @@ async function prepareBrowser(page) {
         if (name === "listProviderModels") {
           if (payload?.supplierId) settings.textSupplierCatalogs = { ...settings.textSupplierCatalogs,
             [payload.supplierId]: { models: ["custom-text-model"] } };
-          return { ok: true, models: ["custom-text-model"], latencyMs: 12 };
+          return { ok: true, supplierId: payload?.supplierId, models: ["custom-text-model"], latencyMs: 12 };
         }
         if (name === "saveSettings") return settings = { ...settings, ...payload };
         if (name === "getStatus") return { settings, hasApiKey: false, registeredHotkeys: [] };

@@ -83,7 +83,7 @@ function resolveMeetingQwenCredentials({ env = process.env, settings = {} } = {}
     // The same settings panel now also configures live streaming. Historical HTTP
     // processing may use only the stored batch profile, never the active live key.
     if (!trimStr(s.meetingQwenProfiles?.[DEFAULT_MODEL]?.apiKey)
-        && !trimStr(s.providerConnections?.aliyun?.apiKey)) {
+        && !trimStr((s.asrConnections || s.providerConnections)?.aliyun?.apiKey)) {
       throw Object.assign(new Error("历史会议 HTTP 转写需要单独配置 qwen3-asr-flash；当前实时模型不能用于此接口。"), {
         code: "meeting_model_unsupported"
       });
@@ -108,6 +108,7 @@ function resolveMeetingQwenCredentials({ env = process.env, settings = {} } = {}
       DEFAULT_PUBLIC_COMPAT
     );
   const connection = resolveProviderConnection(s, {
+    scope: "asr",
     modelId,
     provider: "qwen3-asr",
     operation: "compatible",

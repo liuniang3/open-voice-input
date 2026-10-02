@@ -12,6 +12,8 @@ const API_STYLES = Object.freeze({
   RESPONSES: "responses"
 });
 
+const ASR_PROVIDER_FAMILIES = Object.freeze([PROVIDER_FAMILIES.MIMO, PROVIDER_FAMILIES.ALIYUN]);
+
 const DEFAULT_CONNECTIONS = Object.freeze({
   mimo: Object.freeze({ baseUrl: "https://api.xiaomimimo.com/v1", apiStyle: API_STYLES.CHAT_COMPLETIONS }),
   aliyun: Object.freeze({ baseUrl: "https://dashscope.aliyuncs.com", apiStyle: API_STYLES.CHAT_COMPLETIONS }),
@@ -116,13 +118,26 @@ function mergeProviderConnections(current, updates) {
   return merged;
 }
 
+function mergeAsrConnections(current, updates) {
+  const merged = mergeProviderConnections(current, updates);
+  return Object.fromEntries(ASR_PROVIDER_FAMILIES.filter(family => Object.hasOwn(merged, family))
+    .map(family => [family, merged[family]]));
+}
+
 function resolveProviderConnection(settings, {
   modelId,
   provider,
+  scope = "text",
   operation = "default",
   fallback = {}
 } = {}) {
   const family = providerFamilyFor(modelId, provider);
+  // Once migrated, ASR is authoritative, including an intentionally empty key.
+  // Never borrow a text connection or revive a stale profile after clearing it.
+  if (scope === "asr" && settings?.asrConnections && typeof settings.asrConnections === "object") {
+    const connection = normalizeProviderConnection(family, settings.asrConnections[family]);
+    return { family, ...connection, baseUrl: connectionBaseUrl(family, connection, operation) };
+  }
   const shared = family && settings?.providerConnections?.[family];
   const hasSharedKey = Boolean(trimStr(shared?.apiKey));
   const source = hasSharedKey || !trimStr(fallback?.apiKey) ? shared : fallback;
@@ -139,10 +154,12 @@ function resolveProviderConnection(settings, {
 
 module.exports = {
   API_STYLES,
+  ASR_PROVIDER_FAMILIES,
   DEFAULT_CONNECTIONS,
   PROVIDER_FAMILIES,
   apiStyleFrom,
   connectionBaseUrl,
+  mergeAsrConnections,
   mergeProviderConnections,
   normalizeApiStyle,
   normalizeProviderBaseUrl,

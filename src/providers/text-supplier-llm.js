@@ -45,6 +45,9 @@ function resolveTextLlmProfile(settings, { slot, supplierId, modelId, requestTim
       // reason to silently borrow another supplier's credentials.
       throw Object.assign(new Error("保存的供应商模型选择无效，请重新选择。"), { code: "supplier_invalid" });
     }
+    if (!pair && settings?._languageSuppliersMigrated) {
+      throw Object.assign(new Error("请在语言处理供应商中配置连接，并选择用于表达整理或摘要的模型。"), { code: "supplier_model_missing" });
+    }
     if (!pair) return null;
   } else {
     return null;
@@ -62,6 +65,7 @@ function resolveTextLlmProfile(settings, { slot, supplierId, modelId, requestTim
     apiKey: resolved.apiKey,
     baseUrl: resolved.baseUrl,
     apiStyle: resolved.apiStyle,
+    authStyle: resolved.authStyle,
     requestHeaders: expandSupplierHeaders(resolved.requestHeaders),
     requestTimeoutMs: positiveInteger(requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS),
     // Limits come from the selected supplier's own catalog metadata.
@@ -82,6 +86,8 @@ function createTextSupplierChat(profile, { fetchImpl = null } = {}) {
     baseUrl: profile.baseUrl,
     model: profile.modelId,
     apiStyle: profile.apiStyle,
+    headerName: profile.authStyle === "api-key" ? "api-key" : "Authorization",
+    headerValuePrefix: profile.authStyle === "api-key" ? "" : "Bearer ",
     requestTimeoutMs: profile.requestTimeoutMs,
     fetchImpl
   });

@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="./live-meeting.css" />
     <link rel="stylesheet" href="./app-shell.css" />
     <link rel="stylesheet" href="./reading-layout.css" />
+    <link rel="stylesheet" href="./supplier-manager.css" />
   </head>
   <body>
     <main class="shell">
@@ -117,7 +118,7 @@
         <div class="settings-head">
           <div>
             <strong>设置</strong>
-            <span>按供应商统一配置连接；模型只保存自身参数。</span>
+            <span>语音识别与语言处理分别配置。</span>
           </div>
           <div class="settings-head-actions">
             <button id="settingsGuideOpen" class="icon-btn" type="button" title="重新打开快速上手" aria-label="重新打开快速上手"><span class="ui-icon icon-info" aria-hidden="true"></span></button>
@@ -128,7 +129,8 @@
         <p id="settingsFeedback" class="settings-feedback" role="status" hidden></p>
         <nav class="settings-tabs" role="tablist" aria-label="设置分类">
           <button type="button" class="settings-tab is-active" role="tab" aria-selected="true" data-settings-tab="general">常规</button>
-          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="connections">供应商连接</button>
+          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="asr-connections">语音识别供应商</button>
+          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="connections">语言处理供应商</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="asr">语音识别</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="cleaner">表达整理</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="meeting">会议</button>
@@ -187,45 +189,49 @@
 
           <div class="settings-tab-panel" role="tabpanel" data-settings-panel="connections" hidden>
             <section class="settings-group text-supplier-group" aria-labelledby="textSupplierTitle">
-              <div class="section-title">
-                <strong id="textSupplierTitle">文本模型供应商</strong>
-                <span>表达整理和会议摘要可分别选择供应商。每个供应商的地址、协议和密钥独立保存。</span>
-              </div>
               <div class="text-supplier-toolbar">
-                <label class="field">
-                  <span>已添加的供应商</span>
-                  <select id="textSupplierList" aria-label="已添加的文本模型供应商"></select>
-                </label>
-                <button id="textSupplierAdd" type="button">添加供应商</button>
-                <button id="textSupplierDelete" type="button">删除</button>
+                <div>
+                  <strong id="textSupplierTitle">语言处理供应商</strong>
+                  <span id="textSupplierCount" class="text-supplier-count">0 个供应商</span>
+                </div>
+                <button id="textSupplierAdd" type="button" class="primary"><span class="ui-icon icon-plus" aria-hidden="true"></span>添加供应商</button>
               </div>
-              <div class="provider-grid">
-                <label class="field"><span>供应商 ID</span><input id="textSupplierId" type="text" maxlength="64" autocomplete="off" placeholder="例如 my-provider" /></label>
-                <label class="field"><span>显示名称</span><input id="textSupplierName" type="text" maxlength="120" autocomplete="off" placeholder="供应商名称" /></label>
-              </div>
-              <div class="provider-grid">
-                <label class="field"><span>API Base URL</span><input id="textSupplierBaseUrl" type="url" autocomplete="off" placeholder="https://example.com/v1" /></label>
-                <label class="field"><span>接口协议</span><select id="textSupplierApiStyle"><option value="chat-completions">Chat Completions</option><option value="responses">Responses</option></select></label>
-              </div>
-              <div class="field">
-                <label for="textSupplierApiKey">API Key</label>
-                <div class="secret-control">
-                  <input id="textSupplierApiKey" type="password" autocomplete="off" />
-                  <button type="button" class="secret-action" data-secret-toggle="textSupplierApiKey" title="显示或隐藏 API Key">显示</button>
-                  <button type="button" class="secret-action" data-secret-copy="textSupplierApiKey" title="复制 API Key">复制</button>
+              <div class="text-supplier-layout">
+                <div class="text-supplier-list-wrap">
+                  <label class="field"><span class="sr-only">搜索供应商</span><input id="textSupplierSearch" type="search" placeholder="搜索供应商" autocomplete="off" /></label>
+                  <div id="textSupplierCards" class="text-supplier-cards" role="listbox" aria-label="已添加的文本模型供应商"></div>
+                  <p id="textSupplierEmpty" class="text-supplier-empty">尚未添加文本供应商</p>
+                </div>
+                <div class="text-supplier-editor" id="textSupplierEditor">
+                  <div class="text-supplier-editor-head">
+                    <div>
+                      <span class="text-supplier-editor-kicker">连接详情</span>
+                      <strong id="textSupplierEditorMode">选择一个供应商</strong>
+                    </div>
+                    <div class="supplier-icon-actions">
+                      <button id="textSupplierEdit" type="button" class="icon-btn" title="编辑供应商" aria-label="编辑供应商" disabled><span class="ui-icon icon-pencil" aria-hidden="true"></span></button>
+                      <button id="textSupplierDelete" type="button" class="icon-btn danger-action" title="删除供应商" aria-label="删除供应商" disabled><span class="ui-icon icon-trash-2" aria-hidden="true"></span></button>
+                    </div>
+                  </div>
+                  <dl class="supplier-connection-facts"><div><dt>API 地址</dt><dd id="textSupplierUrlLabel">未配置</dd></div><div><dt>协议</dt><dd id="textSupplierProtocolLabel">—</dd></div><div><dt>API Key</dt><dd id="textSupplierKeyLabel">未配置</dd></div><div><dt>使用位置</dt><dd id="textSupplierUsageLabel">未分配</dd></div></dl>
+                  <div class="text-supplier-catalog-summary">
+                    <div><strong>模型目录</strong><span id="textSupplierCatalogMeta">尚未同步</span></div>
+                    <div id="textSupplierModelPreview" class="text-supplier-model-preview"></div>
+                  </div>
+                  <label class="field"><span>测试模型</span><select id="textSupplierTestModel" disabled></select></label>
+                  <div class="settings-actions text-supplier-actions"><button id="textSupplierRefresh" type="button" disabled><span class="ui-icon icon-refresh" aria-hidden="true"></span>同步模型</button><button id="textSupplierTest" type="button" disabled><span class="ui-icon icon-link" aria-hidden="true"></span>测试连接</button></div>
+                  <div class="supplier-manual-model"><input id="textSupplierManualModel" type="text" maxlength="256" placeholder="模型 ID" autocomplete="off" aria-label="手动添加模型 ID" /><button id="textSupplierModelAdd" type="button" disabled>添加模型</button></div>
+                  <span id="textSupplierStatus" class="provider-test-result" role="status" aria-live="polite"></span>
                 </div>
               </div>
-              <div class="settings-actions">
-                <button id="textSupplierSave" type="button" class="primary">保存供应商</button>
-                <button id="textSupplierTest" type="button">测试连接</button>
-                <button id="textSupplierRefresh" type="button">获取模型</button>
-                <span id="textSupplierStatus" class="provider-test-result" role="status" aria-live="polite"></span>
-              </div>
             </section>
+          </div>
+
+          <div class="settings-tab-panel" role="tabpanel" data-settings-panel="asr-connections" hidden>
             <section class="settings-group provider-connection-group" aria-labelledby="mimoConnectionTitle">
               <div class="section-title">
-                <strong id="mimoConnectionTitle">MiMo</strong>
-                <span id="mimoConnectionDescription">此连接适用于所有 MiMo 语音与文本模型；Token Plan 请填写 token-plan-cn 地址和 tp- Key。</span>
+                <strong id="mimoConnectionTitle">MiMo · 语音识别</strong>
+                <span id="mimoConnectionDescription">用于短语音、文件转写、会议分段转写与音频核对；独立于语言处理连接。Token Plan 请填写 token-plan-cn 地址和 tp- Key。</span>
               </div>
               <label class="field">
                 <span>MiMo Base URL</span>
@@ -234,21 +240,21 @@
               <div class="field">
                 <label for="mimoApiKeyInput">MiMo API Key</label>
                 <div class="secret-control">
-                  <input id="mimoApiKeyInput" type="password" placeholder="所有 MiMo 模型共用" autocomplete="off" aria-describedby="mimoConnectionDescription" />
+                  <input id="mimoApiKeyInput" type="password" placeholder="MiMo ASR API Key" autocomplete="off" aria-describedby="mimoConnectionDescription" />
                   <button type="button" class="secret-action" data-secret-toggle="mimoApiKeyInput" title="显示或隐藏 MiMo API Key">显示</button>
                   <button type="button" class="secret-action" data-secret-copy="mimoApiKeyInput" title="复制 MiMo API Key">复制</button>
                 </div>
               </div>
               <div class="settings-actions">
-                <button type="button" data-provider-connection-test="mimo">测试 MiMo</button>
+                <button type="button" data-provider-connection-test="mimo">测试 MiMo ASR</button>
                 <span class="provider-test-result" data-provider-test-result="mimo" aria-live="polite"></span>
               </div>
             </section>
 
             <section class="settings-group provider-connection-group" aria-labelledby="aliyunConnectionTitle">
               <div class="section-title">
-                <strong id="aliyunConnectionTitle">阿里云百炼</strong>
-                <span id="aliyunConnectionDescription">此 URL 和 API Key 适用于所有 Qwen、Fun-ASR 与会议实时模型。</span>
+                <strong id="aliyunConnectionTitle">阿里云百炼 · 语音识别</strong>
+                <span id="aliyunConnectionDescription">用于 Qwen ASR、Fun-ASR 和会议实时识别；Qwen 文本整理与摘要模型请单独配置语言处理供应商。</span>
               </div>
               <label class="field">
                 <span>阿里云 Base URL</span>
@@ -268,69 +274,13 @@
               </div>
             </section>
 
-            <section class="settings-group provider-connection-group" aria-labelledby="openaiConnectionTitle">
-              <div class="section-title">
-                <strong id="openaiConnectionTitle">OpenAI</strong>
-                <span id="openaiConnectionDescription">此 URL、API Key 和协议适用于所有 GPT 文本模型。</span>
-              </div>
-              <label class="field">
-                <span>OpenAI Base URL</span>
-                <input id="openaiBaseUrlInput" type="url" placeholder="https://api.openai.com/v1" autocomplete="off" aria-describedby="openaiConnectionDescription" />
-              </label>
-              <div class="field">
-                <label for="openaiApiKeyInput">OpenAI API Key</label>
-                <div class="secret-control">
-                  <input id="openaiApiKeyInput" type="password" placeholder="所有 GPT 模型共用" autocomplete="off" aria-describedby="openaiConnectionDescription" />
-                  <button type="button" class="secret-action" data-secret-toggle="openaiApiKeyInput" title="显示或隐藏 OpenAI API Key">显示</button>
-                  <button type="button" class="secret-action" data-secret-copy="openaiApiKeyInput" title="复制 OpenAI API Key">复制</button>
-                </div>
-              </div>
-              <label class="field">
-                <span>OpenAI API 协议</span>
-                <select id="openaiApiStyleSelect" aria-describedby="openaiConnectionDescription">
-                  <option value="responses">Responses API</option>
-                  <option value="chat-completions">Chat Completions API</option>
-                </select>
-              </label>
-              <div class="settings-actions">
-                <button type="button" data-provider-connection-test="openai">测试 OpenAI</button>
-                <span class="provider-test-result" data-provider-test-result="openai" aria-live="polite"></span>
-                <button type="button" data-provider-model-refresh="openai">获取模型列表</button>
-                <span class="provider-test-result" data-provider-model-status="openai" aria-live="polite"></span>
-              </div>
-            </section>
-
-            <section class="settings-group provider-connection-group" aria-labelledby="openCodeGoConnectionTitle">
-              <div class="section-title">
-                <strong id="openCodeGoConnectionTitle">OpenCode Go（实验性）</strong>
-                <span id="openCodeGoConnectionDescription">用于稳定模式表达整理和会议校订/总结；该服务主要面向 coding agent，非代码任务可能受限。</span>
-              </div>
-              <label class="field">
-                <span>OpenCode Go Base URL</span>
-                <input id="openCodeGoBaseUrlInput" type="url" placeholder="https://opencode.ai/zen/go/v1" autocomplete="off" aria-describedby="openCodeGoConnectionDescription" />
-              </label>
-              <div class="field">
-                <label for="openCodeGoApiKeyInput">OpenCode Go API Key</label>
-                <div class="secret-control">
-                  <input id="openCodeGoApiKeyInput" type="password" placeholder="仅 OpenCode Go 模型使用" autocomplete="off" aria-describedby="openCodeGoConnectionDescription" />
-                  <button type="button" class="secret-action" data-secret-toggle="openCodeGoApiKeyInput" title="显示或隐藏 OpenCode Go API Key">显示</button>
-                  <button type="button" class="secret-action" data-secret-copy="openCodeGoApiKeyInput" title="复制 OpenCode Go API Key">复制</button>
-                </div>
-              </div>
-              <div class="settings-actions">
-                <button type="button" data-provider-connection-test="opencode-go">测试 OpenCode Go</button>
-                <span class="provider-test-result" data-provider-test-result="opencode-go" aria-live="polite"></span>
-                <button type="button" data-provider-model-refresh="opencode-go">获取模型列表</button>
-                <span class="provider-test-result" data-provider-model-status="opencode-go" aria-live="polite"></span>
-              </div>
-            </section>
           </div>
 
           <div class="settings-tab-panel" role="tabpanel" data-settings-panel="asr" hidden>
             <section class="settings-group">
               <div class="section-title">
                 <strong>第一步：语音识别</strong>
-                <span>模型选项独立保存；连接统一使用 MiMo 或阿里云配置。</span>
+                <span>连接来自“语音识别供应商”，与表达整理、摘要的语言处理连接独立。</span>
               </div>
               <div class="provider-grid">
                 <label class="field">
@@ -417,7 +367,7 @@
                   <select id="cleanerProviderSelect">
                     <option value="openai-compatible">OpenAI</option>
                     <option value="mimo">MiMo</option>
-                    <option value="opencode-go">OpenCode Go（实验性）</option>
+                    <option value="opencode-go">兼容旧供应商配置</option>
                     <option value="custom">自定义兼容接口</option>
                   </select>
                 </label>
@@ -614,7 +564,7 @@
                 <select id="meetingAnalysisProviderSelect">
                   <option value="openai-compatible">OpenAI</option>
                   <option value="mimo">MiMo</option>
-                  <option value="opencode-go">OpenCode Go（实验性）</option>
+                  <option value="opencode-go">兼容旧供应商配置</option>
                   <option value="custom">自定义兼容接口</option>
                 </select>
               </label>
@@ -1114,9 +1064,35 @@
         <span>Esc 隐藏</span>
       </footer>
     </main>
+    <dialog id="textSupplierDialog" class="supplier-dialog" aria-labelledby="supplierDialogTitle">
+      <form id="textSupplierForm" class="supplier-form" novalidate>
+        <header class="supplier-dialog-header"><div><h2 id="supplierDialogTitle">添加供应商</h2><span id="supplierDialogSubtitle">文本模型连接</span></div><button id="textSupplierClose" type="button" class="icon-btn" title="关闭" aria-label="关闭添加供应商"><span class="ui-icon icon-x" aria-hidden="true"></span></button></header>
+        <div class="supplier-dialog-body">
+          <section id="supplierPresetSection" class="supplier-preset-section" aria-labelledby="supplierPresetTitle">
+            <div class="supplier-section-heading"><strong id="supplierPresetTitle">供应商预设</strong><input id="supplierPresetSearch" type="search" placeholder="搜索预设" autocomplete="off" aria-label="搜索供应商预设" /></div>
+            <div id="supplierPresetGrid" class="supplier-preset-grid" role="radiogroup" aria-label="供应商预设"></div>
+            <p id="supplierPresetEmpty" class="text-supplier-empty" hidden>没有匹配的预设</p>
+          </section>
+          <section class="supplier-connection-form" aria-labelledby="supplierConnectionFormTitle">
+            <strong id="supplierConnectionFormTitle">连接配置</strong>
+            <label class="field"><span>供应商名称</span><input id="textSupplierName" type="text" maxlength="120" autocomplete="off" placeholder="例如：我的文本模型服务" required /></label>
+            <label class="field"><span>API Base URL</span><input id="textSupplierBaseUrl" type="url" maxlength="2048" autocomplete="off" placeholder="https://example.com/v1" required /></label>
+            <div class="field"><label for="textSupplierApiKey">API Key</label><div class="secret-control"><input id="textSupplierApiKey" type="password" maxlength="4096" autocomplete="off" placeholder="填入此供应商的 Key" /><button type="button" class="secret-action supplier-secret-action" data-secret-toggle="textSupplierApiKey" title="显示或隐藏 API Key" aria-label="显示 API Key"><span class="ui-icon icon-eye" aria-hidden="true"></span></button><button type="button" class="secret-action supplier-secret-action" data-secret-copy="textSupplierApiKey" title="复制 API Key" aria-label="复制 API Key"><span class="ui-icon icon-copy" aria-hidden="true"></span></button></div></div>
+            <label class="field"><span>API 协议</span><select id="textSupplierApiStyle"><option value="chat-completions">Chat Completions</option><option value="responses">Responses</option></select></label>
+            <output id="supplierEndpointPreview" class="supplier-endpoint-preview"></output>
+            <label class="field"><span>模型 ID <small>可选</small></span><input id="textSupplierInitialModel" type="text" maxlength="256" autocomplete="off" placeholder="保存后也可以自动获取模型列表" /></label>
+            <details id="supplierAdvancedDetails" class="supplier-advanced"><summary>高级设置</summary><label class="field"><span>认证方式</span><select id="textSupplierAuthStyle"><option value="bearer">Authorization: Bearer</option><option value="api-key">api-key（MiMo）</option></select></label><label class="field"><span>内部标识</span><input id="textSupplierId" type="text" maxlength="64" autocomplete="off" placeholder="自动生成" /></label></details>
+          </section>
+          <p id="supplierDraftStatus" class="supplier-draft-status" role="status" aria-live="polite"></p>
+          <div id="supplierDiscardConfirm" class="supplier-discard-confirm" hidden><span>有未保存的修改，确定放弃吗？</span><button id="supplierDiscardKeep" type="button">继续编辑</button><button id="supplierDiscardAccept" type="button" class="danger-action">放弃修改</button></div>
+        </div>
+        <footer class="supplier-dialog-footer"><span>Key 仅保存在本机</span><button id="textSupplierCancel" type="button">取消</button><button id="textSupplierSave" type="submit" class="primary">添加供应商</button></footer>
+      </form>
+    </dialog>
     <script src="../audio-utils.js"></script>
     <script src="./meeting-ui.js"></script>
     <script src="./text-supplier-ui.js"></script>
+    <script src="./text-supplier-manager.js"></script>
     <script src="./reading-layout.js"></script>
     <script src="./file-ui.js"></script>
     <script src="./live-meeting-ui.js"></script>

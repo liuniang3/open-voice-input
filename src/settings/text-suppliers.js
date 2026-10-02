@@ -8,11 +8,11 @@
 // (supplierId, modelId) pair: the same model ID offered by two suppliers never
 // shares credentials, capabilities or the active selection, and lookups never
 // infer a supplier from a model name. Legacy OpenCode Go settings migrate
-// losslessly into one generic entry (headers preserved); MiMo / OpenAI /
-// Alibaba family connections and ASR routes are untouched here.
+// losslessly into generic entries. ASR connections are never consulted here.
 
 const packageJson = require("../../package.json");
-const { API_STYLES, normalizeApiStyle } = require("./provider-connections");
+const { API_STYLES, DEFAULT_CONNECTIONS, connectionBaseUrl, normalizeApiStyle,
+  providerFamilyFor, resolveProviderConnection } = require("./provider-connections");
 
 const SUPPLIER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const UNSAFE_IDS = new Set(["__proto__", "prototype", "constructor"]);
@@ -96,6 +96,7 @@ function normalizeTextSupplier(raw) {
     name: trimStr(raw.name).slice(0, MAX_NAME_CHARS) || id,
     baseUrl,
     apiStyle: normalizeApiStyle(raw.apiStyle, API_STYLES.CHAT_COMPLETIONS),
+    authStyle: raw.authStyle === "api-key" ? "api-key" : "bearer",
     apiKey: sanitizeApiKey(raw.apiKey),
     requestHeaders: sanitizeRequestHeaders(raw.requestHeaders)
   };
@@ -234,7 +235,9 @@ function migrateTextSuppliers(settings) {
   const defaultOpenCodeGoBase = sanitizeHttpsBaseUrl("https://opencode.ai/zen/go/v1");
   const hasCustomBaseUrl = Boolean(legacyBaseUrl) && legacyBaseUrl !== defaultOpenCodeGoBase;
   const hasLegacyData = Boolean(trimStr(legacyConnection?.apiKey)) || hasCustomBaseUrl || legacyModels.length > 0;
-  if (!alreadyMigrated && hasLegacyData) {
+  const dismissed = Array.isArray(current.textSupplierDismissedMigrations)
+    && current.textSupplierDismissedMigrations.includes(MIGRATED_FROM_OPENCODE_GO);
+  if (!alreadyMigrated && !dismissed && hasLegacyData) {
     const entry = normalizeTextSupplier({
       id: MIGRATED_FROM_OPENCODE_GO,
       name: "OpenCode Go",
@@ -261,8 +264,83 @@ function migrateTextSuppliers(settings) {
   return current;
 }
 
+function migrateLegacyLanguageSuppliers(settings) {
+  if (settings._languageSuppliersMigrated) return settings;
+  const current = { ...settings };
+  const suppliers = (Array.isArray(current.textSuppliers) ? current.textSuppliers : [])
+    .map(normalizeTextSupplier).filter(Boolean);
+  const catalogs = { ...(current.textSupplierCatalogs || {}) };
+  const selections = normalizeTextModelSelections(current.textModelSelections);
+  const oldPair = normalizeTextModelSelection(current.textModelSelection);
+  const dismissed = new Set(current.textSupplierDismissedMigrations || []);
+  const names = { mimo: "MiMo · 语言处理", aliyun: "阿里云 · 语言处理", openai: "OpenAI · 语言处理" };
+  const groups = [
+    { slot: "cleanup", model: current.cleanerModel, profiles: current.cleanerProfiles,
+      fallback: { apiKey: current.cleanerApiKey, baseUrl: current.cleanerBaseUrl,
+        apiStyle: current.cleanerApiStyle }, provider: current.cleanerProvider },
+    { slot: "summary", model: current.meetingAnalysisModel, profiles: current.meetingAnalysisProfiles,
+      fallback: { apiKey: current.meetingAnalysisApiKey, baseUrl: current.meetingAnalysisBaseUrl,
+        apiStyle: current.meetingAnalysisApiStyle } }
+  ];
+  for (const group of groups) {
+    for (const modelId of new Set([group.model, ...Object.keys(group.profiles || {})].filter(Boolean))) {
+      if (!sanitizeModelId(modelId) || /(?:^|-)asr(?:-|$)/i.test(modelId)) continue;
+      const profile = group.profiles?.[modelId] || group.fallback;
+      const provider = profile.provider || profile.providerFamily || group.provider;
+      const family = providerFamilyFor(modelId, provider);
+      const connection = resolveProviderConnection(current, {
+        modelId, provider, scope: "text", operation: "compatible", fallback: profile
+      });
+      const defaultUrl = family && connectionBaseUrl(family, DEFAULT_CONNECTIONS[family], "compatible");
+      const baseUrl = sanitizeHttpsBaseUrl(connection.baseUrl);
+      if (!baseUrl || (!connection.apiKey && baseUrl === defaultUrl)) continue;
+      const marker = `language-${family || "custom"}`;
+      if (dismissed.has(marker) || family === "opencode-go" && dismissed.has(MIGRATED_FROM_OPENCODE_GO)) continue;
+      const authStyle = family === "mimo" ? "api-key" : "bearer";
+      const headers = family === "opencode-go" ? openCodeGoCompatHeaders() : {};
+      let entry = suppliers.find(item => item.baseUrl === baseUrl && item.apiKey === connection.apiKey
+        && item.apiStyle === connection.apiStyle && (item.authStyle || "bearer") === authStyle
+        && JSON.stringify(item.requestHeaders || {}) === JSON.stringify(headers));
+      if (!entry && suppliers.length < MAX_SUPPLIERS) {
+        const baseId = `legacy-text-${family || "custom"}`;
+        let id = baseId;
+        for (let n = 2; suppliers.some(item => item.id === id); n += 1) id = `${baseId}-${n}`;
+        const baseName = names[family] || "旧语言处理连接";
+        let name = baseName;
+        for (let n = 2; suppliers.some(item => item.name === name); n += 1) name = `${baseName} ${n}`;
+        entry = normalizeTextSupplier({ id, name, ...connection, baseUrl, authStyle,
+          requestHeaders: headers, migratedFrom: marker });
+        if (entry) suppliers.push(entry);
+      }
+      if (!entry) continue;
+      const catalog = normalizeCatalogEntry(catalogs[entry.id]) || { models: [], capabilities: {}, updatedAt: "" };
+      if (!catalog.models.includes(modelId)) catalog.models.push(modelId);
+      for (const field of CAPABILITY_FIELDS) {
+        if (profile[field] == null) continue;
+        catalog.capabilities[modelId] = { ...(catalog.capabilities[modelId] || {}), [field]: profile[field] };
+      }
+      if (family === "openai") {
+        catalog.models = sanitizeCatalogModels([...catalog.models, ...(current.openaiModelCatalog || [])]);
+        catalog.capabilities = { ...(current.openaiModelCapabilities || {}), ...catalog.capabilities };
+      }
+      catalogs[entry.id] = catalog;
+      if (modelId === group.model && !selections[group.slot] && !oldPair) {
+        selections[group.slot] = { supplierId: entry.id, modelId };
+      }
+    }
+  }
+  return { ...current, textSuppliers: suppliers, textSupplierCatalogs: catalogs,
+    textModelSelections: selections, _languageSuppliersMigrated: true };
+}
+
 function ensureTextSuppliers(settings) {
-  const migrated = migrateTextSuppliers(settings);
+  const initial = migrateTextSuppliers(settings);
+  // Preserve the formerly shared pair before seeding any legacy slot.
+  if (!initial.textModelSelections && normalizeTextModelSelection(initial.textModelSelection)) {
+    const pair = normalizeTextModelSelection(initial.textModelSelection);
+    initial.textModelSelections = { cleanup: { ...pair }, summary: { ...pair } };
+  }
+  const migrated = migrateLegacyLanguageSuppliers(initial);
   const seen = new Set();
   const suppliers = [];
   for (const raw of Array.isArray(migrated.textSuppliers) ? migrated.textSuppliers : []) {
@@ -313,6 +391,7 @@ function toPublicTextSupplier(entry) {
     name: supplier.name,
     baseUrl: supplier.baseUrl,
     apiStyle: supplier.apiStyle,
+    authStyle: supplier.authStyle,
     hasApiKey: Boolean(supplier.apiKey),
     requestHeaders: supplier.requestHeaders,
     ...(supplier.migratedFrom ? { migratedFrom: supplier.migratedFrom } : {})
@@ -345,6 +424,7 @@ function resolveTextModel(settings, selection = {}) {
     baseUrl: supplier.baseUrl,
     apiKey: supplier.apiKey,
     apiStyle: supplier.apiStyle,
+    authStyle: supplier.authStyle,
     requestHeaders: { ...supplier.requestHeaders }
   };
 }
@@ -361,6 +441,7 @@ module.exports = {
   isValidSupplierId,
   listTextSuppliers,
   migrateTextSuppliers,
+  migrateLegacyLanguageSuppliers,
   normalizeCatalogEntry,
   normalizeTextModelSelection,
   normalizeTextModelSelections,

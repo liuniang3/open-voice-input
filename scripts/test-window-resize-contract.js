@@ -90,6 +90,8 @@ async function verifyResponsiveWindows() {
       if (item.mode === "settings") {
         await page.locator('[data-settings-tab="connections"]').click();
         await page.locator("#textSupplierAdd").click();
+        await page.locator("#textSupplierName").fill("Resize vendor");
+        await page.locator("#supplierAdvancedDetails summary").click();
         await page.locator("#textSupplierId").fill("resize-vendor");
         await page.locator("#textSupplierBaseUrl").fill("https://example.invalid/v1");
         await page.locator("#textSupplierApiKey").fill("test-only-resize");

@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased - 2026-10-02
+
+### Changed
+
+- Split speech recognition and language processing into separate Settings pages and credential stores. Dictation, file ASR, realtime meetings and MiMo audio review use `asrConnections`; expression cleanup and summaries use named text suppliers. ASR connection tests send audio rather than a text-only prompt.
+- Added one-time, non-destructive migration of legacy ASR connections, language connections, active model selections and model catalogs. ASR edits never update text credentials; clearing an ASR key cannot revive a stale shared/profile key. First-run setup also writes only ASR connections, and fast-mode setup does not require a language supplier.
+- Reworked text supplier settings using the CC Switch-style preset-first add flow: a searchable preset grid, a dedicated in-app add/edit dialog, editable connection fields, a live request-path preview, and a pinned cancel/save footer. Advanced internal IDs are hidden by default; presets never include keys or fixed model names.
+- Kept a searchable saved-supplier list separate from drafts, with selected-model connection tests, independent model synchronization, manual model registration and model-count/last-sync visibility. Cancel and Escape discard drafts only after confirmation; failed saves keep them for retry.
+- New suppliers derive a stable internal ID from the full display name, duplicate names are rejected, keys are masked with icon-based visibility/copy controls, and an empty API Key field preserves the existing saved key when editing. Saving unrelated settings never saves an unfinished supplier draft.
+- Added per-supplier Bearer/api-key authentication. MiMo presets use api-key for both model discovery and text requests; existing suppliers keep Bearer authentication by default.
+- Removed the dedicated experimental OpenCode Go settings entry. Existing OpenCode Go data remains available through the generic supplier migration path without exposing a provider-specific product section.
+- Blocked deletion of suppliers still used by cleanup/summary until their selections are changed, and prevented deleted migrated suppliers from being recreated from old settings.
+
+### Tests
+
+- Added provider-role migration, same-brand URL/key isolation, empty-key handling, missing-supplier fallback, audio-only connection-test and responsive split-page browser regression coverage with synthetic credentials and mocked responses.
+- Updated the provider UI contract to require generic supplier cards/editor controls and to reject the retired experimental OpenCode Go entry.
+- Added draft validation, preset identity, credential retention, request-path, auth-header and dismissed-migration regression tests, plus browser coverage for add/edit/cancel, selected-model tests, failed/successful model sync, deletion protection and responsive dialogs.
+
 ## v0.4.7 - 2026-09-30
 
 ### Added

@@ -72,14 +72,16 @@
       const preset = ASR[provider];
       const model = settings.asrProvider === provider ? settings.asrModel || preset.model : preset.model;
       const profile = settings.asrProfiles?.[model] || {};
-      const connection = settings.providerConnections?.[preset.family] || {};
-      $("guideAsrUrl").value = connection.baseUrl || profile.baseUrl || preset.url;
-      $("guideAsrKey").value = connection.apiKey || profile.apiKey || "";
+      const connections = settings.asrConnections || settings.providerConnections;
+      const connection = connections?.[preset.family];
+      $("guideAsrUrl").value = connection?.baseUrl || profile.baseUrl || preset.url;
+      $("guideAsrKey").value = settings.asrConnections ? connection?.apiKey || "" : connection?.apiKey || profile.apiKey || "";
       $("guideAsrModel").value = model;
       options($("guideAsrPresets"), [...new Set([preset.model, ...Object.keys(settings.asrProfiles || {}).filter(id => settings.asrProfiles[id].provider === provider)])].map(id => [id, id]));
       $("guideAsrTestStatus").textContent = "尚未测试";
     }
     function legacyCleaner() {
+      if (settings._languageSuppliersMigrated) return {};
       const profile = settings.cleanerProfiles?.[settings.cleanerModel] || {};
       const family = settings.cleanerProviderFamily || profile.providerFamily || profile.provider || settings.cleanerProvider;
       const connection = family === "custom" ? profile : settings.providerConnections?.[family === "mimo" ? "mimo" : family === "opencode-go" ? "opencode-go" : "openai"] || profile;
@@ -116,7 +118,7 @@
       if (!apiKey || !model) throw new Error("请填写 API Key 和语音识别模型。");
       const realtime = /(?:realtime|streaming)/i.test(model) && provider !== "mimo";
       const saved = await api.saveSettings({
-        providerConnections: { ...settings.providerConnections, [family]: { ...settings.providerConnections?.[family], provider: family, baseUrl, apiKey } },
+        asrConnections: { ...settings.asrConnections, [family]: { ...settings.asrConnections?.[family], baseUrl, apiKey } },
         asrProvider: provider, asrModel: model, asrMode: realtime ? "realtime" : "batch",
         ...(realtime ? { asrRealtimeModel: model } : {}),
         asrProfiles: { ...settings.asrProfiles, [model]: { ...settings.asrProfiles?.[model], provider, baseUrl, apiKey } }

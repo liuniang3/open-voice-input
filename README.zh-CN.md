@@ -33,8 +33,8 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 - 第一阶段已改为可插拔 ASR：优先适配专用 `mimo-v2.5-asr`，并支持 Qwen3-ASR 和 Fun-ASR。
 - 短语音 Qwen 实时预览默认使用 `qwen-audio-3.0-asr-flash-streaming`；Fun-ASR 同样支持 WebSocket 实时预览。MiMo 使用周期性音频片段预览；实时流失败时会用完整录音自动回退到非实时转写。
 - `Stable` 模式可将原始 ASR 文本交给独立添加的文本供应商，在忠于原意的前提下整理成清晰连贯的段落；支持 Chat Completions 与 Responses 协议、获取模型目录和自定义模型；`Fast` 模式只执行 ASR。
-- 设置已整合进无边框主界面，并新增独立的“供应商连接”页。
-- MiMo 全部模型共用一套 MiMo 连接，Qwen/Fun-ASR 共用一套阿里连接，GPT/OpenAI 模型共用一套 OpenAI 连接，OpenCode Go 使用完全隔离的连接和模型目录。OpenAI URL 可以填写 NowCoding 等自定义网关，并可选择 Responses 或 Chat Completions。
+- 设置已整合进无边框主界面，并分为“语音识别供应商”和“语言处理供应商”两个独立入口。
+- MiMo、阿里云 ASR 连接用于短语音、文件转写、实时会议和可选音频核对；表达整理与摘要使用独立添加的 Chat Completions / Responses 兼容供应商，包括 NowCoding 等自定义网关。两类连接各自保存 URL 与 Key，同一品牌也不会因修改另一类连接而被覆盖。
 - API Key 支持显示、隐藏和一键复制，便于本机检查配置；Key 仍只保存在 `%APPDATA%\\open-voice-input\\settings.json`，不会进入安装包或仓库。
 - 录音统一转换为 16 kHz、单声道、16-bit PCM WAV；长录音会按当前 ASR 供应商上限自动分段、提前转写并缓存，结束后按顺序拼接。
 - 独立文件转写工作区可导入音频或视频、单独选择 ASR 模型、使用与实时会议相同的摘要流程，并导出 Markdown、TXT 或 Word。摘要左侧为思维导图，右侧为理解语境后整理的连贯段落；前置设置可折叠、阅读区可调整大小。
@@ -58,7 +58,7 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 - 任务栏托盘菜单进入设置
 - 可配置麦克风、快捷键、API Key、Base URL、供应商和模型
 - ASR 供应商：MiMo-V2.5-ASR、Qwen3-ASR、Fun-ASR
-- 表达整理供应商：独立添加的 Chat Completions / Responses 兼容供应商，保留已有配置的兼容入口
+- 表达整理供应商：在“语言处理供应商”中独立添加多个 Chat Completions / Responses 兼容供应商，模型目录和 Key 按供应商隔离
 - `Fast` 模式：只做 ASR，延迟更低
 - `Stable` 模式：先 ASR，再用 LLM 理解语境并整理表达
 - 转写后写入剪贴板，并尝试粘贴到之前的焦点应用
@@ -203,13 +203,21 @@ ASR 供应商：
 - `Qwen3-ASR`：通过 DashScope/OpenAI 兼容配置接入专用 ASR，支持非实时和实时模式。
 - `Fun-ASR`：通过 DashScope 接入专用 ASR。本地麦克风录音使用 WebSocket 实时协议；公网音频 URL 可走官方 REST 批处理。
 
+### 添加文本供应商
+
+进入 **设置 → 语言处理供应商 → 添加供应商**。新增面板先显示供应商预设，可搜索并选择模板或“自定义”，再填写名称、HTTPS Base URL、API Key 与 Chat Completions / Responses 协议。模板只带入连接信息，不写死模型名称；下方会显示实际请求路径。内部标识和 Bearer / api-key 认证方式收在高级设置中。ASR 则在 **语音识别供应商** 中独立配置；兼容文本接口不代表支持语音识别协议。
+
+保存后，在连接详情中同步模型，或手动添加模型 ID，再选择具体模型测试。表达整理、会议与文件摘要分别选择自己的供应商和模型。编辑时 Key 留空会保留已有值；取消或按 Esc 不会保存草稿，存在修改时先确认。被上述功能使用中的供应商需要先切换模型并保存，才能删除。Windows 与 macOS 使用同一套界面和逻辑。
+
+升级会复制原有可用的 ASR 连接，并把旧表达整理、摘要连接和已选模型迁入语言处理供应商列表。现有 Key 与自定义 URL 不要求重新填写，迁移后两类配置独立修改。清空 ASR Key 不会回退借用旧 Key 或语言处理 Key；未配置语言模型时，语音输入保留原始转写，摘要生成会提示补充配置。
+
 表达整理供应商：
 
-- `MiMo`：通过 MiMo 聊天模型清理文本，可选择 MiMo V2.5 或 MiMo V2.5 Pro。
-- `OpenAI 兼容接口`：通过任意兼容聊天接口清理文本，内置 GPT-5.4 mini 和 Grok 4.5 模型预设，并继续支持自定义模型 ID。
-- `OpenCode Go（实验性）`：使用独立的 `https://opencode.ai/zen/go/v1` Chat Completions 连接，可自动获取模型列表；可用于 Stable 模式清理、会议校订和结构化总结。请求会携带专用 User-Agent，单次会议分析中的分批请求共用稳定会话 ID。
+- `MiMo`：通过已保存的 MiMo 连接整理文本，模型来自目录同步或手动添加。
+- `OpenAI 兼容接口`：通过已保存的 Chat Completions / Responses 兼容连接整理文本，模型来自目录同步或手动添加。
+- `自定义供应商`：任意已保存的 Chat Completions 或 Responses 兼容连接都可以提供表达整理和摘要模型。旧版本的专用连接会自动迁移到通用供应商列表，不要求重新填写 Key。
 
-目前综合推荐使用 GPT-5.4 mini。MiMo 的 ASR、表达整理和复核共用 MiMo 连接；Qwen 与 Fun-ASR 共用阿里连接；GPT 表达整理和分析共用 OpenAI 连接。OpenCode Go 的 Key 和模型目录不会串入这些连接，即使它提供的模型 ID 也叫 `mimo-v2.5` 或 `glm-5.2`。OpenCode Go 官方主要面向 coding agent，语音表达整理和会议总结可能受到限流或策略拒绝；发生失败时程序会保留原始文本、音频和重试数据。
+目前综合推荐使用 GPT-5.4 mini。ASR 凭证和文本供应商凭证分别保存；即使两个供应商提供同名模型，程序也不会串用另一方的 Key 或模型目录。支持 `/models` 的服务可以自动同步模型，不支持的服务仍可手动填写模型 ID。
 
 ## 短语音转写模式
 

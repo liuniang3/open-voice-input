@@ -79,6 +79,7 @@ function resolveMeetingFileAsrCredentials({ env = process.env, settings = {} } =
   );
   const operation = provider === "qwen3-asr" ? "compatible" : provider === "fun-asr" ? "rest" : "default";
   const connection = resolveProviderConnection(s, {
+    scope: "asr",
     modelId,
     provider,
     operation,
@@ -94,7 +95,7 @@ function resolveMeetingFileAsrCredentials({ env = process.env, settings = {} } =
   });
   const apiKey = connection.apiKey;
   if (!apiKey) {
-    const error = new Error("文件转写 ASR API Key 未配置，请在会议设置中填写当前文件 ASR 模型的 Key");
+    const error = new Error("文件转写 ASR API Key 未配置，请在语音识别供应商中配置当前 ASR 的 Key");
     error.code = "meeting_file_asr_credentials_missing";
     throw error;
   }

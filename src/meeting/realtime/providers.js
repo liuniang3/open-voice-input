@@ -31,6 +31,7 @@ function previewProfileFor(settings, modelId = DEFAULT_LIVE_MODEL) {
     }
   }
   const connection = resolveProviderConnection(settings, {
+    scope: "asr",
     modelId,
     provider: "aliyun-streaming",
     operation: "streaming",
@@ -108,6 +109,7 @@ function profileFor(settings, modelId, cleanup = false, env = process.env) {
     ? "https://api.xiaomimimo.com/v1"
     : cleanup ? "" : "https://dashscope.aliyuncs.com/compatible-mode/v1");
   const connection = resolveProviderConnection(settings, {
+    scope: cleanup ? "text" : "asr",
     modelId,
     provider,
     operation,

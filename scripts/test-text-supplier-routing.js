@@ -130,7 +130,7 @@ async function main() {
     assert.equal(resolveTextLlmProfile(settings, { slot: "summary", supplierId: "alpha", modelId: "glm-5.2" }).supplierId, "alpha");
   });
 
-  await test("legacy settings without a supplier selection fall back unchanged", async () => {
+  await test("legacy settings migrate into language suppliers without changing endpoint or key", async () => {
     const legacy = ensureTextSuppliers({
       cleanerProvider: "openai-compatible",
       cleanerModel: "gpt-5.4-mini",
@@ -138,17 +138,17 @@ async function main() {
       meetingAnalysisModel: "gpt-5.4-mini",
       meetingAnalysisProfiles: { "gpt-5.4-mini": { provider: "openai-compatible", apiKey: "sk-legacy", baseUrl: "https://legacy.example/v1" } }
     });
-    assert.equal(resolveTextLlmProfile(legacy, { slot: "summary" }), null);
-    assert.equal(resolveTextLlmProfile(legacy, { slot: "cleanup" }), null);
+    assert.equal(resolveTextLlmProfile(legacy, { slot: "summary" }).apiKey, "sk-legacy");
+    assert.equal(resolveTextLlmProfile(legacy, { slot: "cleanup" }).baseUrl, "https://legacy.example/v1");
     const profile = meetingTextProfile(legacy, { modelId: "gpt-5.4-mini" });
-    assert.equal(profile.provider, "openai-compatible");
+    assert.equal(profile.provider, "text-supplier");
     assert.equal(profile.apiKey, "sk-legacy");
     assert.equal(profile.baseUrl, "https://legacy.example/v1");
 
-    // Voice pipeline keeps using the legacy cleaner provider map.
+    // Unmigrated snapshots still support old jobs; migrated requests use pairs.
     const calls = [];
     const pipeline = createVoicePipeline({
-      getSettings: () => ({ ...legacy, transcriptionMode: "stable" }),
+      getSettings: () => ({ ...legacy, _languageSuppliersMigrated: false, textModelSelections: {}, transcriptionMode: "stable" }),
       logEvent: (message) => calls.push(message),
       providerOverrides: {
         asrProviders: { mimo: { id: "asr", transcribeRaw: async () => ({ text: "raw text" }) } },

@@ -9,6 +9,8 @@ const {
   connectionBaseUrl,
   normalizeProviderConnection
 } = require("../settings/provider-connections");
+const { resolveProviderConnection, ASR_PROVIDER_FAMILIES } = require("../settings/provider-connections");
+const { createMimoAsrProvider } = require("./asr/mimo-asr-provider");
 const {
   catalogFor,
   resolveTextSupplier,
@@ -41,7 +43,10 @@ function textModelFor(settings, family) {
   return candidates.find(model => /^(?:gpt|chatgpt|o[134](?:-|$))/i.test(String(model || ""))) || "gpt-5.4-mini";
 }
 
-async function testProviderConnection({ settings, provider, supplierId, modelId, fetchImpl = null } = {}) {
+async function testProviderConnection({ settings, provider, supplierId, modelId, scope = "text", fetchImpl = null } = {}) {
+  if (scope === "asr" && supplierId) {
+    throw Object.assign(new Error("语言处理供应商不能用于 ASR 连接测试。"), { code: "provider_not_supported" });
+  }
   const requestedSupplierId = sanitizeSupplierId(supplierId);
   if (supplierId && !requestedSupplierId) {
     throw Object.assign(new Error("供应商 ID 无效。"), { code: "supplier_invalid" });
@@ -68,6 +73,8 @@ async function testProviderConnection({ settings, provider, supplierId, modelId,
       baseUrl: supplier.baseUrl,
       model,
       apiStyle: supplier.apiStyle || API_STYLES.CHAT_COMPLETIONS,
+      headerName: supplier.authStyle === "api-key" ? "api-key" : "Authorization",
+      headerValuePrefix: supplier.authStyle === "api-key" ? "" : "Bearer ",
       requestTimeoutMs: 30000,
       fetchImpl
     });
@@ -80,6 +87,24 @@ async function testProviderConnection({ settings, provider, supplierId, modelId,
   }
   if (!Object.values(PROVIDER_FAMILIES).includes(provider)) {
     throw Object.assign(new Error("不支持的供应商连接。"), { code: "provider_not_supported" });
+  }
+  if (scope === "asr") {
+    if (!ASR_PROVIDER_FAMILIES.includes(provider)) {
+      throw Object.assign(new Error("该供应商尚未适配语音识别协议。"), { code: "provider_not_supported" });
+    }
+    const connection = resolveProviderConnection(settings, { provider, scope, operation: "compatible" });
+    if (!connection.apiKey) throw Object.assign(new Error("请先保存语音识别供应商的 API Key。"), { code: "provider_credentials_missing" });
+    const startedAt = Date.now();
+    if (provider === "mimo") {
+      const client = createMimoClient({ getSettings: () => ({ ...connection, model: "mimo-v2.5-asr", requestTimeoutMs: 30000 }), useEnvironmentFallback: false, fetchImpl });
+      await createMimoAsrProvider({ client, cleanTranscript: text => text,
+        getOptions: () => ({ model: "mimo-v2.5-asr" }) }).transcribeMeetingSegment({ audioDataUrl: TEST_AUDIO_URL });
+    } else {
+      const client = createOpenAiCompatibleClient({ ...connection, apiStyle: API_STYLES.CHAT_COMPLETIONS,
+        model: "qwen3-asr-flash", requestTimeoutMs: 30000, fetchImpl });
+      await client.requestChat([{ role: "user", content: [{ type: "input_audio", input_audio: { data: TEST_AUDIO_URL } }] }], { maxTokens: 32 });
+    }
+    return { ok: true, provider, scope, latencyMs: Date.now() - startedAt };
   }
   const connection = normalizeProviderConnection(provider, settings?.providerConnections?.[provider]);
   if (!connection.apiKey) {

@@ -21,28 +21,35 @@ function test(name, run) {
   }
 }
 
-test("provider connection panel exposes one accessible connection per vendor", () => {
+test("ASR and language supplier panels expose separate connections and controls", () => {
   assert.match(html, /data-settings-tab="connections"/);
-  for (const family of ["mimo", "aliyun", "openai", "openCodeGo"]) {
+  assert.match(html, /data-settings-tab="asr-connections">语音识别供应商/);
+  assert.match(html, /data-settings-tab="connections">语言处理供应商/);
+  const textPanel = html.slice(html.indexOf('data-settings-panel="connections"'), html.indexOf('data-settings-panel="asr-connections"'));
+  const asrPanel = html.slice(html.indexOf('data-settings-panel="asr-connections"'), html.indexOf('data-settings-panel="asr"'));
+  assert.match(textPanel, /id="textSupplierCards"/);
+  assert.doesNotMatch(textPanel, /id="(?:mimo|aliyun)ApiKeyInput"/);
+  assert.doesNotMatch(asrPanel, /id="textSupplier/);
+  for (const family of ["mimo", "aliyun"]) {
     assert.equal((html.match(new RegExp(`id="${family}BaseUrlInput"`, "g")) || []).length, 1);
     assert.equal((html.match(new RegExp(`id="${family}ApiKeyInput"`, "g")) || []).length, 1);
     assert.match(html, new RegExp(`data-secret-toggle="${family}ApiKeyInput"`));
     assert.match(html, new RegExp(`data-secret-copy="${family}ApiKeyInput"`));
-    const provider = family === "openCodeGo" ? "opencode-go" : family;
-    assert.match(html, new RegExp(`data-provider-connection-test="${provider}"`));
+    assert.match(html, new RegExp(`data-provider-connection-test="${family}"`));
   }
-  assert.match(html, /id="openaiApiStyleSelect"[\s\S]*value="responses"[\s\S]*value="chat-completions"/);
-  assert.equal((html.match(/data-provider-model-refresh="openai"/g) || []).length, 1);
-  assert.equal((html.match(/data-provider-model-refresh="opencode-go"/g) || []).length, 1);
+  assert.doesNotMatch(html, /id="openai(?:BaseUrl|ApiKey)Input"/);
+  assert.match(html, /id="textSupplierApiStyle"[\s\S]*value="chat-completions"[\s\S]*value="responses"/);
   assert.match(html, /data-provider-model-refresh="cleaner"/);
   assert.match(html, /data-provider-model-refresh="analysis"/);
-  assert.match(html, /data-provider-model-status="openai"/);
+  assert.match(html, /id="textSupplierCards"/);
+  assert.match(html, /id="textSupplierEditor"/);
+  assert.match(html, /id="textSupplierCancel"/);
+  assert.match(html, /id="textSupplierRefresh"/);
   assert.match(html, /aria-describedby="mimoConnectionDescription"/);
   assert.match(html, /token-plan-cn[^<]+tp- Key/);
   assert.match(html, /aria-describedby="aliyunConnectionDescription"/);
-  assert.match(html, /aria-describedby="openaiConnectionDescription"/);
-  assert.match(html, /aria-describedby="openCodeGoConnectionDescription"/);
-  assert.equal((html.match(/value="opencode-go">OpenCode Go（实验性）/g) || []).length, 2);
+  assert.doesNotMatch(html, /OpenCode Go（实验性）/);
+  assert.doesNotMatch(html, /data-provider-connection-test="opencode-go"/);
 });
 
 test("vendor model panels do not expose duplicate credentials", () => {
@@ -53,13 +60,14 @@ test("vendor model panels do not expose duplicate credentials", () => {
   assert.match(html, /value="custom">自定义兼容接口/);
 });
 
-test("save payload writes the shared map and omits vendor credential duplicates", () => {
+test("save payload writes only the ASR map and omits vendor credential duplicates", () => {
   const saveSource = source.slice(source.indexOf("async function saveAllSettings"), source.indexOf("async function runMeetingEnhancedTest"));
-  assert.match(saveSource, /providerConnections:\s*collectProviderConnections\(\)/);
+  assert.match(saveSource, /asrConnections:\s*collectAsrConnections\(\)/);
+  assert.doesNotMatch(saveSource, /providerConnections:\s*collectProviderConnections\(\)/);
   assert.doesNotMatch(saveSource, /\n\s+asrBaseUrl:\s*|\n\s+asrApiKey:\s*/);
   assert.doesNotMatch(saveSource, /\n\s+meeting(?:Qwen|FileAsr|FunAsr)(?:BaseUrl|ApiKey):\s*/);
   assert.match(source, /providerFamily === "custom" \? \{[\s\S]*?baseUrl:[\s\S]*?apiKey:/);
-  assert.match(source, /testProviderConnection\(\{ provider \}\)/);
+  assert.match(source, /testProviderConnection\(\{ provider, scope: "asr" \}\)/);
 });
 
 test("shared OpenAI values override stale GPT profiles and preserve protocol", () => {
@@ -104,7 +112,7 @@ test("provider tests cross a restricted preload and main-process bridge", () => 
   assert.match(preload, /listProviderModels:\s*\(payload\)\s*=>\s*ipcRenderer\.invoke\("provider:list-models", payload\)/);
   assert.match(main, /ipcMain\.handle\("provider:test-connection"/);
   assert.match(main, /ipcMain\.handle\("provider:list-models"/);
-  assert.match(main, /testProviderConnection\(\{ settings, provider, supplierId, modelId \}\)/);
+  assert.match(main, /testProviderConnection\(\{ settings, provider, supplierId, modelId, scope \}\)/);
   assert.match(main, /refreshTextSupplierCatalog\(\{ settings, supplierId: id \}\)/);
   assert.match(main, /sanitizeIpcError\(error\)/);
 });

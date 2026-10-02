@@ -34,9 +34,9 @@ Home, Settings and setup share a light translucent shell, with redesigned app/fi
 - Meeting capture supports microphone-only, dual-track and genuine system-only modes, with a unified floating view, optional always-on-top, pause/resume, full WAV archives, and independently configurable transcription and Markdown autosave intervals.
 - The first stage is now a pluggable ASR layer, tuned most heavily for the dedicated `mimo-v2.5-asr` model and also supporting Qwen3-ASR and Fun-ASR.
 - Short-dictation Qwen preview now defaults to `qwen-audio-3.0-asr-flash-streaming`; Fun-ASR also provides WebSocket preview. MiMo uses periodic partial-audio preview, and a failed realtime stream falls back to non-realtime transcription of the complete recording.
-- `Stable` mode sends raw ASR text to MiMo, OpenAI, an OpenAI-compatible endpoint, or the experimental OpenCode Go provider to turn it into a clear, coherent paragraph while preserving the speaker's intent. `Fast` mode performs ASR only.
+- `Stable` mode sends raw ASR text to the selected text supplier and model to turn it into a clear, coherent paragraph while preserving the speaker's intent. Suppliers can use Chat Completions or Responses; `Fast` mode performs ASR only.
 - Settings now live in the frameless main UI, with a dedicated Provider Connections tab instead of a separate native Windows settings window.
-- MiMo models share one MiMo connection, Qwen/Fun-ASR models share one Alibaba connection, GPT models share one OpenAI connection, and OpenCode Go has an isolated connection and model catalog. The OpenAI URL may be a custom gateway such as NowCoding and supports either Responses or Chat Completions.
+- ASR and Language Processing have separate supplier pages and credential stores. MiMo/Alibaba ASR connections serve dictation, file transcription, live meetings and optional audio review. Cleanup and summary models use independently added Chat Completions/Responses suppliers, including custom gateways such as NowCoding. Editing one category never changes the other, even for the same brand.
 - API key fields include local show/hide and copy controls. Keys remain in `%APPDATA%\\open-voice-input\\settings.json` and are excluded from builds and Git.
 - Recordings are normalized to 16 kHz mono 16-bit PCM WAV. Long recordings are segmented according to the active ASR provider, transcribed and cached early, then joined in order when recording stops.
 - An independent file transcription workspace can import audio or video, select its ASR model, optionally review audio with MiMo, generate a mindmap and coherent notes, and export Markdown, TXT, or Word.
@@ -204,13 +204,21 @@ ASR providers:
 - `Qwen3-ASR`: dedicated ASR through DashScope-compatible configuration. Supports batch and realtime modes.
 - `Fun-ASR`: dedicated DashScope ASR. Realtime recording uses the WebSocket API. Batch URL transcription uses the REST API when a public audio URL is provided.
 
+Text Supplier Setup:
+
+In **Settings > Language Processing Suppliers**, click **Add Supplier** to open the preset-first editor. Choose a template or Custom, then edit the name, HTTPS Base URL, key and Chat Completions/Responses protocol. The request-path preview shows the endpoint that will be used. Templates configure connections only, not model names. Internal IDs and Bearer/api-key authentication are under Advanced Settings. Configure speech recognition separately under **ASR Suppliers**; a text-compatible endpoint does not automatically support the ASR protocols.
+
+Save the connection, then synchronize models or add an ID manually and select the model to test. Assign suppliers/models independently in Expression Cleanup and Meeting/File Summary. Empty keys preserve the saved key during editing; cancel does not persist a draft. Deletion is blocked while a supplier is selected for either feature. This interface is shared by Windows and macOS.
+
+Upgrades copy the previous working ASR connections into a separate ASR store and migrate legacy cleanup/summary connections and active selections into the language supplier list. Existing keys and custom URLs are preserved without re-entry; subsequent edits remain independent. Clearing an ASR key does not revive a legacy or text key. Missing language suppliers keep dictation's raw text and report a configuration error for summary generation.
+
 Cleanup providers:
 
-- `MiMo`: text cleanup through MiMo chat, with MiMo V2.5 and MiMo V2.5 Pro presets.
-- `OpenAI-compatible`: text cleanup through any compatible chat endpoint, with GPT-5.4 mini and Grok 4.5 presets plus a custom model ID option.
-- `OpenCode Go (experimental)`: an isolated Chat Completions connection at `https://opencode.ai/zen/go/v1`, with automatic model retrieval. It can be selected for Stable-mode cleanup and for meeting correction/summary. Requests include the required dedicated user agent and a stable session ID for each meeting analysis run.
+- `MiMo`: text cleanup through a saved MiMo connection with models discovered or added manually.
+- `OpenAI-compatible`: text cleanup through a saved Chat Completions or Responses-compatible connection with models discovered or added manually.
+- `Custom suppliers`: any saved Chat Completions or Responses-compatible connection can provide cleanup and summary models. Older provider-specific settings are migrated into this generic list without requiring credentials to be entered again.
 
-GPT-5.4 mini is the current overall recommendation. MiMo ASR/cleanup/review models use the single MiMo connection; Qwen and Fun-ASR use the single Alibaba connection; GPT cleanup and analysis models use the single OpenAI connection. OpenCode Go credentials and its fetched model list never cross into those families, including when it exposes a model ID such as `mimo-v2.5` or `glm-5.2`. OpenCode Go officially targets coding-agent traffic, so non-code cleanup and meeting-summary requests may be rate-limited or rejected; the app keeps raw text and retry data when that happens.
+GPT-5.4 mini is the current overall recommendation. ASR credentials and text-supplier credentials are kept in separate provider records; the same model ID at two suppliers never borrows the other supplier's key or catalog. Use the supplier's model discovery when available, or enter a model ID manually for services that do not expose `/models`.
 
 ## Short Dictation Modes
 

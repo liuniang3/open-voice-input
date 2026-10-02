@@ -270,28 +270,28 @@ test("meeting model contract keeps streaming transports and the MiMo batch fallb
   assert.equal(invalidIntervals.meetingAutosaveIntervalSeconds, 30);
 });
 
-test("settings UI has unified provider connections and model-only vendor controls", () => {
+test("settings UI separates ASR and language connections with model-only vendor controls", () => {
   const html = fs.readFileSync(path.join(root, "src", "renderer", "index.html"), "utf8");
   const js = fs.readFileSync(path.join(root, "src", "renderer", "renderer.js"), "utf8");
   const saveJs = js.slice(js.indexOf("async function saveAllSettings"), js.indexOf("async function runMeetingEnhancedTest"));
   assert.match(html, /data-settings-tab="connections"/);
-  for (const family of ["mimo", "aliyun", "openai"]) {
+  for (const family of ["mimo", "aliyun"]) {
     assert.match(html, new RegExp(`id="${family}BaseUrlInput"`));
     assert.match(html, new RegExp(`id="${family}ApiKeyInput"`));
     assert.match(html, new RegExp(`data-secret-toggle="${family}ApiKeyInput"`));
     assert.match(html, new RegExp(`data-secret-copy="${family}ApiKeyInput"`));
     assert.match(html, new RegExp(`data-provider-connection-test="${family}"`));
   }
-  assert.match(html, /id="openaiApiStyleSelect"[\s\S]*value="responses"[\s\S]*value="chat-completions"/);
-  assert.match(html, /适用于所有 MiMo/);
-  assert.match(html, /适用于所有 Qwen、Fun-ASR 与会议实时模型/);
-  assert.match(html, /适用于所有 GPT/);
+  assert.match(html, /id="textSupplierApiStyle"[\s\S]*value="chat-completions"[\s\S]*value="responses"/);
+  assert.match(html, /独立于语言处理连接/);
+  assert.match(html, /Qwen 文本整理与摘要模型请单独配置语言处理供应商/);
+  assert.doesNotMatch(html, /id="openaiBaseUrlInput"/);
   assert.doesNotMatch(html, /id="asrBaseUrlInput"|id="asrApiKeyInput"/);
   assert.doesNotMatch(html, /id="meeting(?:Qwen|FileAsr|FunAsr)(?:BaseUrl|ApiKey)Input"/);
   assert.match(html, /id="cleanerCustomConnectionFields"[^>]*hidden/);
   assert.match(html, /id="meetingAnalysisCustomConnectionFields"[^>]*hidden/);
-  assert.match(saveJs, /providerConnections:\s*collectProviderConnections\(\)/);
-  assert.match(js, /testProviderConnection\(\{ provider \}\)/);
+  assert.match(saveJs, /asrConnections:\s*collectAsrConnections\(\)/);
+  assert.match(js, /testProviderConnection\(\{ provider, scope: "asr" \}\)/);
   assert.doesNotMatch(saveJs, /asrBaseUrl:\s*|asrApiKey:\s*|meetingQwenBaseUrl:\s*|meetingQwenApiKey:\s*/);
   assert.match(html, /id="meetingHotkeyInput"/);
   assert.match(html, /id="meetingBtn"[\s\S]*会议实时转录/);

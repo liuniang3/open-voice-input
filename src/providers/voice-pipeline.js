@@ -30,6 +30,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
       const settings = readSettings();
       const model = settings.asrModel || "mimo-v2.5-asr";
       const connection = resolveProviderConnection(settings, {
+        scope: "asr",
         modelId: model,
         provider: "mimo",
         fallback: { apiKey: settings.asrApiKey, baseUrl: settings.asrBaseUrl }
@@ -248,7 +249,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   async function testConnection() {
     const settings = readSettings();
     const asrProvider = resolveAsrProvider(settings);
-    const cleanerProvider = resolveCleanerProvider(settings);
+    const cleanerProvider = settings.transcriptionMode === "fast" ? null : resolveCleanerProvider(settings);
     const checks = [];
 
     checks.push({
@@ -330,7 +331,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
 
   function resolveCleanerProvider(settings) {
     const pair = textModelSelectionFor(settings, "cleanup");
-    if (pair) {
+    if (pair || settings._languageSuppliersMigrated) {
       // Explicit (supplierId, modelId) selection: resolve it or fail cleanly,
       // never fall through to the family-based cleaner providers.
       const profile = resolveTextLlmProfile(settings, { slot: "cleanup" });
@@ -360,6 +361,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   function resolveDashScopeAsrApiKey() {
     const settings = readSettings();
     return resolveProviderConnection(settings, {
+      scope: "asr",
       modelId: settings.asrModel,
       provider: settings.asrProvider,
       operation: settings.asrProvider === "fun-asr" ? "rest" : "compatible",
@@ -370,6 +372,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   function resolveQwenAsrBaseUrl() {
     const settings = readSettings();
     const connection = resolveProviderConnection(settings, {
+      scope: "asr",
       modelId: settings.asrModel,
       provider: "qwen3-asr",
       operation: "compatible",
@@ -388,6 +391,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   function resolveFunAsrBaseUrl() {
     const settings = readSettings();
     const connection = resolveProviderConnection(settings, {
+      scope: "asr",
       modelId: settings.asrModel,
       provider: "fun-asr",
       operation: "rest",
@@ -423,7 +427,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
 
   function resolveCleanerConnection(settings) {
     const pair = textModelSelectionFor(settings, "cleanup");
-    if (pair) {
+    if (pair || settings._languageSuppliersMigrated) {
       const profile = resolveTextLlmProfile(settings, { slot: "cleanup" });
       return { apiKey: profile.apiKey, baseUrl: profile.baseUrl, apiStyle: profile.apiStyle };
     }

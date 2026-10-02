@@ -63,6 +63,7 @@ function resolveMeetingFunAsrCredentials({ env = process.env, settings = {} } = 
   );
   const profile = s.meetingFunAsrProfiles?.[modelId] || {};
   const connection = resolveProviderConnection(s, {
+    scope: "asr",
     modelId,
     provider: "fun-asr",
     operation: "rest",

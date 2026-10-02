@@ -46,7 +46,7 @@ const { resolveMeetingQwenCredentials } = require("./meeting/processing/meeting-
 const { buildHelperReadyErrorResponse } = require("./meeting/processing/session-processor");
 const { resolveMeetingAnalysisCredentials } = require("./meeting/analysis/credentials");
 const { ensureConnectionProfiles } = require("./settings/connection-profiles");
-const { resolveProviderConnection } = require("./settings/provider-connections");
+const { mergeAsrConnections, resolveProviderConnection } = require("./settings/provider-connections");
 const { validateHotkey, normalizeAccelerator } = require("./hotkeys/validate-hotkey");
 const { createUsageStats } = require("./usage-stats");
 const { createOnboardingState } = require("./onboarding-state");
@@ -202,8 +202,8 @@ const DEFAULT_SETTINGS = {
   directSubmit: false,
   restoreClipboard: false,
   requestTimeoutMs: 60000,
-  // Credentials are shared only inside a provider family; model-specific maps
-  // remain as migration/fallback data for custom third-party endpoints.
+  // Legacy family data is retained for migration and old job snapshots.
+  // asrConnections is seeded during load; language tasks use textSuppliers.
   providerConnections: {
     mimo: {
       provider: "mimo",
@@ -323,7 +323,7 @@ async function homeOverview() {
   const family = settings.cleanerProviderFamily || profile.providerFamily || profile.provider || settings.cleanerProvider;
   const connection = resolveProviderConnection(settings, { modelId: settings.cleanerModel,
     provider: family === "mimo" ? "mimo" : family === "opencode-go" ? "opencode-go" : "openai" });
-  const cleanerConfigured = pair ? Boolean(supplier?.apiKey)
+  const cleanerConfigured = pair || settings._languageSuppliersMigrated ? Boolean(supplier?.apiKey)
     : Boolean(profile.apiKey || connection?.apiKey || (family === "mimo" && process.env.MIMO_API_KEY));
   const recent = [
     ...sessions.filter(row => row.source === "import").map(row => ({ id: row.id, kind: "file", title: row.title || "未命名文件", date: row.updatedAt || row.createdAt })),
@@ -842,6 +842,7 @@ async function migrateLegacyUserData() {
 
 async function saveSettings(nextSettings) {
   const next = ensureTextSuppliers(ensureConnectionProfiles({ ...settings, ...nextSettings,
+    asrConnections: mergeAsrConnections(settings.asrConnections, nextSettings?.asrConnections),
     meetingRealtimeDestination: settings.meetingRealtimeDestination }));
   const shortCheck = validateHotkey(next.hotkey, { otherHotkeys: [next.meetingHotkey] });
   if (!shortCheck.ok) throw new Error(`短语音快捷键：${shortCheck.message}`);
@@ -1819,6 +1820,7 @@ function qwenRealtimeSettings() {
   const connection = resolveProviderConnection(settings, {
     modelId: model,
     provider: "qwen3-asr",
+    scope: "asr",
     operation: isQwenAudioStreamingModel(model) ? "streaming" : "realtime",
     fallback
   });
@@ -2072,7 +2074,8 @@ ipcMain.handle("provider:test-connection", async (event, payload = {}) => {
     const provider = typeof payload?.provider === "string" ? payload.provider.trim() : "";
     const supplierId = typeof payload?.supplierId === "string" ? payload.supplierId.trim() : "";
     const modelId = typeof payload?.modelId === "string" ? payload.modelId.trim() : "";
-    return await testProviderConnection({ settings, provider, supplierId, modelId });
+    const scope = payload?.scope === "asr" ? "asr" : "text";
+    return await testProviderConnection({ settings, provider, supplierId, modelId, scope });
   } catch (error) {
     return sanitizeIpcError(error);
   }

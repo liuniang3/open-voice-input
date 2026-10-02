@@ -3,6 +3,7 @@
 const { isSupportedAliMeetingModel } = require("../providers/asr/ali-meeting-stream");
 const {
   API_STYLES,
+  ASR_PROVIDER_FAMILIES,
   DEFAULT_CONNECTIONS,
   PROVIDER_FAMILIES,
   apiStyleFrom,
@@ -312,6 +313,7 @@ function profileCandidates(settings, { activeOnly = false } = {}) {
       const rawStyle = profile.apiStyle ?? profile.wireApi ?? profile.wire_api;
       candidates.push({
         family,
+        scope: group.map === "cleanerProfiles" || group.map === "meetingAnalysisProfiles" ? "text" : "asr",
         modelId,
         active: modelId === activeModel,
         apiKey: trimStr(profile.apiKey),
@@ -391,6 +393,23 @@ function normalizeExistingProviderConnections(settings) {
   settings.providerConnections = connections;
 }
 
+function ensureAsrConnections(settings, legacyConnections = settings.providerConnections) {
+  const saved = settings.asrConnections && typeof settings.asrConnections === "object"
+    && !Array.isArray(settings.asrConnections) ? settings.asrConnections : null;
+  const candidates = profileCandidates(settings).filter(candidate => candidate.scope === "asr");
+  const connections = {};
+  for (const family of ASR_PROVIDER_FAMILIES) {
+    const legacy = legacyConnections?.[family];
+    const seed = bestCandidate(candidates, family);
+    const value = saved ? saved[family] : trimStr(legacy?.apiKey) ? legacy : seed || legacy;
+    connections[family] = normalizeProviderConnection(family, value);
+    // ASR adapters own the audio protocol; legacy text Responses choices do
+    // not apply to the MiMo/DashScope audio endpoints.
+    connections[family].apiStyle = API_STYLES.CHAT_COMPLETIONS;
+  }
+  settings.asrConnections = connections;
+}
+
 function mirrorProviderConnectionsToProfiles(settings) {
   for (const group of PROFILE_GROUPS) {
     const profiles = settings[group.map] || {};
@@ -398,7 +417,9 @@ function mirrorProviderConnectionsToProfiles(settings) {
       const profile = cloneProfile(profileValue);
       const provider = inferredProvider(group, modelId, profile, settings);
       const family = providerFamilyFor(modelId, provider);
-      const connection = family ? settings.providerConnections?.[family] : null;
+      const isAsr = group.map !== "cleanerProfiles" && group.map !== "meetingAnalysisProfiles";
+      const connections = isAsr ? settings.asrConnections : settings.providerConnections;
+      const connection = family ? connections?.[family] : null;
       if (!connection) continue;
       profiles[modelId] = {
         ...profile,
@@ -592,6 +613,7 @@ function migrateConnectionProfiles(raw) {
   ensureMeetingAnalysisCapabilities(next);
 
   initializeProviderConnections(next);
+  ensureAsrConnections(next, raw?.providerConnections || {});
   mirrorProviderConnectionsToProfiles(next);
   applyActiveProfilesToTopLevel(next);
 
@@ -706,6 +728,7 @@ function ensureConnectionProfiles(value) {
 
   if (!next._providerConnectionsMigrated) initializeProviderConnections(next);
   else normalizeExistingProviderConnections(next);
+  ensureAsrConnections(next, value?.providerConnections || {});
   mirrorProviderConnectionsToProfiles(next);
   return applyActiveProfilesToTopLevel(next);
 }

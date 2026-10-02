@@ -214,6 +214,7 @@ async function verifyUpgradeBrowser(page, directory) {
   }
   await page.setViewportSize({ width: 360, height: 240 });
   await page.waitForFunction(() => document.getElementById("meetingPanel").classList.contains("live-minimal"));
+  await page.locator("#livePreview").hover();
   assert.equal(await page.locator("#liveRestoreNormal").isVisible(), true);
   assert.equal(await page.locator("#liveStop").isVisible(), false);
   await page.setViewportSize({ width: 480, height: 360 });
@@ -256,6 +257,8 @@ async function verifyUpgradeBrowser(page, directory) {
   await page.locator('[data-settings-tab="connections"]').click();
   assert.equal(await page.locator("#aliyunApiKeyInput").inputValue(), "test-only-live-key");
   await page.locator("#textSupplierAdd").click();
+  await page.locator("#textSupplierName").fill("Vendor test");
+  await page.locator("#supplierAdvancedDetails summary").click();
   await page.locator("#textSupplierId").fill("vendor-test");
   await page.locator("#textSupplierBaseUrl").fill("https://example.invalid/v1");
   await page.locator("#textSupplierApiKey").fill("test-placeholder");

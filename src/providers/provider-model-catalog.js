@@ -181,9 +181,9 @@ async function listProviderModels({ settings, provider, supplierId, fetchImpl = 
         method: "GET",
         signal: controller.signal,
         headers: {
-          Authorization: `Bearer ${supplier.apiKey}`,
           Accept: "application/json",
-          ...expandSupplierHeaders(supplier.requestHeaders)
+          ...expandSupplierHeaders(supplier.requestHeaders),
+          ...(supplier.authStyle === "api-key" ? { "api-key": supplier.apiKey } : { Authorization: `Bearer ${supplier.apiKey}` })
         }
       });
       if (!response.ok) {
