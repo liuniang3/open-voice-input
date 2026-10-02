@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased - 2026-10-02
+## v0.4.8 - 2026-10-02
 
 ### Changed
 
@@ -20,6 +20,7 @@ All notable changes to this project are documented here.
 - Added provider-role migration, same-brand URL/key isolation, empty-key handling, missing-supplier fallback, audio-only connection-test and responsive split-page browser regression coverage with synthetic credentials and mocked responses.
 - Updated the provider UI contract to require generic supplier cards/editor controls and to reject the retired experimental OpenCode Go entry.
 - Added draft validation, preset identity, credential retention, request-path, auth-header and dismissed-migration regression tests, plus browser coverage for add/edit/cancel, selected-model tests, failed/successful model sync, deletion protection and responsive dialogs.
+- All 52 shared regression scripts passed locally. The source CI matrix passed on Windows x64, macOS Intel x64, macOS Apple Silicon arm64 and Linux; browser interactions and isolated Windows Electron startup were also verified. Native Mac hardware capture, paste and gestures still require device validation.
 
 ## v0.4.7 - 2026-09-30
 
