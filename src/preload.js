@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld("mimoInput", {
   meetingLiveRetry: (payload) => ipcRenderer.invoke("meeting:live:retry", payload),
   meetingLiveCleanup: (payload) => ipcRenderer.invoke("meeting:live:cleanup", payload),
   meetingLiveSummarize: (payload) => ipcRenderer.invoke("meeting:live:summarize", payload),
+  meetingLiveCancelSummary: (payload) => ipcRenderer.invoke("meeting:live:cancel-summary", payload),
   meetingLiveWindow: (payload) => ipcRenderer.invoke("meeting:live:window", payload),
   onMeetingLiveWindowChanged: (callback) => {
     const listener = (_event, flags) => callback(flags);
@@ -122,6 +123,11 @@ contextBridge.exposeInMainWorld("mimoInput", {
   meetingFileSummaryRetry: (payload) => ipcRenderer.invoke("meeting:file-summary:retry", payload),
   meetingFileSummaryStatus: (payload) => ipcRenderer.invoke("meeting:file-summary:status", payload),
   meetingFileSummaryCancel: (payload) => ipcRenderer.invoke("meeting:file-summary:cancel", payload),
+  onMeetingFileSummaryUpdate: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("meeting:file-summary:update", listener);
+    return () => ipcRenderer.removeListener("meeting:file-summary:update", listener);
+  },
   // Stage 4B-core
   meetingRenameSession: (payload) => ipcRenderer.invoke("meeting:session:rename", payload),
   meetingSpeakerMapGet: (payload) => ipcRenderer.invoke("meeting:speaker-map:get", payload),

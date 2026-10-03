@@ -101,6 +101,26 @@ async function main() {
     assert.match(allText(prose), /待确认/);
   });
 
+  await test("new article summary keeps mindmap citations but shows only clean prose on the right", () => {
+    const container = element("div");
+    const summary = {
+      schema: "meeting_summary_v2", title: "主题",
+      mindmap: { text: "主题脉络", uncertain: false, provenance: [{ quote: "原文证据" }], children: [] },
+      sections: [{ heading: "正文", paragraphs: [
+        { text: "第一段，清晰表达原本的想法。", uncertain: false, provenance: [{ quote: "第一段原话" }] },
+        { text: "第二段，在前文基础上自然展开。", uncertain: true, provenance: [{ quote: "第二段原话" }] }
+      ], items: [] }]
+    };
+    renderSummaryDocument(container, summary, { createElement: element });
+    const [tree, article] = container.children[0].children;
+    assert.match(allText(tree), /主题脉络[\s\S]*原文证据/);
+    assert.deepEqual(article.children.map(child => child.tagName), ["H3", "P", "P"]);
+    assert.match(allText(article), /第一段[\s\S]*第二段/);
+    assert.doesNotMatch(allText(article), /来源：|原话|行动项|详细纪要/);
+    assert.match(allText(article.children[2]), /待确认/);
+    assert.match(summaryToPlainText(summary), /第一段[\s\S]*第二段/);
+  });
+
   await test("old summaries with only items or markdown still render", () => {
     const itemsOnly = element("div");
     renderSummaryDocument(itemsOnly, {

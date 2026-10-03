@@ -22,6 +22,7 @@ const {
   expandSupplierHeaders
 } = require("../src/providers/provider-model-catalog");
 const { testProviderConnection } = require("../src/providers/provider-connection-test");
+const { resolveTextLlmProfile, createTextSupplierChat } = require("../src/providers/text-supplier-llm");
 
 const root = path.resolve(__dirname, "..");
 let passed = 0;
@@ -85,6 +86,38 @@ async function main() {
     });
     assert.equal(manual.textSuppliers.length, 1);
     assert.equal(manual.textSuppliers[0].apiKey, "sk-mine");
+  });
+
+  await test("official OpenCode Go entries gain session headers without touching other gateways", async () => {
+    const settings = ensureTextSuppliers({ textSuppliers: [
+      { id: "go", baseUrl: "https://opencode.ai/zen/go/v1/", apiKey: "fixture-go", apiStyle: "chat-completions" },
+      { id: "other", baseUrl: "https://opencode.ai/zen/other/v1", apiKey: "fixture-other" },
+      { id: "lookalike", baseUrl: "https://opencode.ai.example/zen/go/v1", apiKey: "fixture-other" }
+    ] });
+    assert.deepEqual(resolveTextSupplier(settings, "other").requestHeaders, {});
+    assert.deepEqual(resolveTextSupplier(settings, "lookalike").requestHeaders, {});
+    const headers = resolveTextSupplier(settings, "go").requestHeaders;
+    assert.match(headers["User-Agent"], /^open-voice-input\//);
+    assert.equal(headers["x-opencode-session"], "auto");
+    assert.deepEqual(normalizeTextSupplier({ id: "go", baseUrl: "https://opencode.ai/zen/go/v1",
+      requestHeaders: { "user-agent": "my-client/1", "X-OpenCode-Session": "manual-session" } }).requestHeaders,
+    { "user-agent": "my-client/1", "X-OpenCode-Session": "manual-session" });
+    const calls = [];
+    const fetchImpl = async (_url, options) => {
+      calls.push(options.headers);
+      return jsonResponse({ choices: [{ message: { content: "OK" }, finish_reason: "stop" }] });
+    };
+    await testProviderConnection({ settings, supplierId: "go", modelId: "deepseek-v4.1-flash", fetchImpl });
+    const profile = resolveTextLlmProfile(settings, { supplierId: "go", modelId: "deepseek-v4.1-flash" });
+    const chat = createTextSupplierChat(profile, { fetchImpl });
+    await chat([{ role: "user", content: "one" }]);
+    await chat([{ role: "user", content: "two" }]);
+    assert.equal(calls.length, 3);
+    for (const call of calls) {
+      assert.match(call["User-Agent"], /^open-voice-input\//);
+      assert.match(call["x-opencode-session"], /^(?:models-)?[0-9a-f-]{36}$/i);
+    }
+    assert.equal(calls[1]["x-opencode-session"], calls[2]["x-opencode-session"], "one summary retains its session");
   });
 
   await test("same model ID at two suppliers stays fully isolated", () => {

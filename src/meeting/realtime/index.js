@@ -746,11 +746,8 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       && Number(modelProfile.requestTimeoutMs) > 0
       ? Math.floor(Number(modelProfile.requestTimeoutMs))
       : 90000;
-    const taskRequestTimeoutMs = providerRequestTimeoutMs + Math.max(5000, Math.ceil(providerRequestTimeoutMs * 0.05));
-    const maxOutputTokens = Number.isFinite(Number(modelProfile.maxOutputTokens))
-      && Number(modelProfile.maxOutputTokens) > 0
-      ? Math.floor(Number(modelProfile.maxOutputTokens))
-      : 8192;
+    const { summaryBudget } = require("../summary-budget");
+    const budget = summaryBudget(modelProfile);
     const failureCode = kind === "summary" ? "live_summary_failed" : "live_cleanup_failed";
     const useMimoReview = options.useMimoReview === true;
     const reviewModelId = options.reviewModelId || "mimo-v2.5-asr";
@@ -778,11 +775,12 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       asr: review ? { modelId: reviewModelId, revision: digest(JSON.stringify([reviewProfile?.provider, reviewProfile?.baseUrl])),
         limits: { maxSeconds: 30, maxBytes: 2 * 1024 * 1024 },
         transcribe: ({ audio, signal, segmentIndex }) => review({ audioDataUrl: `data:audio/wav;base64,${audio.toString("base64")}`, signal, segmentIndex }) } : null,
-      llm: { modelId, revision: modelProfile.supplierId
-        ? digest(JSON.stringify([modelProfile.provider, modelProfile.baseUrl, modelProfile.supplierId]))
-        : digest(JSON.stringify([modelProfile.provider, modelProfile.baseUrl])),
-        complete: ({ messages, signal }) => call({ messages, signal, maxTokens: maxOutputTokens }) },
-      limits: { maxRequestsPerRun: 1000, requestTimeoutMs: taskRequestTimeoutMs },
+      llm: { modelId, managesTransport: true, revision: modelProfile.supplierId
+        ? digest(JSON.stringify([modelProfile.provider, modelProfile.baseUrl, modelProfile.supplierId, modelProfile.apiStyle, modelProfile.reasoning]))
+        : digest(JSON.stringify([modelProfile.provider, modelProfile.baseUrl, modelProfile.apiStyle, modelProfile.reasoning])),
+        complete: ({ messages, signal, onProgress }) => call({ messages, signal, onProgress,
+          stream: true, maxTokens: budget.maxOutputTokens }) },
+      limits: { ...budget.limits, maxRequestsPerRun: 1000, requestTimeoutMs: providerRequestTimeoutMs },
       onUpdate: (update) => {
         current.postprocessStatus = update.status;
         current.postprocessProgress = { ...update.progress, kind };
@@ -800,14 +798,17 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         ? await processor.reconcile({ reviewAudio: useMimoReview, retryFailed: true, signal })
         : await processor.summarize({ useMimoReview, retryFailed: true, signal,
           source: "original" });
+      if (signal.aborted) throw Object.assign(new Error("postprocess_cancelled"), { code: "postprocess_cancelled" });
       if (outcome.status !== "completed" || !outcome.result) {
-        current.postprocessStatus = "failed";
+        current.postprocessStatus = outcome.status === "cancelled" ? "cancelled" : "needs_retry";
         if (kind === "reconcile") current.cleanupStatus = "failed";
-        current.error = safeError(null, failureCode);
+        current.error = outcome.status === "cancelled" ? null : safeError(null, failureCode);
+        current.postprocessProgress.failureCode = outcome.error?.code || "postprocess_request_failed";
         return;
       }
       const result = outcome.result;
       const writeResult = async (suffix, text) => {
+        if (signal.aborted) throw Object.assign(new Error("postprocess_cancelled"), { code: "postprocess_cancelled" });
         const destination = await reserveMarkdown(`${current.markdownPath.slice(0, -3)}.${suffix}.md`, defaultDirectory, `${current.sessionId}-${now()}`);
         await atomicWrite(destination, text);
         return destination;
@@ -820,20 +821,16 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         current.cleanupStatus = "completed";
         current.summary = null; current.summaryMarkdownPath = "";
       } else {
-        const sections = result.sections.map(section => {
-          const paragraphs = (section.paragraphs || []).map(paragraph =>
-            `${paragraph.text}${paragraph.uncertain ? "（待确认）" : ""}`).join("\n\n");
-          const items = (section.items || []).map(item => `- ${item.text}${item.uncertain ? "（待确认）" : ""}`).join("\n");
-          return `## ${section.heading}\n\n${paragraphs}${items ? `${paragraphs ? "\n\n" : ""}${items}` : ""}\n`;
-        }).join("\n");
-        current.summary = { mindmap: result.mindmap, sections: result.sections, markdown: sections, title: result.title };
+        current.summary = { schema: result.schema, mindmap: result.mindmap, sections: result.sections,
+          markdown: result.markdown, title: result.title };
         current.summaryMarkdownPath = await writeResult("summary", result.markdown);
       }
       current.postprocessStatus = "completed"; current.error = null;
     }).catch(error => {
-      current.postprocessStatus = "failed";
+      current.postprocessStatus = signal.aborted ? "cancelled" : "failed";
       if (kind === "reconcile") current.cleanupStatus = "failed";
-      current.error = safeError(error, failureCode);
+      current.error = signal.aborted ? null : safeError(error, failureCode);
+      current.postprocessProgress.failureCode = error?.code || "postprocess_request_failed";
     }).finally(async () => {
       try { await persist(); } finally { cleanupPromise = null; cleanupController = null; emit(); }
     });
@@ -859,7 +856,13 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     if (state) await saveMarkdown({ strict: true });
   }
 
-  return { start, stop, pause, resume, retry, cleanup, summarize, status, recover, listHistory, openHistory, shutdown,
+  async function cancelPostprocess() {
+    cleanupController?.abort();
+    await cleanupPromise;
+    return status();
+  }
+
+  return { start, stop, pause, resume, retry, cleanup, summarize, cancelPostprocess, status, recover, listHistory, openHistory, shutdown,
     // Deterministic timer-independent regression probes, no IPC exposure.
     flush: async () => { await pump(!state?.recording); await saveMarkdown(); runWorker(); },
     waitForIdle: async () => { await preview?.waitForIdle(); await workerPromise; await cleanupPromise; } };

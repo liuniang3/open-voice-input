@@ -5,6 +5,7 @@
   function createTextSupplierManager({ document, api, ui, getSettings, onSettings }) {
     const $ = id => document.getElementById(id);
     const dialog = $("textSupplierDialog");
+    const deleteDialog = $("textSupplierDeleteDialog");
     if (!dialog) return { render() {} };
     let selectedId = "";
     let editingId = "";
@@ -14,6 +15,7 @@
     let requestBusy = false;
     let idManuallyEdited = false;
     let lastFocus = null;
+    let pendingDeleteId = "";
     const messages = new Map();
     const editable = ["textSupplierName", "textSupplierBaseUrl", "textSupplierApiKey", "textSupplierApiStyle", "textSupplierAuthStyle", "textSupplierId", "textSupplierInitialModel"];
 
@@ -32,11 +34,6 @@
         $("textSupplierStatus").textContent = message;
         $("textSupplierStatus").dataset.kind = kind;
       }
-    }
-    function resetDelete() {
-      delete $("textSupplierDelete").dataset.confirm;
-      $("textSupplierDelete").classList.remove("is-confirming");
-      $("textSupplierDelete").title = "删除供应商";
     }
     function render(preferredId = selectedId) {
       const settings = getSettings();
@@ -91,7 +88,6 @@
       for (const id of ["textSupplierEdit", "textSupplierDelete", "textSupplierRefresh", "textSupplierModelAdd"]) $(id).disabled = !entry || requestBusy;
       $("textSupplierManualModel").disabled = !entry || requestBusy;
       $("textSupplierTest").disabled = !entry || requestBusy || !testSelect.options.length || testSelect.value === "请选择或添加模型";
-      resetDelete();
       const status = messages.get(selectedId);
       $("textSupplierStatus").textContent = status?.message || "";
       $("textSupplierStatus").dataset.kind = status?.kind || "idle";
@@ -188,9 +184,11 @@
         document.querySelector(".supplier-dialog-body").inert = true;
         for (const id of [...editable, "textSupplierSave", "textSupplierCancel", "textSupplierClose"]) $(id).disabled = true;
         $("supplierDraftStatus").textContent = "正在保存…";
+        const discover = !editingId && ui.SUPPLIER_PRESETS.find(preset => preset.id === selectedPreset)?.autoDiscoverModels && Boolean(entry.apiKey);
         const saved = await api.saveSettings(next);
         onSettings(saved); saving = false; dirty = false; close(true);
         setStatus(entry.id, "供应商已保存。", "success"); render(entry.id);
+        if (discover) await runRequest("refresh");
       } catch (error) {
         $("supplierDraftStatus").textContent = error.message || "保存失败，请重试。";
       } finally {
@@ -236,25 +234,47 @@
       } catch { setStatus(id, "添加模型失败，请重试。", "error"); }
       finally { requestBusy = false; render(selectedId); }
     }
-    async function remove() {
-      if (!selectedId || requestBusy) return;
-      const id = selectedId;
+    function confirmRemove() {
+      if (!selectedId || requestBusy || deleteDialog.open) return;
       const settings = getSettings();
-      const uses = usedBy(settings, id);
-      if (uses.length) { setStatus(id, `此供应商正用于${uses.join("、")}。请先切换这些功能的模型并保存，再删除。`, "error"); return; }
-      const button = $("textSupplierDelete");
-      if (button.dataset.confirm !== id) {
-        button.dataset.confirm = id; button.classList.add("is-confirming"); button.title = "再次点击确认删除";
-        setStatus(id, "再次点击删除图标确认。已生成的内容不受影响。", "warning"); return;
-      }
-      requestBusy = true; render(id);
+      const entry = settings.textSuppliers?.find(item => item.id === selectedId);
+      if (!entry) return;
+      pendingDeleteId = selectedId;
+      $("textSupplierDeleteMessage").textContent = `确定从语言处理供应商列表删除“${entry.name}”及其模型目录吗？已生成的转写、音频与摘要不受影响。`;
+      const uses = usedBy(settings, pendingDeleteId);
+      $("textSupplierDeleteUsage").hidden = !uses.length;
+      $("textSupplierDeleteUsage").textContent = uses.length ? `当前用于${uses.join("、")}；删除后这些功能的模型选择会清空，需要重新选择。` : "";
+      $("textSupplierDeleteError").textContent = "";
+      deleteDialog.showModal();
+      $("textSupplierDeleteCancel").focus();
+    }
+    function closeRemove() {
+      if (requestBusy) return;
+      pendingDeleteId = "";
+      deleteDialog.close();
+      $("textSupplierDelete").focus();
+    }
+    async function remove() {
+      if (!pendingDeleteId || requestBusy) return;
+      const id = pendingDeleteId;
+      requestBusy = true;
+      $("textSupplierDeleteConfirm").disabled = true;
+      $("textSupplierDeleteCancel").disabled = true;
+      $("textSupplierDeleteError").textContent = "正在删除…";
       try {
-        const catalogs = { ...settings.textSupplierCatalogs }; delete catalogs[id];
-        const entry = settings.textSuppliers.find(item => item.id === id);
-        const dismissed = [...new Set([...(settings.textSupplierDismissedMigrations || []), ...(entry?.migratedFrom ? [entry.migratedFrom] : [])])];
-        onSettings(await api.saveSettings({ textSuppliers: settings.textSuppliers.filter(item => item.id !== id), textSupplierCatalogs: catalogs, textSupplierDismissedMigrations: dismissed }));
-      } catch { setStatus(id, "删除失败，请重试。", "error"); }
-      finally { requestBusy = false; render(selectedId); }
+        const patch = ui.supplierRemovalPatch(getSettings(), id);
+        onSettings(await api.saveSettings(patch));
+        requestBusy = false;
+        closeRemove();
+        render();
+        if (selectedId) setStatus(selectedId, "供应商已删除。相关模型选择已清空。", "success");
+      } catch {
+        $("textSupplierDeleteError").textContent = "删除失败，原有配置未改变，请重试。";
+      } finally {
+        requestBusy = false;
+        $("textSupplierDeleteConfirm").disabled = false;
+        $("textSupplierDeleteCancel").disabled = false;
+      }
     }
 
     $("textSupplierAdd").addEventListener("click", () => open());
@@ -271,7 +291,10 @@
       buttons[next].click(); buttons[next].focus();
     });
     $("textSupplierForm").addEventListener("submit", save);
-    $("textSupplierDelete").addEventListener("click", remove);
+    $("textSupplierDelete").addEventListener("click", confirmRemove);
+    $("textSupplierDeleteConfirm").addEventListener("click", remove);
+    $("textSupplierDeleteCancel").addEventListener("click", closeRemove);
+    deleteDialog.addEventListener("cancel", event => { event.preventDefault(); closeRemove(); });
     $("textSupplierRefresh").addEventListener("click", () => runRequest("refresh"));
     $("textSupplierTest").addEventListener("click", () => runRequest("test"));
     $("textSupplierModelAdd").addEventListener("click", addModel);

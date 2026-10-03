@@ -372,6 +372,44 @@ async function main() {
     assert.throws(() => profileFor({ cleanerProfiles: { custom: { provider: "openai-compatible", apiKey: "fixture" } } }, "custom", true, {}),
       error => error.code === "live_credentials_missing");
   });
+  await test("summary cancellation preserves original audio/text and resumes through the live service", async () => {
+    let entered, delayed, requestSignal, calls = 0;
+    const begun = new Promise(resolve => { entered = resolve; });
+    const summary = request => {
+      const item = JSON.parse(request.messages[1].content).items[0];
+      const claim = { text: item.text, evidence: [{ sourceId: item.id, quote: item.text }], uncertain: false };
+      return JSON.stringify({ title: "Recorded decision", mindmap: { ...claim, children: [] },
+        sections: [{ heading: "正文", paragraphs: [claim], items: [] }] });
+    };
+    const x = await setup({ llmImpl: request => {
+      calls++; requestSignal = request.signal;
+      assert.equal(request.stream, true);
+      request.onProgress({ stage: "receiving", outputChars: 12, reasoningChars: 4 });
+      if (calls > 1) return Promise.resolve(summary(request));
+      entered();
+      return new Promise(resolve => { delayed = () => resolve(summary(request)); });
+    } });
+    try {
+      await x.api.start({ captureMode: "microphone" }); await x.add("microphone", RATE);
+      await x.api.stop(); await x.api.waitForIdle();
+      const original = x.api.status();
+      const raw = await fs.readFile(original.markdownPath, "utf8");
+      const audio = await fs.readFile(original.audioPaths[0]);
+      await x.api.summarize({ modelId: "unit-model" }); await begun;
+      assert.equal(x.api.status().postprocessStatus, "running");
+      assert.equal(x.api.status().postprocessProgress.outputChars, 12);
+      const cancelled = await x.api.cancelPostprocess();
+      assert.equal(cancelled.postprocessStatus, "cancelled"); assert.equal(cancelled.error, null);
+      assert.equal(requestSignal.aborted, true); assert.equal(cancelled.summaryMarkdownPath, "");
+      delayed(); await new Promise(setImmediate);
+      assert.equal(x.api.status().summaryMarkdownPath, "");
+      await x.api.summarize({ modelId: "unit-model" }); await x.api.waitForIdle();
+      assert.equal(x.api.status().postprocessStatus, "completed"); assert.equal(calls, 2);
+      assert.ok(await fs.stat(x.api.status().summaryMarkdownPath));
+      assert.equal(await fs.readFile(original.markdownPath, "utf8"), raw);
+      assert.deepEqual(await fs.readFile(original.audioPaths[0]), audio);
+    } finally { delayed?.(); await x.api.shutdown(); }
+  });
   console.log(`${count} realtime meeting tests passed`);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

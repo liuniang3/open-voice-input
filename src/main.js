@@ -539,10 +539,14 @@ function liveDto(value = {}) {
   dto.audioPaths = Array.isArray(value.audioPaths) ? value.audioPaths.filter(validPath)
     : Object.fromEntries(Object.entries(pickMeetingFields(value.audioPaths, ["microphone", "system", "mixed"])).filter(([, file]) => validPath(file)));
   for (const key of ["cleanupProgress", "postprocessProgress"]) {
-    dto[key] = Object.fromEntries(Object.entries(pickMeetingFields(value[key], ["completed", "total", "failed", "kind", "stage"]))
-      .filter(([field, item]) => ["kind", "stage"].includes(field) ? typeof item === "string" : typeof item === "number" && Number.isFinite(item)));
+    dto[key] = Object.fromEntries(Object.entries(pickMeetingFields(value[key], ["completed", "total", "failed", "kind", "stage", "failureCode",
+      "attempt", "retry", "maxRetries", "delayMs", "outputChars", "reasoningChars"]))
+      .filter(([field, item]) => ["kind", "stage"].includes(field) ? typeof item === "string"
+        : field === "failureCode" ? typeof item === "string" && /^postprocess_[a-z_]+$/.test(item)
+        : typeof item === "number" && Number.isFinite(item) && item >= 0));
   }
   dto.summary = value.summary ? {
+    ...(value.summary.schema === "meeting_summary_v2" ? { schema: "meeting_summary_v2" } : {}),
     ...Object.fromEntries(Object.entries(pickMeetingFields(value.summary, ["title", "markdown"]))
       .filter(([, item]) => typeof item === "string")),
     mindmap: liveMindmapDto(value.summary.mindmap),
@@ -2217,6 +2221,13 @@ for (const action of ["retry", "cleanup", "summarize"]) {
   });
 }
 
+registerLiveIpc("meeting:live:cancel-summary", async (payload) => {
+  const current = getRealtimeMeeting().status();
+  if (!payload || typeof payload.sessionId !== "string" || payload.sessionId !== current.sessionId) throw liveError("live_session_invalid");
+  if (current.recording || current.paused) throw liveError("live_busy");
+  return liveDto(await getRealtimeMeeting().cancelPostprocess());
+});
+
 registerLiveIpc("meeting:live:choose-destination", async () => {
   const result = await dialog.showSaveDialog(mainWindow, {
     title: "选择实时会议 Markdown 保存位置",
@@ -2645,7 +2656,13 @@ function fileSummaryPayload(payload) {
     retryFailed: input.retryFailed !== false };
 }
 
-function buildFileSummaryService(sessionId, sessionDir, { modelId, reviewModelId, supplierId }) {
+function publishFileSummaryUpdate(value) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const { toFileSummaryDto } = require("./meeting/processing/file-summary");
+  sendWhenLoaded(mainWindow, "meeting:file-summary:update", toFileSummaryDto(value));
+}
+
+function buildFileSummaryService(sessionId, sessionDir, { modelId, reviewModelId, supplierId, onUpdate }) {
   const { createFileSummaryService } = require("./meeting/processing/file-summary");
   const { meetingTextProfile, profileFor, languageModel, transcriber } = require("./meeting/realtime/providers");
   const { readMixed } = require("./meeting/realtime/audio");
@@ -2659,7 +2676,9 @@ function buildFileSummaryService(sessionId, sessionDir, { modelId, reviewModelId
     sessionDir,
     sessionId,
     modelId: summaryProfile.modelId || modelId,
+    modelProfile: summaryProfile,
     reviewModelId,
+    onUpdate,
     readMixedFn: readMixed,
     review: (call) => transcriber(profileFor(snapshot, reviewModelId))(call),
     llm: (call) => languageModel(summaryProfile)(call)
@@ -2675,13 +2694,26 @@ async function startFileSummary(sessionId, payload) {
     if (existing?.running) return existing.service.status();
     const current = await getMeetingCapture().store.readSession(sessionId);
     if (!current?.session || !current.sessionDir) throw fileSummaryError("session_not_found");
-    const service = buildFileSummaryService(sessionId, current.sessionDir, options);
-    const job = { service, running: true, ...options };
+    const job = { service: null, running: true, ...options };
+    const service = buildFileSummaryService(sessionId, current.sessionDir, {
+      ...options,
+      onUpdate: (dto) => {
+        if (fileSummaryJobs.get(sessionId) === job) publishFileSummaryUpdate(dto);
+      }
+    });
+    job.service = service;
     fileSummaryJobs.set(sessionId, job);
     job.promise = service.summarize({ useMimoReview: options.useMimoReview, retryFailed: options.retryFailed })
       .catch(() => { /* sanitized failure already recorded on the job status */ })
-      .finally(() => {
-        if (fileSummaryJobs.get(sessionId) === job) job.running = false;
+      .finally(async () => {
+        if (fileSummaryJobs.get(sessionId) !== job) return;
+        job.running = false;
+        // The final status includes the validated result and saved path, which
+        // are not yet available in streaming progress callbacks.
+        try {
+          const dto = await service.status();
+          if (fileSummaryJobs.get(sessionId) === job) publishFileSummaryUpdate(dto);
+        } catch { /* A disconnected view cannot fail completed durable work. */ }
       });
     return service.status();
   })();

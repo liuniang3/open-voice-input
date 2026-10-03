@@ -1,7 +1,7 @@
 "use strict";
 
-/* The file workspace intentionally owns its state and polling lifecycle.
- * It reuses the meeting processing IPC contract, but never reuses the meeting workbench state. */
+/* The file workspace owns its view state; durable summary jobs belong to MAIN.
+ * Progress subscriptions survive navigation independently of view polling. */
 (function createFileTranscriptionUi() {
   const panel = document.getElementById("filePanel");
   if (!panel) return;
@@ -36,6 +36,8 @@
     settings: {}
   };
   let openPromise = null;
+  let summaryRevision = 0;
+  let unsubscribeSummary = null;
 
   const FILE_ASR_MODELS = [
     { provider: "mimo", value: "mimo-v2.5-asr", label: "MiMo V2.5 ASR" },
@@ -156,6 +158,15 @@
 
   function isRunningAnalysis(status) {
     return status === "running" || status === "cancelling";
+  }
+
+  function acceptSummaryJob(job) {
+    if (!job || job.sessionId !== state.selectedId) return false;
+    summaryRevision += 1;
+    state.summaryJob = job;
+    state.summaryPath = job.summaryMarkdownPath || "";
+    if (job.summary) state.summaryDoc = job.summary;
+    return true;
   }
 
   function hasArchive(row) {
@@ -314,7 +325,7 @@
     const canCancel = Boolean(row && processRunning);
     const canAnalyze = Boolean(
       row && proc === "completed" && !analysisRunning && !processRunning && !state.importBusy &&
-      (ana === "none" || ana === "completed")
+      ["none", "idle", "completed"].includes(ana)
     );
     const canRetryAnalysis = Boolean(row && proc === "completed" && !analysisRunning &&
       ["failed", "cancelled", "needs_retry"].includes(ana));
@@ -344,12 +355,14 @@
     setPill(e.importStatus, state.importBusy ? "processing" : row ? (hasArchive(row) ? "ok" : "warn") : "idle", state.importBusy ? "导入中" : row ? (hasArchive(row) ? "已导入" : "待导入") : "未选择");
     if (e.processLabel) e.processLabel.textContent = processLabel;
     if (e.processProgress) e.processProgress.textContent = ui.processProgressText?.(state.process) || "—";
-    const analysisLabel = ana === "running" ? "正在生成摘要…"
+    let analysisLabel = ana === "running" ? ui.summaryProgressText?.(state.summaryJob?.progress) || "正在生成摘要…"
       : ana === "completed" ? (state.summaryJob?.legacy ? "历史摘要（只读）" : "摘要已生成")
       : ana === "failed" ? "摘要失败，原文保留"
       : ana === "needs_retry" ? "摘要未完成，可重试"
       : ana === "cancelled" ? "摘要已取消"
       : "尚未开始";
+    const reason = ui.summaryErrorText?.(state.summaryJob?.error?.code);
+    if (reason && ["failed", "needs_retry"].includes(ana)) analysisLabel += ` · ${reason}`;
     if (e.analysisLabel) e.analysisLabel.textContent = analysisLabel;
     if (e.processLabel) e.processLabel.dataset.kind = processKind;
     if (e.analysisLabel) e.analysisLabel.dataset.kind = ana === "completed" ? "ok"
@@ -392,7 +405,10 @@
     stopPolling();
     channels.poll.next();
     channels.result.next();
-    state.selectedId = String(sessionId);
+    channels.analysis.next();
+    sessionId = String(sessionId);
+    state.selectedId = sessionId;
+    const atSummaryRevision = ++summaryRevision;
     state.process = null;
     state.summaryJob = null;
     state.summaryPath = "";
@@ -403,24 +419,20 @@
     renderControls();
     const token = channels.select.next();
     const [scan, process, job] = await Promise.all([
-      window.mimoInput.meetingScanSession(state.selectedId),
-      window.mimoInput.meetingProcessStatus({ sessionId: state.selectedId }),
+      window.mimoInput.meetingScanSession(sessionId),
+      window.mimoInput.meetingProcessStatus({ sessionId }),
       typeof window.mimoInput.meetingFileSummaryStatus === "function"
-        ? window.mimoInput.meetingFileSummaryStatus({ sessionId: state.selectedId })
+        ? window.mimoInput.meetingFileSummaryStatus({ sessionId })
         : Promise.resolve(null)
     ]);
-    if (!accept(channels.select, token, state.selectedId)) return;
+    if (!accept(channels.select, token, sessionId)) return;
     const row = currentRow();
     if (row && scan?.ok) {
       row.status = scan.session?.status || row.status;
       row.hasArchive = Boolean(row.hasArchive || scan.session?.tracks?.microphone || scan.session?.tracks?.system);
     }
     state.process = process?.ok ? process.processing : null;
-    state.summaryJob = job?.ok ? job.summary : null;
-    if (state.summaryJob?.summary) {
-      state.summaryDoc = state.summaryJob.summary;
-      state.summaryPath = state.summaryJob.summaryMarkdownPath || "";
-    }
+    if (atSummaryRevision === summaryRevision && job?.ok) acceptSummaryJob(job.summary);
     renderSelected();
     renderControls();
     if (state.process?.stage === "completed" || row?.hasRaw) {
@@ -558,7 +570,8 @@
     const sessionId = state.selectedId;
     if (!sessionId) return;
     const token = channels.analysis.next();
-    state.summaryJob = { status: "running" };
+    const atSummaryRevision = ++summaryRevision;
+    state.summaryJob = { sessionId, status: "running" };
     state.summaryDoc = null;
     state.summaryPath = "";
     if (state.resultTab !== "raw") {
@@ -575,11 +588,9 @@
         modelId: selected.modelId,
         useMimoReview: Boolean(els().mimoReview?.checked)
       });
-      if (!accept(channels.analysis, token, sessionId)) return;
+      if (!accept(channels.analysis, token, sessionId) || atSummaryRevision !== summaryRevision) return;
       if (!res?.ok) throw new Error(res?.error?.message || "摘要生成失败");
-      state.summaryJob = res.summary || { status: "running" };
-      state.summaryPath = state.summaryJob.summaryMarkdownPath || "";
-      if (state.summaryJob.summary) state.summaryDoc = state.summaryJob.summary;
+      acceptSummaryJob(res.summary || { sessionId, status: "running" });
       renderControls();
       if (state.summaryJob.status !== "running" && state.summaryJob.summary) {
         await loadResult("summary", { expectedSessionId: sessionId });
@@ -589,7 +600,8 @@
       }
       ensurePolling();
     } catch (error) {
-      state.summaryJob = { status: "failed" };
+      if (!accept(channels.analysis, token, sessionId) || atSummaryRevision !== summaryRevision) return;
+      acceptSummaryJob({ sessionId, status: "failed" });
       renderControls();
       setHint(error.message || String(error));
       throw error;
@@ -598,9 +610,11 @@
 
   async function summaryCancel() {
     if (!state.selectedId) return;
-    const res = await window.mimoInput.meetingFileSummaryCancel({ sessionId: state.selectedId });
+    const sessionId = state.selectedId;
+    const res = await window.mimoInput.meetingFileSummaryCancel({ sessionId });
+    if (sessionId !== state.selectedId) return;
     if (!res?.ok) throw new Error(res?.error?.message || "取消摘要失败");
-    state.summaryJob = res.summary || { status: "cancelled" };
+    acceptSummaryJob(res.summary || { sessionId, status: "cancelled" });
     renderControls();
   }
 
@@ -657,12 +671,13 @@
 
   async function loadSummaryResults(sessionId) {
     if (!sessionId || sessionId !== state.selectedId) return;
+    const atSummaryRevision = summaryRevision;
     // Durable readback of the shared summary engine (including history sessions).
     if (typeof window.mimoInput.meetingFileSummaryStatus === "function") {
       const res = await window.mimoInput.meetingFileSummaryStatus({ sessionId });
+      if (sessionId !== state.selectedId || atSummaryRevision !== summaryRevision) return;
       if (res?.ok && res.summary) {
-        state.summaryJob = res.summary;
-        state.summaryPath = res.summary.summaryMarkdownPath || "";
+        acceptSummaryJob(res.summary);
         if (res.summary.summary) {
           state.summaryDoc = res.summary.summary;
           return;
@@ -672,7 +687,9 @@
     if (["running", "completed", "needs_retry", "failed", "cancelled"].includes(state.summaryJob?.status)
       && !state.summaryJob?.legacy) return;
     // Legacy histories stay read-only: old analysis summaries still render.
+    const atLegacyRevision = summaryRevision;
     const legacy = await window.mimoInput.meetingAnalysisSummary?.({ sessionId });
+    if (sessionId !== state.selectedId || atLegacyRevision !== summaryRevision) return;
     if (legacy?.ok && legacy.summary) {
       state.summaryDoc = legacy.summary;
       state.summaryJob = { status: "completed", legacy: true };
@@ -684,6 +701,7 @@
     if (!state.selectedId || document.body.classList.contains("file-mode") === false) return;
     const sessionId = state.selectedId;
     const token = channels.poll.next();
+    const atSummaryRevision = summaryRevision;
     const [process, job] = await Promise.all([
       window.mimoInput.meetingProcessStatus({ sessionId }),
       typeof window.mimoInput.meetingFileSummaryStatus === "function"
@@ -692,13 +710,7 @@
     ]);
     if (!accept(channels.poll, token, sessionId)) return;
     if (process?.ok) state.process = process.processing;
-    if (job?.ok && job.summary) {
-      state.summaryJob = job.summary;
-      if (job.summary.summary) {
-        state.summaryDoc = job.summary.summary;
-        state.summaryPath = job.summary.summaryMarkdownPath || "";
-      }
-    }
+    if (atSummaryRevision === summaryRevision && job?.ok) acceptSummaryJob(job.summary);
     renderControls();
     if (state.process?.stage === "completed" && !state.rawDoc) {
       await loadResult("raw", { expectedSessionId: sessionId });
@@ -782,6 +794,22 @@
   }
 
   function bind() {
+    unsubscribeSummary = window.mimoInput.onMeetingFileSummaryUpdate?.((job) => {
+      if (!acceptSummaryJob(job)) return;
+      // Update state even off-screen, without switching views or starting a job.
+      if (document.body.classList.contains("file-mode")) {
+        renderControls();
+        if (job.summary && state.resultTab === "summary") {
+          void loadResult("summary", { expectedSessionId: job.sessionId }).catch(() => {});
+        }
+        ensurePolling();
+      }
+    });
+    window.addEventListener("beforeunload", () => {
+      unsubscribeSummary?.();
+      unsubscribeSummary = null;
+      stopPolling();
+    });
     $("fileBtn")?.addEventListener("click", () => openWorkspace().catch((error) => setHint(error.message)));
     $("fileChooseBtn")?.addEventListener("click", () => importFile().catch((error) => setHint(error.message)));
     $("fileChooseInlineBtn")?.addEventListener("click", () => importFile().catch((error) => setHint(error.message)));

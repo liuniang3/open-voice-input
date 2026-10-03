@@ -31,9 +31,25 @@ async function run() {
   assert.equal(new Set(presets.map(item => item.id)).size, presets.length);
   assert(presets.every(preset => !preset.apiKey && !preset.modelId), "presets must not carry keys or fixed model IDs");
   assert.equal(presets.find(item => item.id === "mimo-plan").authStyle, "api-key");
+  const go = presets.find(item => item.id === "opencode-go");
+  assert.deepEqual([go.baseUrl, go.apiStyle, go.authStyle, go.autoDiscoverModels],
+    ["https://opencode.ai/zen/go/v1", "chat-completions", "bearer", true]);
   const legacy = { providerConnections: { "opencode-go": { baseUrl: "https://legacy.invalid/v1", apiKey: "test-only-legacy" } } };
   assert.equal(ensureTextSuppliers(legacy).textSuppliers.length, 1);
   assert.equal(ensureTextSuppliers({ ...legacy, textSupplierDismissedMigrations: ["opencode-go"] }).textSuppliers.length, 0, "deleted legacy supplier must not reappear");
+  const removable = ensureTextSuppliers({ ...legacy, textSuppliers: [
+    { id: "opencode-go", name: "Go", baseUrl: go.baseUrl, apiKey: "fixture-go", migratedFrom: "opencode-go" },
+    { id: "keep", name: "Keep", baseUrl: "https://other.invalid/v1", apiKey: "fixture-other" }
+  ], textSupplierCatalogs: { "opencode-go": { models: ["first"] }, keep: { models: ["second"] } },
+  textModelSelection: { supplierId: "opencode-go", modelId: "first" },
+  textModelSelections: { cleanup: { supplierId: "keep", modelId: "second" }, summary: { supplierId: "opencode-go", modelId: "first" } } });
+  const removed = ui.supplierRemovalPatch(removable, "opencode-go");
+  assert.equal(removed.textModelSelection, null);
+  assert.equal(removed.textModelSelections.summary, null);
+  assert.deepEqual(removed.textModelSelections.cleanup, removable.textModelSelections.cleanup);
+  assert.deepEqual(Object.keys(removed.textSupplierCatalogs), ["keep"]);
+  assert.equal(ensureTextSuppliers({ ...removable, ...removed }).textSuppliers.length, 1, "legacy Go must stay deleted");
+  assert.throws(() => ui.supplierRemovalPatch(removable, "missing"));
   const authSettings = ensureTextSuppliers({ textSuppliers: [{ ...edited, id: "mimo", authStyle: "api-key" }] });
   assert.equal(resolveTextModel(authSettings, { supplierId: "mimo", modelId: "same-model" }).authStyle, "api-key");
   const profile = resolveTextLlmProfile(authSettings, { supplierId: "mimo", modelId: "same-model" });
@@ -49,6 +65,7 @@ async function run() {
   const renderer = fs.readFileSync(path.join(root, "src/renderer/renderer.js"), "utf8");
   assert.match(html, /<dialog id="textSupplierDialog"/);
   assert.match(html, /id="supplierPresetGrid"/);
+  assert.match(html, /id="textSupplierDeleteDialog"/);
   assert.match(html, /id="textSupplierAuthStyle"/);
   assert.doesNotMatch(html, /OpenCode Go（实验性）/);
   assert.match(renderer, /if \(textSupplierManager\?\.isOpen\(\)\) return/);
@@ -59,7 +76,7 @@ async function run() {
 async function verifySupplierBrowser(page, output) {
   const { prepareBrowser } = require("./test-meeting-live-ui");
   const errors = await prepareBrowser(page);
-  await page.evaluate(() => window.mockOpenSettings());
+  await page.evaluate(async () => { await window.mimoInput.saveSettings({ _languageSuppliersMigrated: true }); window.mockOpenSettings(); });
   await page.locator('[data-settings-tab="connections"]').click();
   await page.locator("#textSupplierAdd").click();
   assert(await page.locator("#textSupplierDialog").isVisible());
@@ -157,20 +174,55 @@ async function verifySupplierBrowser(page, output) {
   }
   await page.setViewportSize({ width: 1180, height: 800 });
   await page.evaluate(async () => {
-    await window.mimoInput.saveSettings({ textModelSelections: { cleanup: { supplierId: "provider-2", modelId: "demo-text-model" } } });
+    await window.mimoInput.saveSettings({ textModelSelections: {
+      cleanup: { supplierId: "provider-2", modelId: "demo-text-model" },
+      summary: { supplierId: "provider", modelId: "demo-text-model" }
+    } });
     window.mockOpenSettings();
   });
   await page.locator('[data-settings-tab="connections"]').click();
   await page.locator('[data-supplier-id="provider-2"]').click();
   await page.locator("#textSupplierDelete").click();
-  assert((await page.locator("#textSupplierStatus").textContent()).includes("请先切换"));
+  assert(await page.locator("#textSupplierDeleteDialog").isVisible());
+  assert((await page.locator("#textSupplierDeleteUsage").textContent()).includes("语音表达整理"));
+  await page.screenshot({ path: path.join(output, "supplier-delete-confirm.png") });
+  await page.setViewportSize({ width: 390, height: 660 });
+  assert.equal(await page.locator("#textSupplierDeleteMessage").evaluate(el => getComputedStyle(el).whiteSpace), "normal");
+  await page.screenshot({ path: path.join(output, "supplier-delete-confirm-390.png") });
+  await page.setViewportSize({ width: 1180, height: 800 });
+  await page.locator("#textSupplierDeleteCancel").click();
   assert.equal(await page.locator("#textSupplierCards button").count(), 2);
-  await page.evaluate(async () => { await window.mimoInput.saveSettings({ textModelSelections: {} }); window.mockOpenSettings(); });
+  await page.evaluate(() => {
+    const save = window.mimoInput.saveSettings;
+    window.mockApiOverrides.saveSettings = patch => {
+      if (window.rejectSupplierDelete && patch.textSuppliers?.length === 1) throw new Error("fixture failure");
+      return save(patch);
+    };
+    window.rejectSupplierDelete = true;
+  });
   await page.locator('[data-supplier-id="provider-2"]').click();
   await page.locator("#textSupplierDelete").click();
-  await page.locator("#textSupplierDelete").click();
+  await page.locator("#textSupplierDeleteConfirm").click();
+  await page.waitForFunction(() => document.getElementById("textSupplierDeleteError").textContent.includes("删除失败"));
+  assert.equal(await page.locator("#textSupplierCards button").count(), 2);
+  await page.evaluate(() => { window.rejectSupplierDelete = false; });
+  await page.locator("#textSupplierDeleteConfirm").click();
   await page.waitForFunction(() => window.mockSettings().textSuppliers.length === 1);
   assert.equal(await page.locator("#textSupplierCards button").count(), 1);
+  assert.deepEqual(await page.evaluate(() => window.mockSettings().textModelSelections), {
+    cleanup: null, summary: { supplierId: "provider", modelId: "demo-text-model" }
+  });
+  assert.equal(await page.locator("#cleanupSupplierSelect").inputValue(), "");
+  await page.locator("#textSupplierAdd").click();
+  await page.locator('[data-preset="opencode-go"]').click();
+  assert.equal(await page.locator("#textSupplierBaseUrl").inputValue(), "https://opencode.ai/zen/go/v1");
+  assert.equal(await page.locator("#textSupplierApiStyle").inputValue(), "chat-completions");
+  assert.equal(await page.locator("#textSupplierApiKey").inputValue(), "");
+  await page.locator("#textSupplierApiKey").fill("fixture-go-only");
+  await page.locator("#textSupplierSave").click();
+  await page.waitForFunction(() => window.mockSettings().textSupplierCatalogs?.["opencode-go"]?.models?.length === 2);
+  assert.equal(await page.locator("#textSupplierModelPreview span").count(), 2);
+  assert.equal(await page.locator("#textSupplierStatus").textContent(), "已获取 2 个模型。");
   assert.deepEqual(errors, [], "no browser runtime errors");
   console.log(`Supplier add/edit/cancel, preset, resize, key visibility, sync/test and deletion browser checks passed: ${output}`);
 }

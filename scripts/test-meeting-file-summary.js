@@ -62,7 +62,7 @@ function summaryReply(input) {
   return {
     title: "File meeting",
     mindmap: { ...claim, children: [] },
-    sections: [{ heading: "Details", paragraphs: [paragraph], items: [claim] }]
+    sections: [{ heading: "正文", paragraphs: [paragraph], items: [] }]
   };
 }
 
@@ -102,10 +102,11 @@ async function fixture({ frames = 32000, items, withLegacyAnalysis = true } = {}
   };
   const calls = { review: [], llm: [], reads: [] };
   const audio = require("../src/meeting/realtime/audio");
-  const makeService = () => createFileSummaryService({
+  const makeService = (options = {}) => createFileSummaryService({
     sessionDir,
     sessionId: "file-summary-test",
     modelId: "sum-model",
+    modelProfile: options.modelProfile,
     reviewModelId: "mimo-v2.5-asr",
     readMixedFn: async (paths, start, end) => {
       calls.reads.push([start, end]);
@@ -134,6 +135,16 @@ async function assertPreserved(f) {
 }
 
 async function main() {
+  await test("file adapter uses the selected profile for streaming, output and context budgets", async () => {
+    const f = await fixture({ items: Array.from({ length: 65 }, (_, index) => ({ id: `microphone:${index}`, track: "microphone",
+      text: `Record ${index}: ` + "Substantive words remain part of this discussion. ".repeat(3), beginMs: index * 40, endMs: index * 40 + 40 })) });
+    const result = await f.makeService({ modelProfile: { provider: "text-supplier", supplierId: "unit", baseUrl: "https://unit.example/v1",
+      contextWindow: 272000, maxOutputTokens: 32768, requestTimeoutMs: 300000 } }).summarize();
+    assert.equal(result.status, "completed"); assert.equal(f.calls.llm.length, 1);
+    assert.equal(f.calls.llm[0].stream, true); assert.equal(f.calls.llm[0].maxTokens, 32768);
+    assert.equal(typeof f.calls.llm[0].onProgress, "function");
+    await assertPreserved(f);
+  });
   await test("file summary without review summarizes immutable ASR text and never calls ASR or audio reads", async () => {
     const f = await fixture();
     const result = await f.makeService().summarize({ useMimoReview: false });
@@ -228,7 +239,7 @@ async function main() {
     const completed = await f.makeService().summarize({ useMimoReview: false });
     assert.equal(completed.status, "completed");
     const stored = await readLatestSummaryResult(f.sessionDir);
-    assert.ok(stored && stored.result.schema === "meeting_summary_v1");
+    assert.ok(stored && stored.result.schema === "meeting_summary_v2");
     assert.equal(f.calls.review.length, 0);
     const historyService = createFileSummaryService({
       sessionDir: f.sessionDir,

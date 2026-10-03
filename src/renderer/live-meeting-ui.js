@@ -144,7 +144,7 @@
       loaded = true;
       if (active(dto) && dto.modelId) setModel(dto.modelId);
       if (active(dto) && dto.captureMode) $("liveCaptureMode").value = dto.captureMode;
-      render();
+      if (opened) render();
     }
 
     async function refresh() {
@@ -174,7 +174,7 @@
       busy.add(name);
       errorText = "";
       // Invalidates status reads that began before this user action.
-      const changesSession = ["start", "stop", "pause", "retry", "history", "cleanup", "summarize"].includes(name);
+      const changesSession = ["start", "stop", "pause", "retry", "history", "cleanup", "summarize", "cancelSummary"].includes(name);
       const atRevision = changesSession ? ++revision : revision;
       const atWindowRevision = windowRevision;
       const epoch = generation;
@@ -265,6 +265,7 @@
       summarySignature = signature;
       $("liveMindmap").replaceChildren();
       $("liveSummaryDetail").replaceChildren();
+      $("liveDetailHeading").textContent = summary?.schema === "meeting_summary_v2" ? "整理正文" : "详细纪要";
       $("liveSummaryHeading").textContent = summary?.title ? `会议摘要 · ${summary.title}` : "会议摘要";
       if (!summary) return;
       const add = (parent, tag, value) => {
@@ -304,6 +305,18 @@
       const sections = Array.isArray(summary.sections) ? summary.sections.filter(section =>
         section && typeof section.heading === "string"
         && (Array.isArray(section.items) || Array.isArray(section.paragraphs))) : [];
+      if (summary.schema === "meeting_summary_v2" && sections.length) {
+        let remaining = 2000;
+        for (const section of sections) {
+          for (const paragraph of section.paragraphs || []) {
+            if (--remaining < 0) break;
+            if (!paragraph || typeof paragraph.text !== "string") continue;
+            const prose = add(detail, "p", paragraph.text);
+            if (paragraph.uncertain === true) add(prose, "small", "待确认，请核对原文");
+          }
+        }
+        return;
+      }
       if (sections.length) {
         let itemsRemaining = 2000;
         for (const section of sections.slice(0, 200)) {
@@ -575,15 +588,21 @@
         || !$("liveCleanerModel").value || !can("meetingLiveSummarize");
       $("liveSummarize").textContent = busy.has("summarize") ? "正在生成摘要…"
         : dto.summary ? "重新生成摘要" : "生成摘要";
+      if ($("liveCancelSummary")) $("liveCancelSummary").disabled = !processing(dto.postprocessStatus) || !can("meetingLiveCancelSummary");
       $("liveCleanupStatus").textContent = dto.summary ? "摘要已生成"
         : processing(dto.postprocessStatus) || busy.has("summarize") ? "正在生成摘要"
         : dto.postprocessStatus === "failed" ? "摘要失败，原文保留"
         : dto.postprocessStatus === "needs_retry" ? "摘要未完成，可重试"
+        : dto.postprocessStatus === "cancelled" ? "已取消生成，原文保留"
         : "未生成摘要";
       const progress = dto.postprocessProgress;
       const operation = progress?.kind === "summary" ? "生成摘要" : progress?.kind === "reconcile" ? "校订" : "处理";
-      $("livePostprocessStatus").textContent = ({ queued: "等待处理", running: `正在${operation}`, processing: `正在${operation}`, reviewing: "正在复核音频", cleaning: "正在校订", summarizing: "正在生成摘要", completed: "处理完成", needs_retry: "部分处理待重试", interrupted: "处理已中断，可重试", failed: "处理失败，可重试" })[dto.postprocessStatus]
+      $("livePostprocessStatus").textContent = ({ queued: "等待处理", running: `正在${operation}`, processing: `正在${operation}`, reviewing: "正在复核音频", cleaning: "正在校订", summarizing: "正在生成摘要", completed: "处理完成", cancelled: "已取消生成，可重新生成", needs_retry: "部分处理待重试", interrupted: "处理已中断，可重试", failed: "处理失败，可重试" })[dto.postprocessStatus]
         || (busy.has("summarize") ? "正在生成摘要" : "");
+      const streamProgress = win.MeetingUi?.summaryProgressText?.(progress);
+      if (processing(dto.postprocessStatus) && streamProgress) $("livePostprocessStatus").textContent = streamProgress;
+      const failure = win.MeetingUi?.summaryErrorText?.(progress?.failureCode);
+      if (failure && ["failed", "needs_retry"].includes(dto.postprocessStatus)) $("livePostprocessStatus").textContent += ` · ${failure}`;
       if (processing(dto.postprocessStatus) && progress?.total) $("livePostprocessStatus").textContent += ` ${count(progress.completed)} / ${count(progress.total)}`;
       if (progress?.failed) $("livePostprocessStatus").textContent += ` · 失败 ${count(progress.failed)} 段`;
       for (const [id, path] of [["liveOpenSummary", dto.summaryMarkdownPath]]) {
@@ -605,7 +624,7 @@
       const epoch = generation;
       if (!unsubscribe && typeof api.onMeetingLiveUpdate === "function") {
         unsubscribe = api.onMeetingLiveUpdate((snapshot) => {
-          if (!opened || epoch !== generation || snapshot?.ok === false) return;
+          if (snapshot?.ok === false) return;
           revision += 1;
           accept(snapshot);
         });
@@ -640,14 +659,20 @@
       opened = false;
       generation += 1;
       revision += 1;
-      if (typeof unsubscribe === "function") unsubscribe();
-      unsubscribe = null;
+      // Leaving the view suspends rendering/polling, not the main-process task
+      // or its state subscription. Completed results remain available on return.
       unsubscribeWindow?.(); unsubscribeWindow = null;
       win.clearTimeout?.(styleTimer); void flushPresentation();
       if (timer) cancel(timer);
       timer = null;
       pollFlight = null;
       openFlight = null;
+    }
+
+    function destroy() {
+      close();
+      unsubscribe?.();
+      unsubscribe = null;
     }
 
     $("liveStart").addEventListener("click", () => {
@@ -672,6 +697,7 @@
     for (const [id, name, method, payload] of [
       ["liveStop", "stop", "meetingLiveStop", () => undefined],
       ["liveRetry", "retry", "meetingLiveRetry", () => ({ sessionId: dto.sessionId })],
+      ["liveCancelSummary", "cancelSummary", "meetingLiveCancelSummary", () => ({ sessionId: dto.sessionId })],
       ["liveSummarize", "summarize", "meetingLiveSummarize", () => {
         const selected = win.TextSupplierUi.parsePair($("liveCleanerModel").value);
         return { sessionId: dto.sessionId, supplierId: selected.supplierId || win.TextSupplierUi.LEGACY_SUPPLIER_ID,
@@ -680,7 +706,7 @@
       }],
       ["liveOpenMarkdown", "open", "meetingLiveOpenPath", () => ({ path: dto.markdownPath })],
       ["liveOpenSummary", "open", "meetingLiveOpenPath", () => ({ path: dto.summaryMarkdownPath })]
-    ]) $(id).addEventListener("click", () => {
+    ]) $(id)?.addEventListener("click", () => {
       if (!$(id).disabled) void action(name, () => invoke(method, payload()));
     });
     $("livePause").addEventListener("click", () => {
@@ -748,9 +774,9 @@
     $("liveHistoryBrowser").addEventListener("keydown", (event) => {
       if (event.key === "Escape") { event.preventDefault(); setHistoryOpen(false); $("liveHistoryToggle").focus(); }
     });
-    win.addEventListener("beforeunload", close);
+    win.addEventListener("beforeunload", destroy);
     render();
-    return { open, close, openSession: sessionId => action("history", () => invoke("meetingLiveOpenSession", { sessionId })) };
+    return { open, close, destroy, openSession: sessionId => action("history", () => invoke("meetingLiveOpenSession", { sessionId })) };
   }
 
   if (typeof module === "object" && module.exports) module.exports = { createLiveMeetingUi };

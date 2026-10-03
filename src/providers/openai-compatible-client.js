@@ -1,4 +1,6 @@
 const { normalizeApiStyle } = require("../settings/provider-connections");
+const { createSseDecoder, createStreamAccumulator, modelStreamError } = require("./llm-stream");
+const { abortError, abortable, retryAfterMs, withRetries } = require("./request-retry");
 
 function normalizeBaseUrl(url, fallback) {
   const normalized = String(url || fallback || "").replace(/\/+$/, "");
@@ -26,7 +28,9 @@ function createOpenAiCompatibleClient({
   headerName = "Authorization",
   headerValuePrefix = "Bearer ",
   extraHeaders = null,
-  fetchImpl = null
+  fetchImpl = null,
+  sleepImpl,
+  random
 }) {
   const fetchFn = fetchImpl || globalThis.fetch.bind(globalThis);
 
@@ -61,8 +65,18 @@ function createOpenAiCompatibleClient({
     extraBody = {},
     maxTokens = 1024,
     signal = null,
-    requestHeaders = null
+    requestHeaders = null,
+    stream = false,
+    onProgress = null,
+    maxRetries = 5,
+    idleTimeoutMs,
+    progressTimeoutMs
   } = {}) {
+    if (stream) {
+      return withRetries(attempt => requestStream(messages, {
+        extraBody, maxTokens, signal, requestHeaders, onProgress, attempt, idleTimeoutMs, progressTimeoutMs
+      }), { signal, maxRetries, sleepImpl, random, onRetry: value => notify(onProgress, { stage: "retrying", ...value }) });
+    }
     if (signal?.aborted) {
       const err = new Error("aborted");
       err.code = "aborted";
@@ -163,6 +177,133 @@ function createOpenAiCompatibleClient({
     }
   }
 
+  function notify(observer, value) {
+    try { observer?.(value); } catch { /* Progress observers cannot break a request. */ }
+  }
+
+  async function requestStream(messages, options) {
+    const { signal, onProgress, attempt, extraBody, maxTokens, requestHeaders } = options;
+    const key = resolveApiKey();
+    if (!key) throw Object.assign(new Error("OpenAI-compatible API key is not configured."), { code: "credentials_missing" });
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+    const limit = resolveRequestTimeoutMs();
+    const idleLimit = Number(options.idleTimeoutMs) > 0 ? Number(options.idleTimeoutMs) : Math.max(300000, limit);
+    const progressLimit = Number(options.progressTimeoutMs) > 0 ? Number(options.progressTimeoutMs) : limit;
+    let deadline, warning, timeoutCode, reader;
+    let outputChars = 0, reasoningChars = 0;
+    function progress(value) {
+      outputChars = value.outputChars ?? outputChars;
+      reasoningChars = value.reasoningChars ?? reasoningChars;
+      notify(onProgress, { attempt, outputChars, reasoningChars, ...value });
+    }
+    function armDeadline(code, milliseconds) {
+      clearTimeout(deadline);
+      deadline = setTimeout(() => { timeoutCode = code; controller.abort(); }, milliseconds);
+    }
+    function armWarning() {
+      clearTimeout(warning);
+      warning = setTimeout(() => progress({ stage: "waiting" }), progressLimit);
+    }
+    try {
+      if (controller.signal.aborted) throw abortError();
+      progress({ stage: "connecting" });
+      armDeadline("connection_timeout", limit);
+      const style = resolveApiStyle();
+      const headers = { "Content-Type": "application/json", Accept: "text/event-stream",
+        ...(resolveMaybeFunction(extraHeaders) || {}), ...(requestHeaders || {}) };
+      headers[headerName] = `${headerValuePrefix}${key}`;
+      const body = style === "responses"
+        ? buildResponsesRequest(resolveModel(), messages, maxTokens, { ...extraBody, stream: true })
+        : { model: resolveModel(), messages, max_completion_tokens: maxTokens, ...extraBody, stream: true };
+      const response = await abortable(fetchFn(`${resolveBaseUrl()}/${style === "responses" ? "responses" : "chat/completions"}`, {
+        method: "POST", headers, body: JSON.stringify(body), signal: controller.signal
+      }), controller.signal);
+      armDeadline("stream_idle_timeout", idleLimit);
+      armWarning();
+      progress({ stage: "thinking" });
+      if (!response.ok) {
+        // Classify locally, but never expose the gateway's body or echo it to logs.
+        let details = "";
+        if (response.status === 400 || response.status === 413) {
+          details = String(await abortable(response.text(), controller.signal)).slice(0, 64000);
+        }
+        const code = /context.{0,30}(length|window|limit)|maximum.{0,30}tokens|too many tokens/i.test(details)
+          ? "request_context_limit" : "http_error";
+        throw Object.assign(new Error(`Model API returned HTTP ${response.status}.`), {
+          code, status: response.status, retryAfterMs: retryAfterMs(response.headers)
+        });
+      }
+      const accumulator = createStreamAccumulator(style, { onProgress: value => { armWarning(); progress(value); } });
+      const parser = createSseDecoder((event, done) => accumulator.accept(event, done));
+      let parsed;
+      if (response.body?.getReader) {
+        reader = response.body.getReader();
+        let mode = /text\/event-stream/i.test(response.headers?.get?.("content-type") || "") ? "sse" : "";
+        let prefix = Buffer.alloc(0), json = "";
+        const decoder = new TextDecoder();
+        for (;;) {
+          const chunk = await abortable(reader.read(), controller.signal);
+          if (chunk.done) break;
+          if (!chunk.value?.length) continue;
+          armDeadline("stream_idle_timeout", idleLimit);
+          if (!mode) {
+            prefix = Buffer.concat([prefix, Buffer.from(chunk.value)]);
+            const start = prefix.toString("utf8").trimStart();
+            if (!start) { if (prefix.length > 8192) throw Object.assign(new Error("Invalid stream"), { code: "stream_invalid_json" }); continue; }
+            if (/^[{[]/.test(start)) mode = "json";
+            else if (/^(?:data:|event:|:)/.test(start)) mode = "sse";
+            else if (prefix.length < 16) continue;
+            else throw Object.assign(new Error("Invalid stream"), { code: "stream_invalid_json" });
+            if (mode === "sse") parser.push(prefix); else json += decoder.decode(prefix, { stream: true });
+            prefix = Buffer.alloc(0);
+          } else if (mode === "sse") parser.push(chunk.value);
+          else json += decoder.decode(chunk.value, { stream: true });
+          if (json.length > 8 * 1024 * 1024) throw Object.assign(new Error("Response exceeds local limit"), { code: "stream_size_limit" });
+          if (mode === "sse" && accumulator.terminal) break;
+        }
+        if (mode === "sse") { parser.finish(); parsed = accumulator.result(parseCompletedResponse); }
+        else {
+          json += decoder.decode();
+          parsed = style === "responses" ? parseResponsesBody(json) : parseChatCompletionBody(json);
+        }
+      } else {
+        // Mock/legacy fetch implementations, and gateways ignoring stream:true.
+        const text = await abortable(response.text(), controller.signal);
+        parsed = style === "responses" ? parseResponsesBody(text) : parseChatCompletionBody(text);
+      }
+      if (parsed.finishReason && parsed.finishReason !== "stop") {
+        throw Object.assign(new Error("Model output was not complete"), {
+          code: parsed.finishReason === "length" ? "response_output_limit" : "response_failed"
+        });
+      }
+      if (style !== "responses" && !parsed.finishReason && !parsed.completed) {
+        throw Object.assign(new Error("Model response ended before completion."), { code: "response_incomplete" });
+      }
+      progress({ stage: "validating", outputChars: String(parsed.message.content || "").length });
+      return { content: String(parsed.message.content || "").trim(), reasoningContent: String(parsed.message.reasoning_content || "").trim(),
+        finishReason: parsed.finishReason, body: parsed.body };
+    } catch (error) {
+      if (signal?.aborted) throw abortError();
+      if (timeoutCode) throw Object.assign(new Error(timeoutCode), { code: timeoutCode });
+      if (error instanceof SyntaxError) {
+        throw Object.assign(new Error("Model response was not valid JSON."), { code: "stream_invalid_json" });
+      }
+      if (error instanceof TypeError || ["ECONNRESET", "ETIMEDOUT", "EPIPE"].includes(error?.code)) {
+        throw Object.assign(new Error("Model network connection interrupted."), { code: "network_error" });
+      }
+      throw error;
+    } finally {
+      clearTimeout(deadline); clearTimeout(warning);
+      signal?.removeEventListener("abort", abort);
+      // Completion can precede HTTP EOF. Release the body without waiting for it.
+      if (reader) Promise.resolve(reader.cancel()).catch(() => {});
+      controller.abort();
+    }
+  }
+
   return {
     requestChat,
     resolveApiKey,
@@ -194,14 +335,16 @@ function parseResponsesBody(bodyText) {
   const { chunks } = parseServerSentEvents(text);
   const deltas = [];
   let completedResponse = null;
-  let terminalType = "";
   for (const chunk of chunks) {
     const type = String(chunk?.type || "");
+    if (chunk?.error || ["response.failed", "error"].includes(type)) throw modelStreamError(chunk);
+    if (type === "response.incomplete") throw Object.assign(new Error("Model response ended before completion."), {
+      code: chunk.response?.incomplete_details?.reason === "max_output_tokens" ? "response_output_limit" : "response_incomplete"
+    });
     if (type === "response.output_text.delta" && chunk.delta != null) deltas.push(String(chunk.delta));
-    if (type === "response.completed") completedResponse = chunk.response || chunk;
-    if (["response.incomplete", "response.failed", "error"].includes(type)) terminalType = type;
+    if (type === "response.completed") { completedResponse = chunk.response || chunk; break; }
   }
-  if (terminalType || !completedResponse) {
+  if (!completedResponse) {
     throw Object.assign(new Error("Model response ended before completion."), { code: "response_incomplete" });
   }
   const parsed = parseCompletedResponse(completedResponse);
@@ -211,11 +354,14 @@ function parseResponsesBody(bodyText) {
 
 function parseCompletedResponse(body) {
   if (body?.error) {
-    throw Object.assign(new Error("OpenAI Responses API returned an error."), { code: "response_failed" });
+    throw modelStreamError(body);
   }
   const status = String(body?.status || "").toLowerCase();
   if (status !== "completed") {
-    throw Object.assign(new Error("Model response ended before completion."), { code: "response_incomplete" });
+    throw Object.assign(new Error("Model response ended before completion."), {
+      code: body?.incomplete_details?.reason === "max_output_tokens" ? "response_output_limit"
+        : status === "failed" ? "response_failed" : "response_incomplete"
+    });
   }
   const contentParts = [];
   const reasoningParts = [];
@@ -249,9 +395,11 @@ function parseChatCompletionBody(bodyText) {
 
   if (!/^data\s*:/im.test(text)) {
     const body = JSON.parse(text);
+    if (body?.error) throw modelStreamError(body);
     const choice = firstChoice(body);
     return {
       body,
+      completed: choice.finish_reason != null,
       finishReason: choice.finish_reason ?? null,
       message: choice.message ?? {}
     };
@@ -283,6 +431,7 @@ function parseChatCompletionBody(bodyText) {
 
   return {
     body: lastBody || { choices: [] },
+    completed: done || finishReason != null,
     finishReason,
     message: {
       content: contentParts.join(""),

@@ -122,7 +122,7 @@ async function readLatestSummaryResult(sessionDir, sessionId = null) {
     const resultPath = path.join(root, latest.key, "result.json");
     assertPathInsideRoot(sessionDir, resultPath);
     const result = JSON.parse(await fs.readFile(resultPath, "utf8"));
-    if (!result || result.schema !== "meeting_summary_v1") return null;
+    if (!result || !["meeting_summary_v1", "meeting_summary_v2"].includes(result.schema)) return null;
     if (sessionId != null && result.sessionId !== sessionId) return null;
     if (latest.resultDigest && resultDigestOf(result) !== latest.resultDigest) return null;
     return { result, resultPath, markdownPath: path.join(root, latest.key, "meeting.summary.md") };
@@ -175,8 +175,15 @@ function toFileSummaryDto(value = {}) {
     summary: null,
     error: value.error?.code ? { code: String(value.error.code).slice(0, 100) } : null
   };
+  for (const field of ["attempt", "retry", "maxRetries", "delayMs", "outputChars", "reasoningChars"]) {
+    if (Number.isSafeInteger(value.progress?.[field]) && value.progress[field] >= 0) dto.progress[field] = value.progress[field];
+  }
+  if (["connecting", "thinking", "receiving", "waiting", "retrying", "validating", "completed", "idle"].includes(value.progress?.stage)) {
+    dto.progress.stage = value.progress.stage;
+  }
   if (summary && typeof summary === "object") {
     dto.summary = {
+      schema: summary.schema === "meeting_summary_v2" ? summary.schema : "meeting_summary_v1",
       title: typeof summary.title === "string" ? summary.title.slice(0, 300) : "",
       markdown: typeof summary.markdown === "string" ? summary.markdown.slice(0, 200000) : "",
       mindmap: claimDto(summary.mindmap, 0, remaining),
@@ -201,6 +208,7 @@ function createFileSummaryService({
   review,
   llm,
   modelId,
+  modelProfile = null,
   reviewModelId = "mimo-v2.5-asr",
   onUpdate
 } = {}) {
@@ -209,6 +217,7 @@ function createFileSummaryService({
   }
   if (typeof llm !== "function") throw fault("postprocess_llm_missing");
   const root = path.resolve(sessionDir);
+  const budget = modelProfile ? require("../summary-budget").summaryBudget(modelProfile) : null;
   let lastDto = toFileSummaryDto({ sessionId, status: "idle", modelId, useMimoReview: false });
 
   const processor = createMeetingPostprocessor({
@@ -234,6 +243,12 @@ function createFileSummaryService({
       : async () => { throw fault("postprocess_asr_missing"); },
     llm: (input) => llm(input),
     modelId,
+    llmRevision: modelProfile ? crypto.createHash("sha256").update(JSON.stringify([
+      modelProfile.provider, modelProfile.baseUrl, modelProfile.supplierId || "", modelProfile.apiStyle, modelProfile.reasoning
+    ])).digest("hex") : "",
+    managesTransport: modelProfile != null,
+    ...(budget ? { maxOutputTokens: budget.maxOutputTokens,
+      limits: { ...budget.limits, maxRequestsPerRun: 1000, requestTimeoutMs: modelProfile.requestTimeoutMs || 120000 } } : {}),
     reviewModelId,
     onUpdate: (state) => {
       lastDto = toFileSummaryDto({ ...state, sessionId, modelId, useMimoReview: lastDto.useMimoReview });
@@ -304,6 +319,7 @@ function createFileSummaryService({
             useMimoReview: stored.result.useMimoReview === true,
             title: stored.result.title || "",
             summary: {
+              schema: stored.result.schema,
               title: stored.result.title || "",
               markdown: stored.result.markdown || "",
               mindmap: stored.result.mindmap,

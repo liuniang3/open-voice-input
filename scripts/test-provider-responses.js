@@ -110,11 +110,11 @@ async function main() {
   });
 
   for (const kind of ["openai", "mimo"]) {
-    await test(`${kind}: JSON and SSE finishReason reaches caller, including usage-only final event`, async () => {
+    await test(`${kind}: nonstream finishReason reaches caller, including usage-only final event`, async () => {
       for (const reason of ["stop", "length", "content_filter", "tool_calls"]) {
         for (const body of [json(reason), sse(reason)]) {
           const client = clientFor(kind, async () => response(body));
-          const result = await client.requestChat([], { stream: true });
+          const result = await client.requestChat([]);
           assert.equal(result.finishReason, reason);
           assert.equal(result.content, "same same.");
         }

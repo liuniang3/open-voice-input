@@ -47,7 +47,7 @@ function modelReply(input, { punctuate = false } = {}) {
     evidence: [evidence(item)], uncertain: Boolean(item.uncertain)
   };
   return JSON.stringify({ title: "Integration meeting", mindmap: { ...claim, children: [] },
-    sections: [{ heading: "Details", paragraphs: [paragraph], items: [claim] }] });
+    sections: [{ heading: "正文", paragraphs: [paragraph], items: [] }] });
 }
 
 async function fixture({ configure, serviceOptions = {}, getSettings } = {}) {

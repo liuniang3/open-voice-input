@@ -10,6 +10,7 @@ const PAIR_SEPARATOR = "::";
 const SUPPLIER_PRESETS = Object.freeze([
   { id: "custom", name: "自定义", mark: "+", category: "兼容服务", baseUrl: "", apiStyle: "chat-completions" },
   { id: "openai", name: "OpenAI", mark: "O", category: "官方", baseUrl: "https://api.openai.com/v1", apiStyle: "responses" },
+  { id: "opencode-go", name: "OpenCode Go", mark: "G", category: "订阅", baseUrl: "https://opencode.ai/zen/go/v1", apiStyle: "chat-completions", authStyle: "bearer", autoDiscoverModels: true },
   { id: "mimo", name: "MiMo", mark: "M", category: "官方", baseUrl: "https://api.xiaomimimo.com/v1", apiStyle: "chat-completions", authStyle: "api-key" },
   { id: "mimo-plan", name: "MiMo Token Plan", mark: "M", category: "订阅", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", apiStyle: "chat-completions", authStyle: "api-key" },
   { id: "aliyun", name: "阿里云百炼", mark: "A", category: "文本模型", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", apiStyle: "chat-completions" }
@@ -57,6 +58,27 @@ function supplierDraft(settings, draft, existingId = "") {
   const apiKey = trim(draft.apiKey) || existing?.apiKey || "";
   if (apiKey.length > 4096 || /[\u0000-\u001f\u007f]/.test(apiKey)) throw new Error("API Key 格式无效。");
   return { ...existing, id, name, baseUrl, apiKey, apiStyle: draft.apiStyle, authStyle: draft.authStyle === "api-key" ? "api-key" : "bearer", requestHeaders: { ...(existing?.requestHeaders || {}) } };
+}
+
+function supplierRemovalPatch(settings, id) {
+  const entry = settings?.textSuppliers?.find(item => item.id === id);
+  if (!entry) throw new Error("此供应商已不存在，请刷新设置。");
+  const catalogs = { ...settings.textSupplierCatalogs };
+  delete catalogs[id];
+  const selections = { ...settings.textModelSelections };
+  for (const [slot, pair] of Object.entries(selections)) {
+    if (pair?.supplierId === id) selections[slot] = null;
+  }
+  const dismissed = new Set(settings.textSupplierDismissedMigrations || []);
+  if (entry.migratedFrom) dismissed.add(entry.migratedFrom);
+  if (id === "opencode-go" || entry.migratedFrom === "language-opencode-go") dismissed.add("opencode-go");
+  return {
+    textSuppliers: settings.textSuppliers.filter(item => item.id !== id),
+    textSupplierCatalogs: catalogs,
+    textModelSelections: selections,
+    textModelSelection: settings.textModelSelection?.supplierId === id ? null : settings.textModelSelection || null,
+    textSupplierDismissedMigrations: [...dismissed]
+  };
 }
 
 function trim(value) {
@@ -227,6 +249,7 @@ if (typeof module === "object" && module.exports) {
     uniqueSupplierName,
     supplierEndpoint,
     supplierDraft,
+    supplierRemovalPatch,
     CUSTOM_MODEL_VALUE,
     LEGACY_SUPPLIER_ID,
     applySelection,
@@ -249,6 +272,7 @@ if (typeof window !== "undefined") {
     uniqueSupplierName,
     supplierEndpoint,
     supplierDraft,
+    supplierRemovalPatch,
     CUSTOM_MODEL_VALUE,
     LEGACY_SUPPLIER_ID,
     applySelection,

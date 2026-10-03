@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Changed
+
+- File and live-meeting summary generation continues in the main process when switching to Home, Settings or another workspace. Background progress and final results stay synchronized without reopening the source page or stealing focus; returning to it restores the latest state without starting another request.
+- File and live-meeting summaries now generate a single evidence-grounded article alongside the existing hierarchical mindmap. The right pane presents connected prose instead of minutes sections, bullet items and inline source quotations. Provenance remains stored and visible in the mindmap; old summaries retain their legacy rendering. A new summary fingerprint prevents reusing prior minutes as a newly generated article.
+- Added an OpenCode Go preset to the general language-supplier add flow. It pre-fills the official URL/protocol/authentication, accepts a key, and attempts model discovery after saving; failed discovery keeps the saved connection.
+- Supplier deletion now uses an in-app confirmation showing affected cleanup/summary selections and clears only those selections. Unrelated suppliers and generated content remain intact, and deleted migrated entries stay dismissed.
+- File and live-meeting summaries now request incremental Chat Completions or Responses streams. Active generation is no longer stopped by a fixed overall deadline; model-specific connection limits, network inactivity checks and visible waiting states remain.
+- Transient network errors, early EOF, rate limits and explicit temporary server failures receive up to five cancellable retries after the initial attempt, with exponential backoff, jitter and provider retry-delay hints. Every retry uses a fresh output buffer; compatible requests restart generation rather than resume a remote task.
+- Summary planning uses the selected supplier/model's context and output capabilities, counting instructions, serialized source metadata and output reservations. Whole-input requests are preferred; bounded hierarchical compression is used only when the input exceeds the estimated budget. Unknown models keep a 128k-context/8192-output fallback instead of assuming every gateway provides a 250k context.
+- Completed paid tasks remain reusable when transport timeouts change. Compatible legacy cache layouts are adopted through a durable alias; changed models, reasoning, source content or planning budgets still produce separate generations.
+
+### Fixed
+
+- Existing generic entries for the official OpenCode Go endpoint now get the app's own User-Agent and per-conversation session header without replacing their saved key or adding Go headers to other URLs.
+- Propagate model-specific timeouts into supplier routing and avoid an additional fixed timeout around transport-managed summary requests.
+- Reject unfinished JSON/SSE, output-limit responses and malformed results instead of saving partial content as a completed summary. Structured error classifications never expose provider bodies or credentials.
+- Preserve legacy MiMo api-key authentication and custom endpoints for streamed summaries, including Token Plan routes. Malformed JSON fallback responses are sanitized without exposing the provider payload.
+- Show connection, thinking, received-character, waiting and retry states in file/live-meeting views. Add live-summary cancellation with session validation, immediate UI updates and protection against late responses. Original transcripts and full audio remain unchanged.
+
+### Tests
+
+- Added background-summary lifecycle and navigation regressions for file/live views, including Windows/macOS IPC harnesses, late start/status responses, per-file result isolation, explicit cancellation and listener disposal. Real-browser mock tests cover generation, Settings/Home navigation, off-screen completion and reopening with one start and no cancellation. New file summaries can start from the engine's idle state.
+- Added offline streaming, completion, retry, cancellation, model-budget and durable-cache tests, plus live service/IPC/UI integration coverage. Updated browser checks for progress and cancellation.
+- These changes use shared Windows/macOS services and UI and are included in the existing desktop CI matrix. Local tests do not establish macOS native or real-provider verification; no paid API requests are required by these regression tests.
+- Local validation passed all 55 shared regression scripts, the package secret scan and responsive browser checks. Streaming regression cases include legacy MiMo authentication and sanitized JSON fallbacks.
+- OpenCode Go preset, automatic model discovery, active-supplier deletion/cancellation and narrow-window confirmation were checked in browser fixtures; an existing locally configured Go connection passed a minimal live `deepseek-v4.1-flash` check without exposing credentials or response content.
+- The new article summary was exercised against a configured official OpenCode Go endpoint with a short synthetic transcript; the completed result contained prose, mindmap and verified provenance. This is a smoke test, not a quality evaluation of long recordings or macOS native capture.
+
 ## v0.4.8 - 2026-10-02
 
 ### Changed

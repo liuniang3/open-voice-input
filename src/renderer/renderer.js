@@ -2329,8 +2329,10 @@ function currentTextModelSelection(slot) {
 function refreshTextModelPickers() {
   const cleanup = currentTextModelSelection("cleanup");
   const summary = currentTextModelSelection("summary");
-  renderTextModelPicker("cleanup", cleanup);
-  renderTextModelPicker("summary", summary);
+  const valid = selection => !selection.supplierId || selection.supplierId === textSupplierUi.LEGACY_SUPPLIER_ID
+    || (appSettings.textSuppliers || []).some(item => item.id === selection.supplierId);
+  renderTextModelPicker("cleanup", valid(cleanup) ? cleanup : textSupplierUi.selectionFor(appSettings, "cleanup"));
+  renderTextModelPicker("summary", valid(summary) ? summary : textSupplierUi.selectionFor(appSettings, "summary"));
 }
 
 function renderTextPickerModels(slot, preferredModel = "") {

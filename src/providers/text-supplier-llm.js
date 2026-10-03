@@ -15,6 +15,7 @@ const {
 } = require("../settings/text-suppliers");
 const { expandSupplierHeaders } = require("./provider-model-catalog");
 const { createOpenAiCompatibleClient } = require("./openai-compatible-client");
+const { resolveModelCapability } = require("../settings/model-capabilities");
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
@@ -57,6 +58,7 @@ function resolveTextLlmProfile(settings, { slot, supplierId, modelId, requestTim
     throw Object.assign(new Error("所选文本供应商不存在或已被删除，请重新选择。"), { code: "supplier_not_found" });
   }
   const capability = catalogFor(settings, pair.supplierId).capabilities[pair.modelId] || {};
+  const defaults = resolveModelCapability(pair.modelId);
   return {
     provider: "text-supplier",
     supplierId: pair.supplierId,
@@ -67,17 +69,20 @@ function resolveTextLlmProfile(settings, { slot, supplierId, modelId, requestTim
     apiStyle: resolved.apiStyle,
     authStyle: resolved.authStyle,
     requestHeaders: expandSupplierHeaders(resolved.requestHeaders),
-    requestTimeoutMs: positiveInteger(requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS),
+    requestTimeoutMs: positiveInteger(requestTimeoutMs,
+      positiveInteger(capability.timeoutMs, positiveInteger(slot === "summary" ? settings.meetingAnalysisTimeoutMs : undefined,
+        defaults.timeoutMs || DEFAULT_REQUEST_TIMEOUT_MS))),
     // Limits come from the selected supplier's own catalog metadata.
-    maxOutputTokens: positiveInteger(capability.maxOutput, DEFAULT_MAX_OUTPUT_TOKENS),
-    contextWindow: positiveInteger(capability.contextWindow, 0) || undefined
+    maxOutputTokens: positiveInteger(capability.maxOutput, defaults.maxOutput || DEFAULT_MAX_OUTPUT_TOKENS),
+    contextWindow: positiveInteger(capability.contextWindow, defaults.contextWindow),
+    reasoning: capability.reasoning ?? defaults.reasoning
   };
 }
 
 // Chat call for a resolved supplier profile. maxTokens is capped by the
 // catalog's output limit; headers merge profile compat headers with per-call
 // additions (auto session tokens already expanded in the profile).
-function createTextSupplierChat(profile, { fetchImpl = null } = {}) {
+function createTextSupplierChat(profile, { fetchImpl = null, sleepImpl, random } = {}) {
   if (!profile || profile.provider !== "text-supplier") {
     throw Object.assign(new Error("无效的文本供应商配置。"), { code: "supplier_invalid" });
   }
@@ -89,14 +94,19 @@ function createTextSupplierChat(profile, { fetchImpl = null } = {}) {
     headerName: profile.authStyle === "api-key" ? "api-key" : "Authorization",
     headerValuePrefix: profile.authStyle === "api-key" ? "" : "Bearer ",
     requestTimeoutMs: profile.requestTimeoutMs,
-    fetchImpl
+    fetchImpl, sleepImpl, random
   });
   return async (messages, options = {}) => {
     const requested = positiveInteger(options.maxTokens, profile.maxOutputTokens);
     return client.requestChat(messages, {
       signal: options.signal,
       maxTokens: Math.min(requested, profile.maxOutputTokens),
-      extraBody: options.extraBody,
+      stream: options.stream,
+      onProgress: options.onProgress,
+      maxRetries: options.maxRetries,
+      idleTimeoutMs: options.idleTimeoutMs,
+      progressTimeoutMs: options.progressTimeoutMs,
+      extraBody: { ...(options.stream && profile.reasoning ? { reasoning_effort: profile.reasoning } : {}), ...options.extraBody },
       requestHeaders: {
         ...profile.requestHeaders,
         ...(options.requestHeaders && typeof options.requestHeaders === "object" ? options.requestHeaders : {})

@@ -51,7 +51,7 @@ const harnessCode = harnessSlice.replace(
 
 const fileSummaryStub = {
   createFileSummaryService: () => { throw new Error("file summary service factory not configured"); },
-  toFileSummaryDto: (value = {}) => value,
+  toFileSummaryDto: require("../src/meeting/processing/file-summary").toFileSummaryDto,
   readLatestSummaryResult: async () => null,
   segmentsFromTranscript: () => []
 };
@@ -85,6 +85,10 @@ function configureServiceFactory() {
       outcome: "completed",
       cancelCalls: 0,
       summarizeCalls: [],
+      report(patch) {
+        Object.assign(dto, patch);
+        options.onUpdate?.(JSON.parse(JSON.stringify(dto)));
+      },
       async summarize(payload) {
         this.summarizeCalls.push(payload);
         dto.status = "running";
@@ -110,15 +114,55 @@ function configureServiceFactory() {
   };
 }
 
-function makeHarness() {
+function makeHarness(platform = "darwin") {
   configureServiceFactory();
-  const h = mainHarness();
+  const h = mainHarness(platform);
   h.run('getMeetingCapture().store.readSession = async (id) => ({ session: { id, source: "import" }, sessionDir: "D:/mock/sessions/" + id });');
   return h;
 }
 
 const tests = [];
 const test = (name, run) => tests.push({ name, run });
+
+for (const platform of ["win32", "darwin"]) {
+  test(`${platform}: file summary runs through navigation and publishes safe background results`, async () => {
+    const h = makeHarness(platform);
+    await h.invoke("meeting:file-summary:start", { sessionId: "s-background", modelId: "model-a" });
+    await h.invoke("window:settings");
+    await h.invoke("window:home");
+    await h.invoke("window:file");
+    await h.invoke("window:meeting");
+    await h.invoke("window:settings");
+    const service = createdServices[0];
+    service.report({ progress: { stage: "receiving", outputChars: 1200 }, apiKey: "fixture-secret",
+      responseBody: "fixture-private-response" });
+    const update = h.controls.sent.filter(([channel]) => channel === "meeting:file-summary:update").at(-1)[1];
+    assert.equal(update.sessionId, "s-background");
+    assert.equal(update.progress.outputChars, 1200);
+    assert.equal(update.apiKey, undefined);
+    assert.equal(update.responseBody, undefined);
+    service.report({ summary: { schema: "meeting_summary_v2", title: "Background article",
+      markdown: "A completed article.", sections: [] } });
+    service.gate.resolve();
+    await tick();
+    const final = h.controls.sent.filter(([channel]) => channel === "meeting:file-summary:update").at(-1)[1];
+    assert.equal(final.status, "completed");
+    assert.equal(final.summary.markdown, "A completed article.");
+    assert.equal(service.cancelCalls, 0, "only the explicit cancel IPC may cancel a job");
+    assert.equal(service.summarizeCalls.length, 1);
+    assert.equal(h.run("windowMode"), "settings", "background completion never steals the current view");
+    const readback = await h.invoke("meeting:file-summary:status", { sessionId: "s-background" });
+    assert.equal(readback.summary.status, "completed");
+    assert.equal(createdServices.length, 1);
+
+    await h.invoke("meeting:file-summary:start", { sessionId: "s-background", modelId: "model-b" });
+    const before = h.controls.sent.length;
+    service.report({ progress: { outputChars: 9000 } });
+    assert.equal(h.controls.sent.length, before, "obsolete jobs cannot publish into a new generation");
+    await h.invoke("meeting:file-summary:cancel", { sessionId: "s-background" });
+    assert.equal(createdServices[1].cancelCalls, 1);
+  });
+}
 
 test("start deduplicates only while running; failure keeps status and permits retry", async () => {
   const h = makeHarness();

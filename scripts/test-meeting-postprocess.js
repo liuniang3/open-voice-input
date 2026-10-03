@@ -25,7 +25,7 @@ function summary(input) {
     evidence: [evidence(item)], uncertain: Boolean(item.uncertain)
   };
   return { title: "Meeting", mindmap: { ...claim, children: [] },
-    sections: [{ heading: "Details", paragraphs: [paragraph], items: [claim] }] };
+    sections: [{ heading: "正文", paragraphs: [paragraph], items: [] }] };
 }
 async function fixture(options = {}) {
   const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "meeting-postprocess-test-"));
@@ -187,10 +187,25 @@ async function main() {
     const f = await fixture();
     const result = await f.service.summarize({ source: "original" });
     assert.equal(result.status, "completed"); assert.equal(f.calls.asr.length, 0);
-    assert.ok(result.result.sections[0].items[0].provenance[0].sourceId.startsWith("live:"));
+    assert.equal(result.result.schema, "meeting_summary_v2");
+    assert.equal(result.result.sections.length, 1);
+    assert.equal(result.result.sections[0].heading, "正文");
+    assert.deepEqual(result.result.sections[0].items, []);
+    assert.ok(result.result.sections[0].paragraphs[0].provenance[0].sourceId.startsWith("live:"));
     assert.equal(result.result.mindmap.children.length, 0);
     const resumed = await f.create().summarize();
     assert.equal(resumed.status, "completed"); assert.equal(f.calls.llm.length, 1);
+  });
+  await test("article validation rejects minutes-style bullet output without publishing it", async () => {
+    const f = await fixture();
+    f.llm.complete = async request => {
+      const value = summary(request.input);
+      value.sections[0].items = [{ ...value.mindmap, children: undefined }];
+      return value;
+    };
+    const result = await f.service.summarize();
+    assert.equal(result.status, "needs_retry");
+    assert.equal(result.result, undefined);
   });
   await test("long summaries reduce hierarchically within bounds and retain original citations", async () => {
     const segments = Array.from({ length: 35 }, (_, index) => ({ index, startFrame: index * 100,
@@ -200,7 +215,7 @@ async function main() {
     assert.equal(result.status, "completed"); assert.ok(result.result.levels > 1);
     assert.ok(f.calls.llm.some(call => call.task === "summary_reduce"));
     assert.ok(f.calls.llm.every(call => JSON.stringify(call.messages).length <= 24000));
-    assert.ok(result.result.sections[0].items[0].provenance.every(p => p.sourceId.startsWith("live:")));
+    assert.ok(result.result.sections[0].paragraphs[0].provenance.every(p => p.sourceId.startsWith("live:")));
   });
   await test("summary accepts validated echoed source metadata but discards it from results", async () => {
     const f = await fixture();
@@ -218,12 +233,12 @@ async function main() {
     const f = await fixture();
     f.llm.complete = async request => {
       const result = summary(request.input);
-      result.sections[0].items[0].evidence[0].quote = result.sections[0].items[0].evidence[0].quote.replace("120", "121");
+      result.sections[0].paragraphs[0].evidence[0].quote = result.sections[0].paragraphs[0].evidence[0].quote.replace("120", "121");
       return result;
     };
     const result = await f.service.summarize();
     assert.equal(result.status, "completed");
-    const quote = result.result.sections[0].items[0].provenance[0].quote;
+    const quote = result.result.sections[0].paragraphs[0].provenance[0].quote;
     assert.equal(quote.includes("120"), true);
     assert.equal(f.state.segments[0].text.includes(quote), true);
   });
@@ -231,12 +246,12 @@ async function main() {
     const f = await fixture();
     f.llm.complete = async request => {
       const result = summary(request.input);
-      result.sections[0].items[0].evidence[0].quote = "not in source";
+      result.sections[0].paragraphs[0].evidence[0].quote = "not in source";
       return result;
     };
     const result = await f.service.summarize();
     assert.equal(result.status, "completed");
-    const item = result.result.sections[0].items[0];
+    const item = result.result.sections[0].paragraphs[0];
     assert.equal(item.uncertain, true);
     assert.equal(item.provenance[0].quote, f.state.segments[0].text);
   });
@@ -245,7 +260,7 @@ async function main() {
       const f = await fixture();
       f.llm.complete = async request => {
         const result = summary(request.input);
-        if (mode === "source") result.sections[0].items[0].evidence[0].sourceId = "invented";
+        if (mode === "source") result.sections[0].paragraphs[0].evidence[0].sourceId = "invented";
         if (mode === "unknown") result.script = "bad";
         if (mode === "prototype") return '{"__proto__":{"polluted":true}}';
         if (mode === "depth") {
@@ -272,7 +287,7 @@ async function main() {
     await assert.rejects(f.service.summarize({ source: "reconciled" }), error => error.code === "postprocess_reconciliation_required");
     await f.service.reconcile();
     const result = await f.service.summarize({ source: "reconciled" });
-    assert.ok(result.result.sections[0].items[0].provenance[0].sourceId.startsWith("live:"));
+    assert.ok(result.result.sections[0].paragraphs[0].provenance[0].sourceId.startsWith("live:"));
     f.state.segments[0].text = "Updated original";
     await assert.rejects(f.service.summarize({ source: "reconciled" }), error => error.code === "postprocess_reconciliation_required");
   });
@@ -298,7 +313,8 @@ async function main() {
     assert.notEqual(resumed.paths.cleanedMarkdownPath, result.paths.cleanedMarkdownPath);
     assert.equal(await fs.readFile(result.paths.cleanedMarkdownPath, "utf8"), "User edited note");
     const notes = await processor.summarize({ modelId: "llm", source: "reconciled" });
-    assert.ok(notes.summary.markdown.includes("Evidence:"));
+    assert.ok(notes.summary.markdown.includes("## 正文"));
+    assert.ok(!notes.summary.markdown.includes("Evidence:"));
     assert.ok(notes.paths.summaryMarkdownPath.endsWith(".summary.md"));
     assert.equal(calls.length, 2);
   });

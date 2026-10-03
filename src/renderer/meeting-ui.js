@@ -806,6 +806,22 @@ function renderSummaryDocument(container, summary, doc) {
     root.appendChild(pane);
   }
   const prose = create("div", "summary-doc-prose");
+  if (summary.schema === "meeting_summary_v2" && sections.length) {
+    prose.appendChild(create("h3", null, "整理正文"));
+    let budget = 2000;
+    for (const section of sections) {
+      for (const paragraph of section.paragraphs || []) {
+        if (--budget < 0) break;
+        if (!paragraph || typeof paragraph.text !== "string") continue;
+        const node = create("p", "summary-doc-paragraph", paragraph.text);
+        if (paragraph.uncertain === true) node.appendChild(create("small", "summary-uncertain", "待确认，请核对原文"));
+        prose.appendChild(node);
+      }
+    }
+    root.appendChild(prose);
+    container.appendChild(root);
+    return;
+  }
   if (sections.length) {
     let budget = 2000;
     for (const section of sections.slice(0, 100)) {
@@ -1095,8 +1111,35 @@ function seekMsFromTranscriptItem(item) {
   return null;
 }
 
+function summaryProgressText(progress = {}) {
+  const chars = Math.max(0, Math.floor(Number(progress.outputChars) || 0));
+  const labels = { connecting: "正在连接模型", thinking: "模型正在思考", receiving: `流式接收中 · 已接收 ${chars} 字符`,
+    waiting: "模型暂未返回新内容，继续等待中，可取消后重试", validating: "正在校验摘要" };
+  if (progress.stage === "retrying") return `连接中断或服务繁忙 · 重试 ${progress.retry || 1}/${progress.maxRetries || 5} · ${Math.ceil((progress.delayMs || 0) / 1000)} 秒后重新请求`;
+  return labels[progress.stage] || "";
+}
+
+function summaryErrorText(code) {
+  return ({ postprocess_connection_timeout: "连接模型超时，重试机会已用完",
+    postprocess_stream_idle: "长时间未收到网络数据，重试机会已用完",
+    postprocess_network_error: "网络连接中断，重试机会已用完",
+    postprocess_response_incomplete: "模型返回中途结束，重试机会已用完",
+    postprocess_output_limit: "模型输出达到上限，请提高最大输出或换用更大输出模型",
+    postprocess_context_limit: "供应商拒绝了上下文长度，请检查该模型的上下文设置",
+    postprocess_credentials_invalid: "模型认证失败，请检查供应商地址及密钥",
+    postprocess_credentials_missing: "尚未配置模型密钥",
+    postprocess_rate_limited: "供应商限流，重试机会已用完",
+    postprocess_invalid_json: "模型结果格式校验失败",
+    postprocess_evidence_invalid: "摘要引用校验失败",
+    postprocess_evidence_limit: "摘要引用超出安全上限",
+    postprocess_response_failed: "供应商返回生成失败",
+    postprocess_timeout: "请求超时" })[code] || "";
+}
+
 // Node + browser
 const api = {
+  summaryProgressText,
+  summaryErrorText,
   formatElapsed,
   formatClockMs,
   captureStatusLabel,

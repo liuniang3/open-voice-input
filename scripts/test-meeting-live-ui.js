@@ -69,12 +69,14 @@ function fixture() {
   handlers.meetingLiveResume = () => ({ ok: true, ...status, paused: false });
   handlers.meetingLiveWindow = (flags) => ({ ok: true, ...flags });
   handlers.meetingLiveSummarize = () => ({ ok: true, ...status, postprocessStatus: "summarizing" });
+  handlers.meetingLiveCancelSummary = () => ({ ok: true, ...status, postprocessStatus: "cancelled" });
   const api = Object.fromEntries(Object.keys(handlers).map((name) => [name, async (...args) => {
     calls.push({ name, args });
     return handlers[name](...args);
   }]));
   api.onMeetingLiveUpdate = (callback) => { callbacks.add(callback); return () => callbacks.delete(callback); };
-  const win = { document: { getElementById: $, createElement: element }, mimoInput: api, TextSupplierUi, addEventListener() {} };
+  const win = { document: { getElementById: $, createElement: element }, mimoInput: api, TextSupplierUi,
+    MeetingUi: require("../src/renderer/meeting-ui"), addEventListener() {} };
   const ui = createLiveMeetingUi(win, {
     now: () => clock, every: (fn) => { timers.add(fn); return fn; }, cancel: (fn) => timers.delete(fn)
   });
@@ -97,7 +99,7 @@ const completed = (extra = {}) => ({
   rawText: "原始转写文本", pendingSegments: 0, failedSegments: 0, cleanupStatus: "idle", ...extra
 });
 
-test("view-only open is single-flight; close unsubscribes and reopen reloads", async () => {
+test("view-only open is single-flight; navigation keeps updates and destruction unsubscribes", async () => {
   const f = fixture();
   await Promise.all([f.ui.open(), f.ui.open()]);
   assert.equal(f.count("meetingLiveStatus"), 1);
@@ -107,12 +109,58 @@ test("view-only open is single-flight; close unsubscribes and reopen reloads", a
   assert.equal(f.timers.size, 1);
   assert.equal(f.$("liveStart").disabled, false);
   f.ui.close();
-  assert.equal(f.callbacks.size, 0);
+  assert.equal(f.callbacks.size, 1, "navigation preserves the background state subscription");
   assert.equal(f.timers.size, 0);
   await f.ui.open();
   assert.equal(f.count("meetingLiveStatus"), 2);
   assert.equal(f.callbacks.size, 1);
+  f.ui.destroy();
+  assert.equal(f.callbacks.size, 0);
+  assert.equal(f.timers.size, 0);
+});
+
+test("meeting summary finishes off-screen and reopens without restarting or cancelling", async () => {
+  const f = fixture();
+  f.setStatus(completed());
+  await f.ui.open();
+  f.$("liveCleanerModel").value = "analysis-a";
+  await f.click("liveSummarize");
   f.ui.close();
+  assert.equal(f.timers.size, 0, "hidden views need no foreground polling");
+  f.push(completed({ postprocessStatus: "running", postprocessProgress: { stage: "receiving", outputChars: 1234 } }));
+  const final = completed({ postprocessStatus: "completed", summaryMarkdownPath: "C:/mock/background.summary.md",
+    summary: { schema: "meeting_summary_v2", title: "Background article", mindmap: { text: "Topic", children: [] },
+      sections: [{ heading: "正文", paragraphs: [{ text: "A completed coherent article.", uncertain: false }], items: [] }] } });
+  f.push(final);
+  assert.equal(f.$("liveSummarySection").hidden, true, "off-screen updates store state without repainting");
+  const read = deferred();
+  f.handlers.meetingLiveStatus = () => read.promise;
+  const reopening = f.ui.open();
+  assert.equal(f.$("liveSummarySection").hidden, false, "cached completed output is immediately available");
+  assert.match(f.$("liveSummaryDetail").children[0].textContent, /completed coherent article/);
+  read.resolve({ ok: true, ...final });
+  await reopening;
+  assert.equal(f.count("meetingLiveSummarize"), 1);
+  assert.equal(f.count("meetingLiveCancelSummary"), 0);
+  assert.equal(f.count("meetingLiveStart"), 0);
+  assert.equal(f.callbacks.size, 1);
+  f.ui.destroy();
+});
+
+test("meeting background failures stay recoverable after repeated view switches", async () => {
+  const f = fixture();
+  f.setStatus(completed({ postprocessStatus: "running" }));
+  await f.ui.open();
+  for (let i = 0; i < 3; i++) { f.ui.close(); await f.ui.open(); }
+  f.ui.close();
+  f.push(completed({ postprocessStatus: "failed", postprocessProgress: { failureCode: "postprocess_request_failed" } }));
+  await f.ui.open();
+  assert.equal(f.$("liveSummarize").disabled, false);
+  assert.match(f.$("liveCleanupStatus").textContent, /失败/);
+  assert.equal(f.count("meetingLiveSummarize"), 0);
+  assert.equal(f.count("meetingLiveCancelSummary"), 0);
+  assert.equal(f.callbacks.size, 1, "reopening never duplicates the background listener");
+  f.ui.destroy();
 });
 
 test("streaming transports and the MiMo batch fallback appear; invalid models stay blocked", async () => {
@@ -406,6 +454,22 @@ test("history is integrated into realtime UI, searchable, and blocked while reco
   assert.match(html, /legacyMeetingHistoryPanel[^>]*inert[^>]*hidden/);
 });
 
+test("streaming summary progress and cancellation are visible without exposing partial output", async () => {
+  const f = fixture(); await f.ui.open();
+  f.push(completed({ postprocessStatus: "running", postprocessProgress: { stage: "receiving", outputChars: 250,
+    reasoningChars: 12, completed: 0, total: 1, content: "PRIVATE" } }));
+  assert.equal(f.$("liveCancelSummary").disabled, false);
+  assert.match(f.$("livePostprocessStatus").textContent, /250/);
+  assert.doesNotMatch(f.$("livePostprocessStatus").textContent, /PRIVATE/);
+  f.push(completed({ postprocessStatus: "running", postprocessProgress: { stage: "retrying", retry: 2, maxRetries: 5, delayMs: 4000 } }));
+  assert.match(f.$("livePostprocessStatus").textContent, /2\/5/);
+  await f.click("liveCancelSummary");
+  assert.deepEqual(f.last("meetingLiveCancelSummary").args, [{ sessionId: "s1" }]);
+  assert.equal(f.$("liveCancelSummary").disabled, true);
+  f.push(completed({ postprocessStatus: "needs_retry", postprocessProgress: { failureCode: "postprocess_credentials_invalid" } }));
+  assert.match(f.$("livePostprocessStatus").textContent, /认证/);
+});
+
 test("platform key capture distinguishes macOS Command/Control and Windows Ctrl/Super", () => {
   const source = fs.readFileSync(path.join(root, "src/renderer/renderer.js"), "utf8");
   const fn = source.slice(source.indexOf("function formatHotkey("), source.indexOf("function handleHotkeyCaptureKeydown("));
@@ -557,6 +621,10 @@ async function prepareBrowser(page) {
           window.mockPush({ postprocessStatus: "summarizing" });
           return { ok: true, ...dto };
         }
+        if (name === "meetingLiveCancelSummary") {
+          window.mockPush({ postprocessStatus: "cancelled" });
+          return { ok: true, ...dto };
+        }
         if (name === "meetingLiveStart") {
           window.mockPush({ sessionId: "demo", status: "recording", recording: true, modelId: payload.modelId,
             markdownPath: "C:/mock/项目例会-demo.md", audioPaths: ["C:/mock/microphone-complete.wav", "C:/mock/system-complete.wav"],
@@ -579,6 +647,7 @@ async function prepareBrowser(page) {
 
 async function verifyBrowser(page, screenshotDirectory) {
   const errors = await prepareBrowser(page);
+  const screenshots = [];
   await page.evaluate(async () => { window.applyWindowMode("meeting"); await window.MeetingLiveUi.open(); });
   assert.equal(await page.title(), "会议实时转录");
   assert.equal(await page.locator("#liveStart").isEnabled(), true);
@@ -629,15 +698,51 @@ async function verifyBrowser(page, screenshotDirectory) {
   await page.evaluate(() => window.mockPush({ status: "completed", recording: false, pendingSegments: 0, failedSegments: 0, error: null }));
   await page.locator("#liveSummarize").click();
   await page.waitForFunction(() => document.getElementById("livePostprocessStatus").textContent.includes("生成摘要"));
+  await page.evaluate(() => window.mockPush({ postprocessStatus: "running",
+    postprocessProgress: { stage: "receiving", outputChars: 1200, completed: 0, total: 1 } }));
+  assert.match(await page.locator("#livePostprocessStatus").textContent(), /1200/);
+  assert.equal(await page.locator("#liveCancelSummary").isEnabled(), true);
+  for (const progress of [{ stage: "receiving", outputChars: 1200 }, { stage: "waiting" },
+    { stage: "retrying", retry: 2, maxRetries: 5, delayMs: 4000 }]) {
+    await page.evaluate(progress => window.mockPush({ postprocessStatus: "running",
+      postprocessProgress: { ...progress, completed: 0, total: 1 } }), progress);
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await page.locator("#livePostprocessStatus").scrollIntoViewIfNeeded();
+      assert.equal(await page.locator("#liveCancelSummary").isEnabled(), true);
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+        `${progress.stage} must not overflow at ${width}`);
+      if (screenshotDirectory) {
+        const file = path.join(screenshotDirectory, `meeting-live-${progress.stage}-${width}.png`);
+        await page.screenshot({ path: file });
+        screenshots.push(file);
+      }
+    }
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.locator("#liveCancelSummary").click();
+  assert.match(await page.locator("#livePostprocessStatus").textContent(), /已取消/);
+  assert.equal(await page.evaluate(() => window.mockCalls.filter(c => c.name === "meetingLiveCancelSummary").at(-1).payload.sessionId), "demo");
+  assert.equal(await page.locator("#liveCancelSummary").isEnabled(), false);
+  await page.locator("#liveSummarize").click();
   await page.evaluate(() => window.mockPush({ postprocessStatus: "completed",
-    summary: { title: "Summary", markdown: "## Details\nCoherent prose.", mindmap: { text: "Root", uncertain: false, provenance: [], children: [] },
-      sections: [{ heading: "Details", paragraphs: [{ text: "Coherent paragraph for the record.", uncertain: false, provenance: [] }], items: [] }] },
+    summary: { schema: "meeting_summary_v2", title: "Summary", markdown: "## 正文\nCoherent prose.", mindmap: { text: "Root", uncertain: false, provenance: [{ quote: "source only on the left" }], children: [] },
+      sections: [{ heading: "正文", paragraphs: [{ text: "Coherent paragraph for the record.", uncertain: false, provenance: [{ quote: "private source quote" }] }], items: [] }] },
     summaryMarkdownPath: "C:/mock/summary.md" }));
   await page.waitForFunction(() => /Coherent paragraph/.test(document.getElementById("liveSummaryDetail").textContent));
+  assert.equal(await page.locator("#liveDetailHeading").textContent(), "整理正文");
+  assert.doesNotMatch(await page.locator("#liveSummaryDetail").textContent(), /来源：|private source quote|Details/);
+  assert.match(await page.locator("#liveMindmap").textContent(), /source only on the left/);
+  await page.evaluate(() => window.mockPush({ summary: { title: "Old", mindmap: { text: "Root", provenance: [], children: [] },
+    sections: [{ heading: "旧决策", items: [{ text: "保留旧纪要", provenance: [] }] }] } }));
+  assert.equal(await page.locator("#liveDetailHeading").textContent(), "详细纪要");
+  assert.match(await page.locator("#liveSummaryDetail").textContent(), /保留旧纪要/);
+  await page.evaluate(() => window.mockPush({ summary: { schema: "meeting_summary_v2", title: "Summary",
+    mindmap: { text: "Root", uncertain: false, provenance: [], children: [] },
+    sections: [{ heading: "正文", paragraphs: [{ text: "Coherent paragraph for the record.", uncertain: false, provenance: [] }], items: [] }] } }));
   await page.locator("#liveOpenSummary").click();
   assert.equal(await page.evaluate(() => window.mockCalls.filter((c) => c.name === "meetingLiveOpenPath").at(-1).payload.path), "C:/mock/summary.md");
   const viewports = [{ width: 1280, height: 900 }, { width: 960, height: 720 }, { width: 390, height: 844 }];
-  const screenshots = [];
   for (const size of viewports) {
     await page.setViewportSize(size);
     await page.locator("#liveMeetingPanel").evaluate((el) => { el.scrollTop = 0; });

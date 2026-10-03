@@ -879,6 +879,7 @@
             </label>
             <label id="liveReviewModelField" class="field" hidden><span>音频复核模型</span><select id="liveReviewModel" aria-label="音频复核模型"></select></label>
             <button id="liveSummarize" type="button" class="primary" disabled>生成摘要</button>
+            <button id="liveCancelSummary" type="button" disabled>取消生成</button>
             <span id="liveCleanupStatus" role="status">未生成摘要</span>
             <span id="livePostprocessStatus" role="status"></span>
             <button id="liveOpenSummary" type="button" disabled>打开摘要</button>
@@ -887,7 +888,7 @@
             <h2 id="liveSummaryHeading">会议摘要</h2>
             <div class="live-summary-layout">
               <section aria-labelledby="liveMindmapHeading"><h3 id="liveMindmapHeading">会议脉络</h3><div id="liveMindmap" class="live-mindmap"></div></section>
-              <section aria-labelledby="liveDetailHeading"><h3 id="liveDetailHeading">详细纪要</h3><div id="liveSummaryDetail" class="live-summary-detail"></div></section>
+              <section aria-labelledby="liveDetailHeading"><h3 id="liveDetailHeading">整理正文</h3><div id="liveSummaryDetail" class="live-summary-detail"></div></section>
             </div>
           </section>
           <div id="liveSummaryResize" class="reading-resize-grip" role="separator" tabindex="0" aria-label="调整摘要区域高度" aria-orientation="horizontal" data-resize-target="liveSummarySection" title="拖动调整摘要区域高度，双击恢复自动大小" hidden></div>
@@ -1088,6 +1089,17 @@
         </div>
         <footer class="supplier-dialog-footer"><span>Key 仅保存在本机</span><button id="textSupplierCancel" type="button">取消</button><button id="textSupplierSave" type="submit" class="primary">添加供应商</button></footer>
       </form>
+    </dialog>
+    <dialog id="textSupplierDeleteDialog" class="supplier-dialog supplier-delete-dialog" aria-labelledby="textSupplierDeleteTitle">
+      <div class="supplier-form">
+        <header class="supplier-dialog-header"><div><h2 id="textSupplierDeleteTitle">删除供应商</h2></div></header>
+        <div class="supplier-dialog-body">
+          <p id="textSupplierDeleteMessage"></p>
+          <p id="textSupplierDeleteUsage" class="supplier-delete-usage" hidden></p>
+          <p id="textSupplierDeleteError" class="supplier-draft-status" role="alert"></p>
+        </div>
+        <footer class="supplier-dialog-footer"><button id="textSupplierDeleteCancel" type="button">取消</button><button id="textSupplierDeleteConfirm" type="button" class="danger-action">删除供应商</button></footer>
+      </div>
     </dialog>
     <script src="../audio-utils.js"></script>
     <script src="./meeting-ui.js"></script>

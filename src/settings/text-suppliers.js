@@ -17,7 +17,7 @@ const { API_STYLES, DEFAULT_CONNECTIONS, connectionBaseUrl, normalizeApiStyle,
 const SUPPLIER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const UNSAFE_IDS = new Set(["__proto__", "prototype", "constructor"]);
 const SECRET_HEADERS = new Set(["authorization", "cookie", "proxy-authorization", "x-api-key"]);
-const CAPABILITY_FIELDS = ["contextWindow", "maxOutput", "reasoning", "capabilitySource", "capabilityRevision"];
+const CAPABILITY_FIELDS = ["contextWindow", "maxOutput", "reasoning", "timeoutMs", "capabilitySource", "capabilityRevision"];
 
 const MAX_SUPPLIERS = 64;
 const MAX_MODELS_PER_CATALOG = 1000;
@@ -86,6 +86,17 @@ function sanitizeApiKey(value) {
   return trimStr(value).slice(0, MAX_KEY_CHARS);
 }
 
+function supplierRequestHeaders(baseUrl, rawHeaders) {
+  const headers = sanitizeRequestHeaders(rawHeaders);
+  const url = new URL(baseUrl);
+  if (url.host !== "opencode.ai" || url.pathname !== "/zen/go/v1") return headers;
+  const names = new Set(Object.keys(headers).map(name => name.toLowerCase()));
+  for (const [name, value] of Object.entries(openCodeGoCompatHeaders())) {
+    if (!names.has(name.toLowerCase())) headers[name] = value;
+  }
+  return headers;
+}
+
 function normalizeTextSupplier(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const id = sanitizeSupplierId(raw.id);
@@ -98,7 +109,7 @@ function normalizeTextSupplier(raw) {
     apiStyle: normalizeApiStyle(raw.apiStyle, API_STYLES.CHAT_COMPLETIONS),
     authStyle: raw.authStyle === "api-key" ? "api-key" : "bearer",
     apiKey: sanitizeApiKey(raw.apiKey),
-    requestHeaders: sanitizeRequestHeaders(raw.requestHeaders)
+    requestHeaders: supplierRequestHeaders(baseUrl, raw.requestHeaders)
   };
   const migratedFrom = trimStr(raw.migratedFrom).slice(0, 64);
   if (migratedFrom) entry.migratedFrom = migratedFrom;

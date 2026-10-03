@@ -46,23 +46,23 @@ function languageModel(profile) {
   if (profile?.provider === "text-supplier") {
     // Named supplier pair: own endpoint, key, API style and compat headers.
     const chat = createTextSupplierChat(profile);
-    return async ({ messages, signal, maxTokens = 8192 }) => {
-      const response = await chat(messages, { signal, maxTokens });
+    return async ({ messages, signal, maxTokens = 8192, stream = false, onProgress }) => {
+      const response = await chat(messages, { signal, maxTokens, stream, onProgress });
       if (response.finishReason && response.finishReason !== "stop") throw Object.assign(new Error("Incomplete model response"), { code: "analysis_response_incomplete" });
       return response.content;
     };
   }
-  const client = profile.provider === "mimo"
-    ? createMimoClient({ getSettings: () => ({ ...profile, model: profile.modelId }), useEnvironmentFallback: false })
-    : profile.provider === "opencode-go"
+  const client = profile.provider === "opencode-go"
       ? createOpenCodeGoClient({
           ...profile,
           model: profile.modelId,
           sessionId: createOpenCodeGoSessionId("meeting-live")
         })
-      : createOpenAiCompatibleClient({ ...profile, model: profile.modelId });
-  return async ({ messages, signal, maxTokens = 8192 }) => {
-    const response = await client.requestChat(messages, { signal, maxTokens });
+      : createOpenAiCompatibleClient({ ...profile, model: profile.modelId,
+          ...(profile.provider === "mimo" ? { headerName: "api-key", headerValuePrefix: "" } : {}) });
+  return async ({ messages, signal, maxTokens = 8192, stream = false, onProgress }) => {
+    const response = await client.requestChat(messages, { signal, maxTokens, stream, onProgress,
+      extraBody: stream && profile.reasoning ? { reasoning_effort: profile.reasoning } : {} });
     if (response.finishReason && response.finishReason !== "stop") throw Object.assign(new Error("Incomplete model response"), { code: "analysis_response_incomplete" });
     return response.content;
   };

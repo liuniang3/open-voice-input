@@ -325,6 +325,25 @@ test("postprocessing rejects stale sessions, string booleans and overlapping sta
   assert.equal(h.run("liveActionPromise"), null);
 });
 
+test("summary cancel IPC is pinned to the stopped session and progress DTOs exclude private data", async () => {
+  const h = mainHarness(); h.context.testState = h.controls.state;
+  Object.assign(h.controls.state, { sessionId: "s-current", status: "completed", recording: false, paused: false,
+    postprocessStatus: "running", postprocessProgress: { stage: "retrying", retry: 2, maxRetries: 5,
+      outputChars: 200, reasoningChars: 10, content: "PRIVATE", apiKey: "PRIVATE", failureCode: "postprocess_network_error" } });
+  await h.invoke("meeting:live:status");
+  h.run("realtimeMeeting.cancelPostprocess = async () => { cancelCalls = (typeof cancelCalls === 'undefined' ? 0 : cancelCalls) + 1; testState.postprocessStatus = 'cancelled'; return testState; }");
+  assert.equal((await h.invoke("meeting:live:cancel-summary", { sessionId: "wrong" })).error.code, "live_session_invalid");
+  assert.equal(h.run("typeof cancelCalls"), "undefined");
+  h.controls.state.recording = true;
+  assert.equal((await h.invoke("meeting:live:cancel-summary", { sessionId: "s-current" })).error.code, "live_busy");
+  h.controls.state.recording = false;
+  const result = await h.invoke("meeting:live:cancel-summary", { sessionId: "s-current", apiKey: "PRIVATE" });
+  assert.equal(result.postprocessStatus, "cancelled"); assert.equal(h.run("cancelCalls"), 1);
+  assert.equal(result.postprocessProgress.retry, 2); assert.equal(result.postprocessProgress.outputChars, 200);
+  assert.equal(result.postprocessProgress.failureCode, "postprocess_network_error");
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE/);
+});
+
 test("pause/stop race waits for capture control and safely propagates rejections", async () => {
   const h = mainHarness();
   await h.invoke("meeting:live:start");
@@ -438,10 +457,11 @@ test("preload exposes only the new scoped live IPC methods", async () => {
   await api.meetingLiveHistory();
   await api.meetingLiveOpenSession({ sessionId: "history" });
   await api.meetingLiveSummarize({ sessionId: "s", modelId: "llm" });
+  await api.meetingLiveCancelSummary({ sessionId: "s" });
   await api.meetingLiveWindow({ floating: true });
   await api.meetingLiveTestConnection({ modelId: MEETING_LIVE_MODEL });
   assert.deepEqual(calls.map(call => call[0]), ["meeting:live:pause", "meeting:live:resume", "meeting:live:history",
-    "meeting:live:open-session", "meeting:live:summarize", "meeting:live:window", "meeting:live:test-connection"]);
+    "meeting:live:open-session", "meeting:live:summarize", "meeting:live:cancel-summary", "meeting:live:window", "meeting:live:test-connection"]);
 });
 
 (async () => {

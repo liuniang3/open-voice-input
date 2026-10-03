@@ -267,6 +267,16 @@ function renderSharedSummaryLines(summary, headingPrefix = "") {
     walk(mindmap, 0);
   }
   const sections = Array.isArray(summary.sections) ? summary.sections : [];
+  if (summary.schema === "meeting_summary_v2") {
+    out.push("", `${headingPrefix}整理正文`);
+    for (const section of sections) {
+      for (const paragraph of (Array.isArray(section?.paragraphs) ? section.paragraphs : [])) {
+        const text = sharedSummaryClaimText(paragraph);
+        if (text) out.push("", text);
+      }
+    }
+    return out;
+  }
   for (const section of sections) {
     if (!section || typeof section.heading !== "string") continue;
     out.push("");
