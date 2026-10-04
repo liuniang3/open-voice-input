@@ -239,6 +239,18 @@ async function main() {
       ([], { stream: true, maxTokens: 99999 });
     assert.equal(body.max_completion_tokens, 32768); assert.equal(body.reasoning_effort, "high");
   });
+  await test("format regeneration progress and typed errors are shared by file and live UI", () => {
+    const dto = toFileSummaryDto({ progress: { stage: "validation_retry", validationRetry: 1, content: "PRIVATE" } });
+    assert.equal(dto.progress.stage, "validation_retry"); assert.equal(dto.progress.validationRetry, 1);
+    assert.match(summaryProgressText(dto.progress), /自动重新生成/);
+    assert.match(summaryProgressText({ stage: "receiving", validationRetry: 1 }), /格式重试 1\/1/);
+    for (const [code, label] of [["postprocess_invalid_json", /JSON/], ["postprocess_schema_invalid", /字段结构/],
+      ["postprocess_structure_limit", /超出限制/], ["postprocess_unsafe_json", /不安全/]]) {
+      assert.match(summaryErrorText(code), label);
+    }
+    assert.ok(!JSON.stringify(dto).includes("PRIVATE"));
+    assert.equal(toFileSummaryDto({ progress: { validationRetry: -1 } }).progress.validationRetry, undefined);
+  });
   await test("progress DTO and UI expose counters only, not partial JSON or private reasoning", () => {
     const dto = toFileSummaryDto({ progress: { stage: "receiving", outputChars: 200, reasoningChars: 30,
       content: "PRIVATE", apiKey: "PRIVATE", attempts: -10 }, error: { code: "postprocess_stream_idle", body: "PRIVATE" } });

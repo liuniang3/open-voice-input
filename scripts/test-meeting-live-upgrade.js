@@ -264,7 +264,7 @@ async function verifyUpgradeBrowser(page, directory) {
   await page.locator("#textSupplierApiKey").fill("test-placeholder");
   await page.locator("#textSupplierSave").click();
   await page.waitForFunction(() => document.getElementById("textSupplierStatus").textContent.includes("已保存"));
-  await page.locator('[data-settings-tab="meeting"]').click();
+  await page.locator('[data-settings-tab="cleaner"]').click();
   await page.locator("#summarySupplierSelect").selectOption("vendor-test");
   await page.locator("#summaryCustomModelInput").fill("model-test");
   await page.locator("#saveSettingsBtn").click();

@@ -338,7 +338,7 @@ function providerCatalogCapabilities(provider) {
 }
 
 const GENERIC_ANALYSIS_CAPABILITY = Object.freeze({
-  contextWindow: 128000,
+  contextWindow: 256000,
   maxOutput: 8192,
   reasoning: "",
   timeoutMs: 180000,

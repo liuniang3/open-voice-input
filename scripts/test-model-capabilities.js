@@ -21,13 +21,19 @@ assert.deepEqual(
     reasoning: "",
     timeoutMs: 300000,
     capabilitySource: "official",
-    capabilityRevision: 2
+    capabilityRevision: 3
   }
 );
 assert.equal(resolveModelCapability("vendor/glm-5.2").contextWindow, 1000000);
 assert.equal(resolveModelCapability("grok-4.5").reasoning, "high");
 assert.equal(resolveModelCapability("gpt-5.6-terra").contextWindow, 272000);
 assert.equal(resolveModelCapability("gpt-5.4-mini").contextWindow, 230000);
+assert.equal(resolveModelCapability("gpt-4.1-mini").contextWindow, 1048576);
+assert.equal(resolveModelCapability("o4-mini").contextWindow, 200000);
+assert.equal(resolveModelCapability("gemini-2.5-pro").maxOutput, 65536);
+assert.equal(resolveModelCapability("claude-4-sonnet").contextWindow, 200000);
+assert.equal(resolveModelCapability("qwen3-max").contextWindow, 256000);
+assert.equal(resolveModelCapability("deepseek-v3.1").contextWindow, 128000);
 for (const model of [
   "deepseek-v4-pro",
   "deepseek-v4-flash",
@@ -43,7 +49,7 @@ for (const model of [
 }
 assert.deepEqual(
   resolveModelCapability("new-model-without-preset"),
-  { ...GENERIC_MODEL_CAPABILITY, capabilityRevision: 2 }
+  { ...GENERIC_MODEL_CAPABILITY, capabilityRevision: 3 }
 );
 
 const providerCapability = resolveModelCapability("new-provider-model", {
@@ -134,7 +140,7 @@ const cachedCatalog = ensureConnectionProfiles({
 });
 assert.equal(cachedCatalog.openaiModelCapabilities["gpt-5.6-terra"].contextWindow, 272000);
 assert.equal(cachedCatalog.openaiModelCapabilities["gpt-5.6-terra"].capabilitySource, "compatibility");
-assert.equal(cachedCatalog.openaiModelCapabilities["new-catalog-model"].contextWindow, 128000);
+assert.equal(cachedCatalog.openaiModelCapabilities["new-catalog-model"].contextWindow, 256000);
 assert.equal(cachedCatalog.openaiModelCapabilities["new-catalog-model"].capabilitySource, "generic");
 
 const openCodeGoCatalog = ensureConnectionProfiles({

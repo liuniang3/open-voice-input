@@ -2,7 +2,7 @@ const { ensureTerminalPunctuation } = require("../../transcript-cleaner");
 
 const MIN_REWRITE_LENGTH_RATIO = 0.2;
 const MAX_REWRITE_LENGTH_RATIO = 1.5;
-const MIN_GROUNDED_CHARACTER_RATIO = 0.5;
+const MIN_GROUNDED_CHARACTER_RATIO = 0.35;
 const MIN_CONSERVATIVE_RETAINED_RATIO = 0.45;
 
 function buildTextCleanupMessages(rawText, shortContext = "", options = {}) {
@@ -47,14 +47,8 @@ function buildTextCleanupMessages(rawText, shortContext = "", options = {}) {
 }
 
 function parseAndValidateCleanupResponse(value, rawText, options = {}) {
-  let parsed;
-  try {
-    parsed = JSON.parse(String(value || "").trim());
-  } catch {
-    return "";
-  }
+  const parsed = extractCleanupObject(value);
   if (!parsed || Array.isArray(parsed) || typeof parsed.text !== "string") return "";
-  if (Object.keys(parsed).length !== 1 || !Object.prototype.hasOwnProperty.call(parsed, "text")) return "";
   if (/(?:^|\n)\s*(?:[-*•]|\d+[.)、])\s+/u.test(parsed.text)) return "";
 
   const cleanedText = ensureTerminalPunctuation(normalizeParagraph(parsed.text));
@@ -62,6 +56,47 @@ function parseAndValidateCleanupResponse(value, rawText, options = {}) {
     ? isConservativeCleanup(rawText, cleanedText)
     : isSafeCleanup(rawText, cleanedText);
   return valid ? cleanedText : "";
+}
+
+// Providers sometimes wrap an otherwise valid JSON result in a Markdown fence
+// or a short preamble. Extract only a balanced JSON object and continue to
+// validate its text field; never pass the wrapper prose to the user.
+function extractCleanupObject(value) {
+  const source = String(value || "").trim();
+  if (!source) return null;
+  try {
+    const parsed = JSON.parse(source);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {}
+
+  const starts = [];
+  for (let index = source.indexOf("{"); index >= 0; index = source.indexOf("{", index + 1)) starts.push(index);
+  for (const start of starts) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < source.length; index += 1) {
+      const character = source[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+      if (character === '"') { inString = true; continue; }
+      if (character === "{") depth += 1;
+      else if (character === "}") {
+        depth -= 1;
+        if (depth !== 0) continue;
+        try {
+          const parsed = JSON.parse(source.slice(start, index + 1));
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+        } catch {}
+        break;
+      }
+    }
+  }
+  return null;
 }
 
 function isSafeCleanup(rawText, cleanedText) {
@@ -154,5 +189,6 @@ module.exports = {
   isSafeCleanup,
   normalizeParagraph,
   parseAndValidateCleanupResponse,
+  extractCleanupObject,
   preservesProtectedAnchors
 };

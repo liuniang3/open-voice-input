@@ -35,6 +35,10 @@ assert.equal(
   "我现在开始。"
 );
 assert.equal(
+  parseAndValidateCleanupResponse('说明文字\n```json\n{"text":"我现在开始。","confidence":0.98}\n```\n', "呃，我我现在开始。"),
+  "我现在开始。"
+);
+assert.equal(
   parseAndValidateCleanupResponse('{"text":"请缩小窗口"}', "我希望把窗口缩小一点"),
   "请缩小窗口。"
 );
@@ -46,7 +50,7 @@ assert.equal(
   "请缩小实时转写窗口，并在按下回车后整理文本。"
 );
 assert.equal(parseAndValidateCleanupResponse('{"text":"整理后的文本：请缩小窗口。"}', "请把窗口缩小。"), "");
-assert.equal(parseAndValidateCleanupResponse('{"text":"请缩小窗口。","reason":"done"}', "请把窗口缩小。"), "");
+assert.equal(parseAndValidateCleanupResponse('{"text":"请缩小窗口。","reason":"done"}', "请把窗口缩小。"), "请缩小窗口。");
 assert.equal(parseAndValidateCleanupResponse('{"text":"- 请缩小窗口。"}', "请把窗口缩小。"), "");
 assert.equal(
   parseAndValidateCleanupResponse('{"text":"大家逐步进行。"}', "大家一步一步来。", { policy: "conservative" }),

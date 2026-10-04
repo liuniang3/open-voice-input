@@ -7,6 +7,7 @@
 const LEGACY_SUPPLIER_ID = "__legacy__";
 const CUSTOM_MODEL_VALUE = "__custom__";
 const PAIR_SEPARATOR = "::";
+const CAPABILITY_PRESET_REVISION = 3;
 const SUPPLIER_PRESETS = Object.freeze([
   { id: "custom", name: "自定义", mark: "+", category: "兼容服务", baseUrl: "", apiStyle: "chat-completions" },
   { id: "openai", name: "OpenAI", mark: "O", category: "官方", baseUrl: "https://api.openai.com/v1", apiStyle: "responses" },
@@ -262,7 +263,8 @@ if (typeof module === "object" && module.exports) {
     selectionFor,
     supplierIdOf,
     supplierOptionLabel,
-    modelIdOf
+    modelIdOf,
+    CAPABILITY_PRESET_REVISION
   };
 }
 if (typeof window !== "undefined") {
@@ -285,6 +287,7 @@ if (typeof window !== "undefined") {
     selectionFor,
     supplierIdOf,
     supplierOptionLabel,
-    modelIdOf
+    modelIdOf,
+    CAPABILITY_PRESET_REVISION
   };
 }

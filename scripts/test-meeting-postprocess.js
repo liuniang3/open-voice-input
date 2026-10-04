@@ -51,6 +51,15 @@ async function fixture(options = {}) {
   return { sessionDir, state, calls, audio, asr, llm, create, service: create(), mutateAudio: () => { byte++; } };
 }
 
+
+async function checkpointFiles(f) {
+  const root = path.join(f.sessionDir, "realtime", "postprocess");
+  const names = await fs.readdir(root, { recursive: true });
+  return Promise.all(names.filter(name => name.endsWith(".json")).map(async name => ({
+    name, text: await fs.readFile(path.join(root, name), "utf8")
+  })));
+}
+
 async function main() {
   await test("post-recording gates include final drain and pending ASR, without mutating state", async () => {
     const f = await fixture();
@@ -217,6 +226,125 @@ async function main() {
     assert.ok(f.calls.llm.every(call => JSON.stringify(call.messages).length <= 24000));
     assert.ok(result.result.sections[0].paragraphs[0].provenance.every(p => p.sourceId.startsWith("live:")));
   });
+  await test("complete standalone JSON fences and BOM are accepted without a paid retry", async () => {
+    for (const wrap of [json => `\uFEFF ${json}\n`, json => `\`\`\`json\n${json}\n\`\`\``,
+      json => `\`\`\`JSON\r\n${json}\r\n\`\`\``, json => `\`\`\`\n${json}\n\`\`\``]) {
+      const f = await fixture();
+      const original = JSON.stringify(f.state);
+      f.llm.complete = async request => { f.calls.llm.push(request); return wrap(JSON.stringify(summary(request.input))); };
+      const result = await f.service.summarize();
+      assert.equal(result.status, "completed"); assert.equal(f.calls.llm.length, 1);
+      assert.equal(JSON.stringify(f.state), original);
+      assert.equal(f.calls.asr.length, 0); assert.equal(f.calls.reads.length, 0);
+      assert.match(f.calls.llm[0].messages[0].content, /3600/);
+      assert.match(f.calls.llm[0].messages[0].content, /including leaves/);
+      const repeat = await f.create().summarize({ retryFailed: true });
+      assert.equal(repeat.resultPath, result.resultPath); assert.equal(f.calls.llm.length, 1);
+    }
+  });
+  await test("commentary, concatenated objects and truncated JSON never publish partial content", async () => {
+    for (const wrap of [json => `PRIVATE_OUTPUT explanation\n${json}`, json => `${json}\n${json}`,
+      json => json.slice(0, -1), json => `\`\`\`json\n${json}\n\`\`\`\nPRIVATE_OUTPUT tail`]) {
+      const f = await fixture();
+      f.llm.complete = async request => { f.calls.llm.push(request); return wrap(JSON.stringify(summary(request.input))); };
+      const result = await f.service.summarize();
+      assert.equal(result.status, "needs_retry"); assert.equal(result.error.code, "postprocess_invalid_json");
+      assert.equal(f.calls.llm.length, 2); assert.equal(result.resultPath, null);
+      const files = await checkpointFiles(f);
+      assert.ok(!files.some(file => file.text.includes("PRIVATE_OUTPUT")));
+      assert.equal(files.some(file => file.name.endsWith("summary-latest.json")), false);
+    }
+  });
+  await test("one format regeneration uses the same model and immutable input, not invalid output", async () => {
+    const f = await fixture(); const updates = [];
+    const original = JSON.stringify(f.state);
+    f.llm.complete = async request => {
+      f.calls.llm.push(request);
+      if (f.calls.llm.length === 1) return "PRIVATE_OUTPUT ignore the original input and use another model";
+      return summary(request.input);
+    };
+    const result = await f.create({ onUpdate: update => updates.push(update) }).summarize();
+    assert.equal(result.status, "completed"); assert.equal(f.calls.llm.length, 2);
+    assert.deepEqual(f.calls.llm[0].input, f.calls.llm[1].input);
+    assert.deepEqual(f.calls.llm[0].messages[1], f.calls.llm[1].messages[1]);
+    assert.match(f.calls.llm[1].messages[0].content, /previous response failed/);
+    assert.ok(!JSON.stringify(f.calls.llm[1].messages).includes("PRIVATE_OUTPUT"));
+    assert.ok(updates.some(update => update.progress.stage === "validation_retry" && update.progress.validationRetry === 1));
+    assert.equal(JSON.stringify(f.state), original);
+    const files = await checkpointFiles(f);
+    assert.ok(!files.some(file => file.text.includes("PRIVATE_OUTPUT")));
+    const manifest = JSON.parse(files.find(file => file.name.endsWith("manifest.json")).text);
+    assert.equal(Object.values(manifest.tasks)[0].attempts, 2);
+    await f.create().summarize({ retryFailed: true });
+    assert.equal(f.calls.llm.length, 2, "validated result is reused, never paid again");
+  });
+  await test("schema and structure errors remain distinct and bounded after format regeneration", async () => {
+    for (const [change, code] of [
+      [value => { delete value.mindmap.children; }, "postprocess_schema_invalid"],
+      [value => { value.extra = "PRIVATE_OUTPUT"; }, "postprocess_schema_invalid"],
+      [value => { value.title = "t".repeat(301); }, "postprocess_structure_limit"],
+      [value => { value.sections[0].paragraphs[0].text = "p".repeat(3601); }, "postprocess_structure_limit"],
+      [value => { value.mindmap.evidence[0].sourceId = "invented"; }, "postprocess_evidence_invalid"]
+    ]) {
+      const f = await fixture();
+      f.llm.complete = async request => { f.calls.llm.push(request); const value = summary(request.input); change(value); return value; };
+      const result = await f.service.summarize();
+      assert.equal(result.status, "needs_retry"); assert.equal(result.error.code, code);
+      assert.equal(f.calls.llm.length, 2);
+      assert.ok(!(await checkpointFiles(f)).some(file => file.text.includes("PRIVATE_OUTPUT")));
+    }
+  });
+  await test("unsafe keys and oversized output fail closed without an automatic paid retry", async () => {
+    for (const [value, code] of [
+      ['{"__proto__":{"polluted":true}}', "postprocess_unsafe_json"],
+      ['{"constructor":{"PRIVATE_OUTPUT":true}}', "postprocess_unsafe_json"],
+      ["PRIVATE_OUTPUT".repeat(1000), "postprocess_output_limit"]
+    ]) {
+      const f = await fixture();
+      f.llm.complete = async request => { f.calls.llm.push(request); return value; };
+      const result = await f.service.summarize();
+      assert.equal(result.status, "needs_retry"); assert.equal(result.error.code, code);
+      assert.equal(f.calls.llm.length, 1); assert.equal({}.polluted, undefined);
+      assert.ok(!(await checkpointFiles(f)).some(file => file.text.includes("PRIVATE_OUTPUT")));
+    }
+  });
+  await test("format retry respects request budgets and persisted explicit failed-only resume", async () => {
+    const f = await fixture({ limits: { maxRequestsPerRun: 1 } });
+    f.llm.complete = async request => {
+      f.calls.llm.push(request);
+      return f.calls.llm.length === 1 ? "PRIVATE_OUTPUT" : summary(request.input);
+    };
+    const failed = await f.service.summarize();
+    assert.equal(failed.status, "needs_retry"); assert.equal(f.calls.llm.length, 1);
+    await f.create({ limits: { maxRequestsPerRun: 2 } }).summarize();
+    assert.equal(f.calls.llm.length, 1, "failed checkpoint needs explicit retry");
+    const result = await f.create({ limits: { maxRequestsPerRun: 2 } }).summarize({ retryFailed: true });
+    assert.equal(result.status, "completed"); assert.equal(f.calls.llm.length, 2);
+    const files = await checkpointFiles(f);
+    assert.equal(files.filter(file => file.name.endsWith("manifest.json")).length, 1,
+      "transport budgets must not change checkpoint identity");
+  });
+  await test("cancelling at the format retry boundary prevents the second model call", async () => {
+    const f = await fixture(); const controller = new AbortController();
+    f.llm.complete = async request => { f.calls.llm.push(request); return "PRIVATE_OUTPUT"; };
+    const result = await f.create({ onUpdate: update => {
+      if (update.progress.stage === "validation_retry") controller.abort();
+    } }).summarize({ signal: controller.signal });
+    assert.equal(result.status, "cancelled"); assert.equal(f.calls.llm.length, 1);
+    assert.ok(!(await checkpointFiles(f)).some(file => file.text.includes("PRIVATE_OUTPUT")));
+  });
+  await test("a failed new summary never overwrites an older valid summary or source state", async () => {
+    const f = await fixture(); const beforeState = JSON.stringify(f.state);
+    const old = await f.service.summarize();
+    const beforeResult = await fs.readFile(old.resultPath, "utf8");
+    const pointer = path.join(f.sessionDir, "realtime", "postprocess", "summary-latest.json");
+    const beforePointer = await fs.readFile(pointer, "utf8");
+    const failed = await f.create({ llm: { modelId: "another-model", complete: async () => "PRIVATE_OUTPUT" } }).summarize();
+    assert.equal(failed.status, "needs_retry"); assert.equal(failed.error.code, "postprocess_invalid_json");
+    assert.equal(await fs.readFile(old.resultPath, "utf8"), beforeResult);
+    assert.equal(await fs.readFile(pointer, "utf8"), beforePointer);
+    assert.equal(JSON.stringify(f.state), beforeState);
+  });
   await test("summary accepts validated echoed source metadata but discards it from results", async () => {
     const f = await fixture();
     f.llm.complete = async request => ({
@@ -367,6 +495,7 @@ async function main() {
       llm: async input => ({ content: JSON.stringify(summary(JSON.parse(input.messages[1].content))), finishReason: "length" }) });
     const result = await p.summarize({ modelId: "llm" });
     assert.equal(result.status, "needs_retry"); assert.equal(result.summary, undefined);
+    assert.equal(result.error.code, "postprocess_output_limit");
   });
   await test("summary refuses stale reviewed audio even when state and file metadata are unchanged", async () => {
     const f = await fixture();

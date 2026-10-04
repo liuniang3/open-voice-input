@@ -5,7 +5,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { summaryBudget, estimateTokens } = require("../src/meeting/summary-budget");
+const { MAX_SUMMARY_OUTPUT_TOKENS, summaryBudget, estimateTokens } = require("../src/meeting/summary-budget");
 const { createMeetingPostprocessService, DEFAULT_LIMITS } = require("../src/meeting/realtime/postprocess");
 
 let passed = 0;
@@ -135,6 +135,19 @@ async function main() {
     assert.ok(small.limits.contextChars <= small.limits.maxInputChars / 4);
     const outputLimited = summaryBudget({ contextWindow: 1000000, maxOutputTokens: 4096 });
     assert.equal(outputLimited.limits.inputTokenBudget, 4096 * 6);
+  });
+  await test("large-context models are no longer capped at the former 32K ceiling", () => {
+    const deepseek = summaryBudget({ modelId: "deepseek-v4.1-flash", contextWindow: 1000000, maxOutputTokens: 384000 });
+    assert.equal(deepseek.maxOutputTokens, 250000, "context reserve should be the active ceiling");
+    assert.ok(deepseek.maxOutputTokens > 32768);
+    assert.ok(deepseek.maxOutputTokens <= MAX_SUMMARY_OUTPUT_TOKENS);
+    assert.equal(deepseek.limits.maxOutputChars, 500000);
+
+    const gpt = summaryBudget({ modelId: "gpt-5.6-sol", contextWindow: 272000, maxOutputTokens: 32768 });
+    assert.equal(gpt.maxOutputTokens, 32768, "smaller model limits remain unchanged");
+
+    const mimo = summaryBudget({ modelId: "mimo-v2.5", contextWindow: 1000000, maxOutputTokens: 128000 });
+    assert.equal(mimo.maxOutputTokens, 128000);
   });
   console.log(`${passed} summary budget tests passed`);
 }

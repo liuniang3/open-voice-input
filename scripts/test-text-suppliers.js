@@ -127,26 +127,26 @@ async function main() {
         { id: "beta", name: "Beta", baseUrl: "https://beta.example/v1", apiKey: "sk-beta", apiStyle: "responses" }
       ],
       textSupplierCatalogs: {
-        alpha: { models: ["glm-5.2"], capabilities: { "glm-5.2": { contextWindow: 1000, maxOutput: 100 } } },
-        beta: { models: ["glm-5.2"], capabilities: { "glm-5.2": { contextWindow: 2000, maxOutput: 200 } } }
+        alpha: { models: ["shared-model"], capabilities: { "shared-model": { contextWindow: 4096, maxOutput: 1024 } } },
+        beta: { models: ["shared-model"], capabilities: { "shared-model": { contextWindow: 8192, maxOutput: 2048 } } }
       },
       textModelSelection: { supplierId: "alpha", modelId: "glm-5.2" }
     });
-    const alpha = resolveTextModel(settings, { supplierId: "alpha", modelId: "glm-5.2" });
-    const beta = resolveTextModel(settings, { supplierId: "beta", modelId: "glm-5.2" });
+    const alpha = resolveTextModel(settings, { supplierId: "alpha", modelId: "shared-model" });
+    const beta = resolveTextModel(settings, { supplierId: "beta", modelId: "shared-model" });
     assert.equal(alpha.apiKey, "sk-alpha");
     assert.equal(beta.apiKey, "sk-beta");
     assert.equal(alpha.baseUrl, "https://alpha.example/v1");
     assert.equal(beta.baseUrl, "https://beta.example/v1");
-    assert.equal(catalogFor(settings, "alpha").capabilities["glm-5.2"].contextWindow, 1000);
-    assert.equal(catalogFor(settings, "beta").capabilities["glm-5.2"].contextWindow, 2000);
+    assert.equal(catalogFor(settings, "alpha").capabilities["shared-model"].contextWindow, 4096);
+    assert.equal(catalogFor(settings, "beta").capabilities["shared-model"].contextWindow, 8192);
     // The active selection is a pair; it resolves to exactly one supplier.
     const selected = resolveTextModel(settings, settings.textModelSelection);
     assert.equal(selected.supplierId, "alpha");
     assert.equal(selected.apiKey, "sk-alpha");
     // Model names never infer a supplier.
-    assert.equal(resolveTextModel(settings, { modelId: "glm-5.2" }), null);
-    assert.equal(resolveTextModel(settings, { supplierId: "gamma", modelId: "glm-5.2" }), null);
+    assert.equal(resolveTextModel(settings, { modelId: "shared-model" }), null);
+    assert.equal(resolveTextModel(settings, { supplierId: "gamma", modelId: "shared-model" }), null);
   });
 
   await test("chat-completions and responses styles normalize and survive resolution", () => {
@@ -198,7 +198,37 @@ async function main() {
     });
     assert.deepEqual(refreshed.result.models, ["model-new"]);
     assert.deepEqual(refreshed.settings.textSupplierCatalogs.keep.models, ["model-new"]);
+    assert.equal(refreshed.settings.textSupplierCatalogs.keep.capabilities["model-new"].contextWindow, 8192,
+      "newly discovered models receive a usable capability default");
+    assert.equal(refreshed.settings.textSupplierCatalogs.keep.capabilities["model-new"].maxOutput, 8192);
+    assert.equal(refreshed.settings.textSupplierCatalogs.keep.capabilities["model-new"].capabilityManaged, true);
     assert.deepEqual(base.textSupplierCatalogs.keep.models, ["model-old"], "input settings stay immutable");
+
+    const manual = ensureTextSuppliers({
+      textSuppliers: [{ id: "manual", baseUrl: "https://manual.example/v1", apiKey: "sk-manual" }],
+      textSupplierCatalogs: {
+        manual: {
+          models: ["grok-4.5"],
+          capabilities: {
+            "grok-4.5": {
+              contextWindow: 320000,
+              maxOutput: 12000,
+              capabilityManaged: false,
+              capabilitySource: "manual"
+            }
+          }
+        }
+      }
+    });
+    const manualRefresh = await refreshTextSupplierCatalog({
+      settings: manual,
+      supplierId: "manual",
+      fetchImpl: async () => jsonResponse({ data: [{ id: "grok-4.5", context_window: 500000, max_output_tokens: 32768 }] })
+    });
+    assert.equal(manualRefresh.settings.textSupplierCatalogs.manual.capabilities["grok-4.5"].contextWindow, 320000,
+      "manual context values survive catalog refresh");
+    assert.equal(manualRefresh.settings.textSupplierCatalogs.manual.capabilities["grok-4.5"].maxOutput, 12000);
+    assert.equal(manualRefresh.settings.textSupplierCatalogs.manual.capabilities["grok-4.5"].capabilityManaged, false);
   });
 
   await test("catalog, connection test and public views never expose secrets", async () => {
@@ -290,7 +320,8 @@ async function main() {
     assert.equal(messy.textSuppliers.length, 1, "invalid and duplicate entries are sanitized out");
     assert.equal(messy.textSuppliers[0].apiKey, "k1", "keys are trimmed, never dropped");
     assert.deepEqual(messy.textSupplierCatalogs.ok.models, ["m1", "m2"], "unsafe and duplicate model ids are dropped");
-    assert.equal(messy.textSupplierCatalogs.ok.capabilities.m1.maxOutput, undefined);
+    assert.equal(messy.textSupplierCatalogs.ok.capabilities.m1.contextWindow, 256000);
+    assert.equal(messy.textSupplierCatalogs.ok.capabilities.m1.maxOutput, 8192);
     assert.deepEqual(messy.textModelSelection, { supplierId: "ok", modelId: "m1" });
     const applied = applySupplierCatalog(messy, "ok", { models: ["m3"] });
     assert.deepEqual(applied.textSupplierCatalogs.ok.models, ["m3"]);

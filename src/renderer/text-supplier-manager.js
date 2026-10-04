@@ -19,6 +19,40 @@
     const messages = new Map();
     const editable = ["textSupplierName", "textSupplierBaseUrl", "textSupplierApiKey", "textSupplierApiStyle", "textSupplierAuthStyle", "textSupplierId", "textSupplierInitialModel"];
 
+    function modelCapability(settings, id, model) {
+      const capability = settings.textSupplierCatalogs?.[id]?.capabilities?.[model] || {};
+      return {
+        ...capability,
+        contextWindow: Number(capability.contextWindow) > 0 ? Number(capability.contextWindow) : 256000,
+        maxOutput: Number(capability.maxOutput) > 0 ? Number(capability.maxOutput) : 8192
+      };
+    }
+
+    function renderCapabilityEditor(settings, models) {
+      const select = $("textSupplierCapabilityModel");
+      const context = $("textSupplierCapabilityContext");
+      const maxOutput = $("textSupplierCapabilityMaxOutput");
+      const save = $("textSupplierCapabilitySave");
+      const status = $("textSupplierCapabilityStatus");
+      const previous = select.value;
+      select.replaceChildren();
+      for (const model of models) option(select, model);
+      if ([...select.options].some(item => item.value === previous)) select.value = previous;
+      else if (models.length) select.value = models[0];
+      const model = select.value;
+      const capability = model ? modelCapability(settings, selectedId, model) : null;
+      context.value = capability ? String(capability.contextWindow) : "";
+      maxOutput.value = capability ? String(capability.maxOutput) : "";
+      const enabled = Boolean(selectedId && model && !requestBusy);
+      select.disabled = !enabled;
+      context.disabled = !enabled;
+      maxOutput.disabled = !enabled;
+      save.disabled = !enabled;
+      if (!capability) status.textContent = "同步模型后可设置参数。";
+      else if (capability.capabilityManaged === false) status.textContent = "当前为手工配置，刷新模型目录不会覆盖。";
+      else status.textContent = `当前为${capability.capabilitySource === "provider" ? "接口返回" : capability.capabilitySource === "generic" ? "通用保守" : "预设"}值。`;
+    }
+
     function option(select, value) {
       const node = document.createElement("option");
       node.value = value; node.textContent = value;
@@ -75,6 +109,7 @@
         $("textSupplierModelPreview").append(span);
       }
       if (!models.length) $("textSupplierModelPreview").textContent = "暂无模型";
+      renderCapabilityEditor(settings, models);
       const testSelect = $("textSupplierTestModel");
       const previous = testSelect.value;
       testSelect.replaceChildren();
@@ -184,7 +219,10 @@
         document.querySelector(".supplier-dialog-body").inert = true;
         for (const id of [...editable, "textSupplierSave", "textSupplierCancel", "textSupplierClose"]) $(id).disabled = true;
         $("supplierDraftStatus").textContent = "正在保存…";
-        const discover = !editingId && ui.SUPPLIER_PRESETS.find(preset => preset.id === selectedPreset)?.autoDiscoverModels && Boolean(entry.apiKey);
+        // Newly added suppliers are probed immediately when a key is present.
+        // Some gateways do not expose /models, so refresh remains best-effort
+        // and the saved supplier can still be used with a manually added model.
+        const discover = !editingId && Boolean(entry.apiKey);
         const saved = await api.saveSettings(next);
         onSettings(saved); saving = false; dirty = false; close(true);
         setStatus(entry.id, "供应商已保存。", "success"); render(entry.id);
@@ -233,6 +271,52 @@
         $("textSupplierManualModel").value = ""; setStatus(id, "模型已添加。", "success");
       } catch { setStatus(id, "添加模型失败，请重试。", "error"); }
       finally { requestBusy = false; render(selectedId); }
+    }
+
+    async function saveModelCapability() {
+      if (requestBusy || !selectedId) return;
+      const id = selectedId;
+      const model = $("textSupplierCapabilityModel").value.trim();
+      const contextWindow = Number($("textSupplierCapabilityContext").value);
+      const maxOutput = Number($("textSupplierCapabilityMaxOutput").value);
+      if (!model || !Number.isSafeInteger(contextWindow) || contextWindow < 4096) {
+        setStatus(id, "上下文窗口必须是至少 4096 的整数。", "error"); return;
+      }
+      if (!model || !Number.isSafeInteger(maxOutput) || maxOutput < 256 || maxOutput > contextWindow) {
+        setStatus(id, "最大输出必须是不超过上下文窗口的整数。", "error"); return;
+      }
+      const settings = getSettings();
+      const catalog = settings.textSupplierCatalogs?.[id] || { models: [], capabilities: {}, updatedAt: "" };
+      const previous = catalog.capabilities?.[model] || {};
+      requestBusy = true;
+      render(id);
+      try {
+        onSettings(await api.saveSettings({
+          textSupplierCatalogs: {
+            ...settings.textSupplierCatalogs,
+            [id]: {
+              ...catalog,
+              capabilities: {
+                ...(catalog.capabilities || {}),
+                [model]: {
+                  ...previous,
+                  contextWindow,
+                  maxOutput,
+                  capabilityManaged: false,
+                  capabilitySource: "manual",
+                  capabilityRevision: ui.CAPABILITY_PRESET_REVISION || 3
+                }
+              }
+            }
+          }
+        }));
+        setStatus(id, `已保存 ${model} 的模型能力参数。`, "success");
+      } catch (error) {
+        setStatus(id, error.message || "模型能力参数保存失败，请重试。", "error");
+      } finally {
+        requestBusy = false;
+        render(id);
+      }
     }
     function confirmRemove() {
       if (!selectedId || requestBusy || deleteDialog.open) return;
@@ -298,6 +382,8 @@
     $("textSupplierRefresh").addEventListener("click", () => runRequest("refresh"));
     $("textSupplierTest").addEventListener("click", () => runRequest("test"));
     $("textSupplierModelAdd").addEventListener("click", addModel);
+    $("textSupplierCapabilityModel").addEventListener("change", () => renderCapabilityEditor(getSettings(), ui.catalogModels(getSettings(), selectedId)));
+    $("textSupplierCapabilitySave").addEventListener("click", saveModelCapability);
     $("textSupplierManualModel").addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); void addModel(); } });
     $("textSupplierCancel").addEventListener("click", () => close());
     $("textSupplierClose").addEventListener("click", () => close());

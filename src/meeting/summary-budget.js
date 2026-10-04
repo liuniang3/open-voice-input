@@ -2,6 +2,14 @@
 
 const { resolveModelCapability } = require("../settings/model-capabilities");
 
+// Summary output is structured JSON with evidence and a mindmap, so keep a
+// generous application-level guard while still honoring each model's own
+// advertised limit. This is intentionally above the former 32K ceiling:
+// large-context models commonly support substantially larger completions.
+const MAX_SUMMARY_OUTPUT_TOKENS = 256000;
+const MAX_SUMMARY_INPUT_CHARS = 1500000;
+const MAX_SUMMARY_OUTPUT_CHARS = 1000000;
+
 // A portable conservative estimate, not a provider tokenizer. Include escaped
 // metadata, instructions and output reservation, plus a 20% context margin.
 function estimateTokens(value) {
@@ -19,15 +27,19 @@ function estimateTokens(value) {
 function summaryBudget(profile = {}) {
   const defaults = resolveModelCapability(profile.modelId);
   const contextWindow = Math.max(4096, Math.floor(Number(profile.contextWindow) || defaults.contextWindow));
-  const maxOutputTokens = Math.max(256, Math.floor(Math.min(Number(profile.maxOutputTokens) || defaults.maxOutput,
-    32768, contextWindow / 4)));
+  const configuredMaxOutput = Math.max(256, Math.floor(Number(profile.maxOutputTokens) || defaults.maxOutput));
+  const maxOutputTokens = Math.max(256, Math.floor(Math.min(
+    configuredMaxOutput,
+    MAX_SUMMARY_OUTPUT_TOKENS,
+    contextWindow / 4
+  )));
   // An enormous context does not imply enormous output: detailed prose +
   // citations still need to fit. Oversized inputs use hierarchical compression.
   const inputTokenBudget = Math.floor(Math.min(contextWindow * 0.8 - maxOutputTokens, maxOutputTokens * 6));
-  const maxInputChars = Math.max(4000, Math.min(1500000, inputTokenBudget * 3));
+  const maxInputChars = Math.max(4000, Math.min(MAX_SUMMARY_INPUT_CHARS, inputTokenBudget * 3));
   return { maxOutputTokens, limits: {
     maxInputChars,
-    maxOutputChars: Math.max(1000, Math.min(200000, maxOutputTokens * 2)),
+    maxOutputChars: Math.max(1000, Math.min(MAX_SUMMARY_OUTPUT_CHARS, maxOutputTokens * 2)),
     inputTokenBudget,
     fragmentChars: Math.min(2200, Math.floor(maxInputChars / 8)),
     contextChars: Math.min(2000, Math.floor(maxInputChars / 4)),
@@ -41,4 +53,11 @@ function summaryInput(task, items, context, limits, sourceIncomplete, missingRan
     context, maxOutputChars: limits.maxOutputChars };
 }
 
-module.exports = { estimateTokens, summaryBudget, summaryInput };
+module.exports = {
+  MAX_SUMMARY_INPUT_CHARS,
+  MAX_SUMMARY_OUTPUT_CHARS,
+  MAX_SUMMARY_OUTPUT_TOKENS,
+  estimateTokens,
+  summaryBudget,
+  summaryInput
+};

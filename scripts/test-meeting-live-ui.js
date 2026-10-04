@@ -463,6 +463,10 @@ test("streaming summary progress and cancellation are visible without exposing p
   assert.doesNotMatch(f.$("livePostprocessStatus").textContent, /PRIVATE/);
   f.push(completed({ postprocessStatus: "running", postprocessProgress: { stage: "retrying", retry: 2, maxRetries: 5, delayMs: 4000 } }));
   assert.match(f.$("livePostprocessStatus").textContent, /2\/5/);
+  f.push(completed({ postprocessStatus: "running", postprocessProgress: { stage: "validation_retry", validationRetry: 1 } }));
+  assert.match(f.$("livePostprocessStatus").textContent, /自动重新生成/);
+  f.push(completed({ postprocessStatus: "running", postprocessProgress: { stage: "receiving", validationRetry: 1, outputChars: 250 } }));
+  assert.match(f.$("livePostprocessStatus").textContent, /格式重试/);
   await f.click("liveCancelSummary");
   assert.deepEqual(f.last("meetingLiveCancelSummary").args, [{ sessionId: "s1" }]);
   assert.equal(f.$("liveCancelSummary").disabled, true);

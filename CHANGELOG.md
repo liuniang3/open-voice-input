@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented here.
 
+## v0.4.10 - 2026-10-03
+
+### Added
+
+- Added model capability presets for common MiMo, GLM, Grok, GPT, Gemini, Claude, Qwen, DeepSeek and Kimi model families.
+- Added automatic text-supplier model discovery through the supplier's `/models` endpoint after a new API key is saved.
+- Added editable per-model context length, maximum output and timeout capabilities, with conservative defaults for unknown models.
+
+### Changed
+
+- Model catalog capabilities now take precedence over built-in presets, while manually edited model capabilities remain stable across catalog refreshes.
+- Removed the visible standalone Meeting settings tab and moved meeting/file summary model selection into the shared expression and summary settings area.
+- Summary planning now uses the selected model's actual context and output capabilities, preferring whole-input processing and using hierarchical compression only when the input exceeds the calculated budget.
+- Improved voice-expression cleanup handling for strict JSON, Markdown-wrapped JSON, explanatory prefixes and extra response fields.
+
+### Fixed
+
+- Voice-expression cleanup now rejects explanatory, list-like or likely-expanding model responses and safely falls back to the original transcription when the result cannot be validated.
+- Relaxed overly strict grounding checks for natural Chinese rewrites so valid contextual cleanup is not discarded unnecessarily.
+
+### Tests
+
+- Shared regression coverage passed locally, including model capability presets, supplier model discovery, manual capability overrides, summary budgeting and voice-expression cleanup.
+- Secret scanning passed with no API keys, local settings, user audio, transcripts or provider response bodies included in the repository.
+- The existing browser-level checks remain dependent on the local Playwright installation; the non-browser regression suite passed.
+
 ## v0.4.9 - 2026-10-03
 
 ### Changed

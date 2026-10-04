@@ -273,7 +273,7 @@ const DEFAULT_SETTINGS = {
   meetingAnalysisBaseUrl: "",
   meetingAnalysisModel: "",
   meetingAnalysisProfiles: {},
-  meetingAnalysisContextWindow: 128000,
+  meetingAnalysisContextWindow: 256000,
   meetingAnalysisMaxOutput: 8192,
   meetingAnalysisReasoning: "",
   meetingAnalysisTimeoutMs: 120000,
@@ -540,7 +540,7 @@ function liveDto(value = {}) {
     : Object.fromEntries(Object.entries(pickMeetingFields(value.audioPaths, ["microphone", "system", "mixed"])).filter(([, file]) => validPath(file)));
   for (const key of ["cleanupProgress", "postprocessProgress"]) {
     dto[key] = Object.fromEntries(Object.entries(pickMeetingFields(value[key], ["completed", "total", "failed", "kind", "stage", "failureCode",
-      "attempt", "retry", "maxRetries", "delayMs", "outputChars", "reasoningChars"]))
+      "attempt", "retry", "maxRetries", "delayMs", "outputChars", "reasoningChars", "validationRetry"]))
       .filter(([field, item]) => ["kind", "stage"].includes(field) ? typeof item === "string"
         : field === "failureCode" ? typeof item === "string" && /^postprocess_[a-z_]+$/.test(item)
         : typeof item === "number" && Number.isFinite(item) && item >= 0));

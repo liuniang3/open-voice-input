@@ -175,10 +175,10 @@ function toFileSummaryDto(value = {}) {
     summary: null,
     error: value.error?.code ? { code: String(value.error.code).slice(0, 100) } : null
   };
-  for (const field of ["attempt", "retry", "maxRetries", "delayMs", "outputChars", "reasoningChars"]) {
+  for (const field of ["attempt", "retry", "maxRetries", "delayMs", "outputChars", "reasoningChars", "validationRetry"]) {
     if (Number.isSafeInteger(value.progress?.[field]) && value.progress[field] >= 0) dto.progress[field] = value.progress[field];
   }
-  if (["connecting", "thinking", "receiving", "waiting", "retrying", "validating", "completed", "idle"].includes(value.progress?.stage)) {
+  if (["connecting", "thinking", "receiving", "waiting", "retrying", "validating", "validation_retry", "completed", "idle"].includes(value.progress?.stage)) {
     dto.progress.stage = value.progress.stage;
   }
   if (summary && typeof summary === "object") {

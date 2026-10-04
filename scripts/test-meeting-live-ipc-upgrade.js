@@ -329,7 +329,7 @@ test("summary cancel IPC is pinned to the stopped session and progress DTOs excl
   const h = mainHarness(); h.context.testState = h.controls.state;
   Object.assign(h.controls.state, { sessionId: "s-current", status: "completed", recording: false, paused: false,
     postprocessStatus: "running", postprocessProgress: { stage: "retrying", retry: 2, maxRetries: 5,
-      outputChars: 200, reasoningChars: 10, content: "PRIVATE", apiKey: "PRIVATE", failureCode: "postprocess_network_error" } });
+      outputChars: 200, reasoningChars: 10, validationRetry: 1, content: "PRIVATE", apiKey: "PRIVATE", failureCode: "postprocess_network_error" } });
   await h.invoke("meeting:live:status");
   h.run("realtimeMeeting.cancelPostprocess = async () => { cancelCalls = (typeof cancelCalls === 'undefined' ? 0 : cancelCalls) + 1; testState.postprocessStatus = 'cancelled'; return testState; }");
   assert.equal((await h.invoke("meeting:live:cancel-summary", { sessionId: "wrong" })).error.code, "live_session_invalid");
@@ -340,6 +340,7 @@ test("summary cancel IPC is pinned to the stopped session and progress DTOs excl
   const result = await h.invoke("meeting:live:cancel-summary", { sessionId: "s-current", apiKey: "PRIVATE" });
   assert.equal(result.postprocessStatus, "cancelled"); assert.equal(h.run("cancelCalls"), 1);
   assert.equal(result.postprocessProgress.retry, 2); assert.equal(result.postprocessProgress.outputChars, 200);
+  assert.equal(result.postprocessProgress.validationRetry, 1);
   assert.equal(result.postprocessProgress.failureCode, "postprocess_network_error");
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE/);
 });

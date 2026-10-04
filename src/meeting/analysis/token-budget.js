@@ -15,7 +15,7 @@ function computeInputBudget({
   budgetRatio = BUDGET_RATIO,
   charsPerToken = CHARS_PER_TOKEN
 } = {}) {
-  const ctx = Number(contextWindowTokens) > 0 ? Number(contextWindowTokens) : 128000;
+  const ctx = Number(contextWindowTokens) > 0 ? Number(contextWindowTokens) : 256000;
   const out = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : 8192;
   const ratio = Number(budgetRatio) > 0 && Number(budgetRatio) <= 1 ? Number(budgetRatio) : BUDGET_RATIO;
   const systemTokens = estimateTokens(systemPrompt, charsPerToken);

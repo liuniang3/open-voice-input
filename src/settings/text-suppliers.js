@@ -13,11 +13,12 @@
 const packageJson = require("../../package.json");
 const { API_STYLES, DEFAULT_CONNECTIONS, connectionBaseUrl, normalizeApiStyle,
   providerFamilyFor, resolveProviderConnection } = require("./provider-connections");
+const { resolveModelCapability } = require("./model-capabilities");
 
 const SUPPLIER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const UNSAFE_IDS = new Set(["__proto__", "prototype", "constructor"]);
 const SECRET_HEADERS = new Set(["authorization", "cookie", "proxy-authorization", "x-api-key"]);
-const CAPABILITY_FIELDS = ["contextWindow", "maxOutput", "reasoning", "timeoutMs", "capabilitySource", "capabilityRevision"];
+const CAPABILITY_FIELDS = ["contextWindow", "maxOutput", "reasoning", "timeoutMs", "capabilitySource", "capabilityRevision", "capabilityManaged"];
 
 const MAX_SUPPLIERS = 64;
 const MAX_MODELS_PER_CATALOG = 1000;
@@ -166,7 +167,9 @@ function sanitizeCapabilities(value, models) {
     const entry = {};
     for (const field of CAPABILITY_FIELDS) {
       const fieldValue = capability[field];
-      if (Number.isSafeInteger(fieldValue) && fieldValue > 0) {
+      if (field === "capabilityManaged" && typeof fieldValue === "boolean") {
+        entry[field] = fieldValue;
+      } else if (Number.isSafeInteger(fieldValue) && fieldValue > 0) {
         entry[field] = Math.floor(fieldValue);
       } else if (field === "reasoning" || field === "capabilitySource" || field === "capabilityRevision") {
         const text = trimStr(fieldValue).slice(0, 32);
@@ -187,9 +190,22 @@ function sanitizeCapabilities(value, models) {
 function normalizeCatalogEntry(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const models = sanitizeCatalogModels(raw.models);
+  const provided = sanitizeCapabilities(raw.capabilities, models);
+  const capabilities = {};
+  for (const model of models) {
+    const capability = provided[model];
+    if (capability?.capabilityManaged === false) {
+      capabilities[model] = capability;
+      continue;
+    }
+    capabilities[model] = {
+      ...resolveModelCapability(model, capability),
+      capabilityManaged: true
+    };
+  }
   return {
     models,
-    capabilities: sanitizeCapabilities(raw.capabilities, models),
+    capabilities,
     updatedAt: trimStr(raw.updatedAt).slice(0, 64)
   };
 }
@@ -214,6 +230,15 @@ function applySupplierCatalog(settings, supplierId, payload = {}) {
   const current = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
   const catalogs = current.textSupplierCatalogs && typeof current.textSupplierCatalogs === "object"
     && !Array.isArray(current.textSupplierCatalogs) ? { ...current.textSupplierCatalogs } : {};
+  const previous = normalizeCatalogEntry(catalogs[id]);
+  if (previous) {
+    for (const model of entry.models) {
+      const previousCapability = previous.capabilities[model];
+      if (previousCapability?.capabilityManaged === false) {
+        entry.capabilities[model] = previousCapability;
+      }
+    }
+  }
   catalogs[id] = entry;
   return { ...current, textSupplierCatalogs: catalogs };
 }

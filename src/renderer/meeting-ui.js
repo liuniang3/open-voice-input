@@ -1114,9 +1114,12 @@ function seekMsFromTranscriptItem(item) {
 function summaryProgressText(progress = {}) {
   const chars = Math.max(0, Math.floor(Number(progress.outputChars) || 0));
   const labels = { connecting: "正在连接模型", thinking: "模型正在思考", receiving: `流式接收中 · 已接收 ${chars} 字符`,
-    waiting: "模型暂未返回新内容，继续等待中，可取消后重试", validating: "正在校验摘要" };
+    waiting: "模型暂未返回新内容，继续等待中，可取消后重试", validating: "正在校验摘要",
+    validation_retry: "摘要格式不符，正在自动重新生成（1/1）" };
   if (progress.stage === "retrying") return `连接中断或服务繁忙 · 重试 ${progress.retry || 1}/${progress.maxRetries || 5} · ${Math.ceil((progress.delayMs || 0) / 1000)} 秒后重新请求`;
-  return labels[progress.stage] || "";
+  const label = labels[progress.stage] || "";
+  return label && progress.validationRetry > 0 && progress.stage !== "validation_retry"
+    ? `格式重试 1/1 · ${label}` : label;
 }
 
 function summaryErrorText(code) {
@@ -1129,7 +1132,10 @@ function summaryErrorText(code) {
     postprocess_credentials_invalid: "模型认证失败，请检查供应商地址及密钥",
     postprocess_credentials_missing: "尚未配置模型密钥",
     postprocess_rate_limited: "供应商限流，重试机会已用完",
-    postprocess_invalid_json: "模型结果格式校验失败",
+    postprocess_invalid_json: "模型返回的 JSON 不完整或语法不正确",
+    postprocess_schema_invalid: "模型返回的摘要字段结构不符合要求",
+    postprocess_structure_limit: "模型返回的段落、节点或引用长度超出限制",
+    postprocess_unsafe_json: "模型返回了不安全的 JSON 字段，已拒绝使用",
     postprocess_evidence_invalid: "摘要引用校验失败",
     postprocess_evidence_limit: "摘要引用超出安全上限",
     postprocess_response_failed: "供应商返回生成失败",

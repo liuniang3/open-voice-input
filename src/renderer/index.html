@@ -133,7 +133,6 @@
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="connections">语言处理供应商</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="asr">语音识别</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="cleaner">表达整理</button>
-          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="meeting">会议</button>
           <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="updates">关于与更新</button>
         </nav>
 
@@ -217,6 +216,30 @@
                   <div class="text-supplier-catalog-summary">
                     <div><strong>模型目录</strong><span id="textSupplierCatalogMeta">尚未同步</span></div>
                     <div id="textSupplierModelPreview" class="text-supplier-model-preview"></div>
+                  </div>
+                  <div class="model-capability-editor" aria-labelledby="textSupplierCapabilityTitle">
+                    <div class="section-title">
+                      <strong id="textSupplierCapabilityTitle">模型能力参数</strong>
+                      <span>自动获取或预设的值可以按模型单独修改。</span>
+                    </div>
+                    <label class="field">
+                      <span>模型</span>
+                      <select id="textSupplierCapabilityModel" disabled></select>
+                    </label>
+                    <div class="provider-grid">
+                      <label class="field">
+                        <span>上下文窗口（tokens）</span>
+                        <input id="textSupplierCapabilityContext" type="number" min="4096" step="1024" placeholder="256000" disabled />
+                      </label>
+                      <label class="field">
+                        <span>最大输出（tokens）</span>
+                        <input id="textSupplierCapabilityMaxOutput" type="number" min="256" step="256" placeholder="8192" disabled />
+                      </label>
+                    </div>
+                    <div class="settings-actions model-capability-actions">
+                      <button id="textSupplierCapabilitySave" type="button" disabled>保存模型参数</button>
+                      <span id="textSupplierCapabilityStatus" class="model-catalog-status" role="status" aria-live="polite"></span>
+                    </div>
                   </div>
                   <label class="field"><span>测试模型</span><select id="textSupplierTestModel" disabled></select></label>
                   <div class="settings-actions text-supplier-actions"><button id="textSupplierRefresh" type="button" disabled><span class="ui-icon icon-refresh" aria-hidden="true"></span>同步模型</button><button id="textSupplierTest" type="button" disabled><span class="ui-icon icon-link" aria-hidden="true"></span>测试连接</button></div>
@@ -392,6 +415,75 @@
                 </div>
               </div>
             </section>
+            <section class="settings-group">
+              <div class="section-title">
+                <strong>会议与文件摘要</strong>
+                <span>生成摘要时使用此模型；实时会议与文件转写共用选择。</span>
+              </div>
+              <div class="provider-grid text-model-picker">
+                <label class="field"><span>供应商</span><select id="summarySupplierSelect"></select></label>
+                <label class="field"><span>模型</span><select id="summaryModelSelect"></select></label>
+              </div>
+              <label id="summaryCustomModelField" class="field" hidden><span>自定义模型 ID</span><input id="summaryCustomModelInput" type="text" maxlength="256" autocomplete="off" /></label>
+              <small id="summaryModelHint" class="model-catalog-status" role="status"></small>
+              <div class="field legacy-text-config" hidden>
+                <label for="meetingAnalysisModelPresetSelect">分析模型</label>
+                <div class="model-select-control">
+                  <select id="meetingAnalysisModelPresetSelect"><option value="__custom__">自定义模型</option></select>
+                  <button type="button" class="model-refresh-btn" data-provider-model-refresh="analysis" title="从当前供应商接口获取模型列表">获取模型</button>
+                </div>
+                <small class="model-catalog-status" data-provider-model-status="analysis" aria-live="polite"></small>
+              </div>
+              <label class="field legacy-text-config" hidden>
+                <span>连接类型</span>
+                <select id="meetingAnalysisProviderSelect">
+                  <option value="openai-compatible">OpenAI</option>
+                  <option value="mimo">MiMo</option>
+                  <option value="opencode-go">兼容旧供应商配置</option>
+                  <option value="custom">自定义兼容接口</option>
+                </select>
+              </label>
+              <label id="meetingAnalysisCustomModelField" class="field legacy-text-config" hidden>
+                <span>自定义分析模型 ID</span>
+                <input id="meetingAnalysisModelInput" type="text" placeholder="输入模型 ID" autocomplete="off" />
+              </label>
+              <div id="meetingAnalysisCustomConnectionFields" class="custom-connection-fields legacy-text-config" hidden>
+                <p class="settings-note">仅此模型使用以下自定义连接，不会修改 OpenAI 或 MiMo 配置。</p>
+                <label class="field">
+                  <span>自定义 Base URL</span>
+                  <input id="meetingAnalysisBaseUrlInput" type="url" placeholder="https://example.com/v1" autocomplete="off" />
+                </label>
+                <div class="field">
+                  <label for="meetingAnalysisApiKeyInput">自定义 API Key</label>
+                  <div class="secret-control">
+                    <input id="meetingAnalysisApiKeyInput" type="password" placeholder="仅当前自定义模型使用" autocomplete="off" />
+                    <button type="button" class="secret-action" data-secret-toggle="meetingAnalysisApiKeyInput" title="显示或隐藏自定义 API Key">显示</button>
+                    <button type="button" class="secret-action" data-secret-copy="meetingAnalysisApiKeyInput" title="复制自定义 API Key">复制</button>
+                  </div>
+                </div>
+              </div>
+              <div class="provider-grid">
+                <label class="field">
+                  <span>上下文窗口（tokens）</span>
+                  <input id="meetingAnalysisContextInput" type="number" min="1024" step="1024" placeholder="256000" />
+                </label>
+                <label class="field">
+                  <span>最大输出</span>
+                  <input id="meetingAnalysisMaxOutputInput" type="number" min="256" step="256" placeholder="8192" />
+                </label>
+              </div>
+              <div class="provider-grid">
+                <label class="field">
+                  <span>推理等级</span>
+                  <input id="meetingAnalysisReasoningInput" type="text" placeholder="可选 high / medium / low" autocomplete="off" />
+                </label>
+                <label class="field">
+                  <span>超时（ms）</span>
+                  <input id="meetingAnalysisTimeoutInput" type="number" min="5000" step="1000" placeholder="180000" />
+                </label>
+              </div>
+              <small id="meetingAnalysisCapabilityHint" class="model-catalog-status" aria-live="polite"></small>
+            </section>
           </div>
 
           <div class="settings-tab-panel" role="tabpanel" data-settings-panel="meeting" hidden>
@@ -539,75 +631,6 @@
                 <button type="button" id="meetingOssTestBtn">测试 OSS</button>
                 <span id="meetingOssTestResult" class="meeting-test-result" aria-live="polite"></span>
               </div>
-            </section>
-            <section class="settings-group">
-              <div class="section-title">
-                <strong>会议与文件摘要</strong>
-                <span>生成摘要时使用此模型；实时会议与文件转写共用选择。</span>
-              </div>
-              <div class="provider-grid text-model-picker">
-                <label class="field"><span>供应商</span><select id="summarySupplierSelect"></select></label>
-                <label class="field"><span>模型</span><select id="summaryModelSelect"></select></label>
-              </div>
-              <label id="summaryCustomModelField" class="field" hidden><span>自定义模型 ID</span><input id="summaryCustomModelInput" type="text" maxlength="256" autocomplete="off" /></label>
-              <small id="summaryModelHint" class="model-catalog-status" role="status"></small>
-              <div class="field legacy-text-config" hidden>
-                <label for="meetingAnalysisModelPresetSelect">分析模型</label>
-                <div class="model-select-control">
-                  <select id="meetingAnalysisModelPresetSelect"><option value="__custom__">自定义模型</option></select>
-                    <button type="button" class="model-refresh-btn" data-provider-model-refresh="analysis" title="从当前供应商接口获取模型列表">获取模型</button>
-                  </div>
-                <small class="model-catalog-status" data-provider-model-status="analysis" aria-live="polite"></small>
-              </div>
-              <label class="field legacy-text-config" hidden>
-                <span>连接类型</span>
-                <select id="meetingAnalysisProviderSelect">
-                  <option value="openai-compatible">OpenAI</option>
-                  <option value="mimo">MiMo</option>
-                  <option value="opencode-go">兼容旧供应商配置</option>
-                  <option value="custom">自定义兼容接口</option>
-                </select>
-              </label>
-              <label id="meetingAnalysisCustomModelField" class="field legacy-text-config" hidden>
-                <span>自定义分析模型 ID</span>
-                <input id="meetingAnalysisModelInput" type="text" placeholder="输入模型 ID" autocomplete="off" />
-              </label>
-              <div id="meetingAnalysisCustomConnectionFields" class="custom-connection-fields legacy-text-config" hidden>
-                <p class="settings-note">仅此模型使用以下自定义连接，不会修改 OpenAI 或 MiMo 配置。</p>
-                <label class="field">
-                  <span>自定义 Base URL</span>
-                  <input id="meetingAnalysisBaseUrlInput" type="url" placeholder="https://example.com/v1" autocomplete="off" />
-                </label>
-                <div class="field">
-                  <label for="meetingAnalysisApiKeyInput">自定义 API Key</label>
-                  <div class="secret-control">
-                    <input id="meetingAnalysisApiKeyInput" type="password" placeholder="仅当前自定义模型使用" autocomplete="off" />
-                    <button type="button" class="secret-action" data-secret-toggle="meetingAnalysisApiKeyInput" title="显示或隐藏自定义 API Key">显示</button>
-                    <button type="button" class="secret-action" data-secret-copy="meetingAnalysisApiKeyInput" title="复制自定义 API Key">复制</button>
-                  </div>
-                </div>
-              </div>
-              <div class="provider-grid">
-                <label class="field">
-                  <span>上下文窗口（tokens）</span>
-                  <input id="meetingAnalysisContextInput" type="number" min="1024" step="1024" placeholder="128000" />
-                </label>
-                <label class="field">
-                  <span>最大输出</span>
-                  <input id="meetingAnalysisMaxOutputInput" type="number" min="256" step="256" placeholder="8192" />
-                </label>
-              </div>
-              <div class="provider-grid">
-                <label class="field">
-                  <span>推理等级</span>
-                  <input id="meetingAnalysisReasoningInput" type="text" placeholder="可选 high / medium / low" autocomplete="off" />
-                </label>
-                <label class="field">
-                  <span>超时（ms）</span>
-                  <input id="meetingAnalysisTimeoutInput" type="number" min="5000" step="1000" placeholder="180000" />
-                </label>
-              </div>
-              <small id="meetingAnalysisCapabilityHint" class="model-catalog-status" aria-live="polite"></small>
             </section>
           </div>
 

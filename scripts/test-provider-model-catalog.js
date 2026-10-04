@@ -30,7 +30,7 @@ assert.equal(catalog.capabilities["provider-model"].contextWindow, 256000);
 assert.equal(catalog.capabilities["provider-model"].maxOutput, 24000);
 assert.equal(catalog.capabilities["provider-model"].capabilitySource, "provider");
 assert.equal(catalog.capabilities["grok-4.5"].contextWindow, 500000);
-assert.equal(catalog.capabilities["unknown-model"].contextWindow, 128000);
+assert.equal(catalog.capabilities["unknown-model"].contextWindow, 256000);
 
 async function main() {
   const calls = [];

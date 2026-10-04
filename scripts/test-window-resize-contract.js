@@ -102,7 +102,6 @@ async function verifyResponsiveWindows() {
         await page.locator('[data-settings-tab="cleaner"]').click();
         await page.locator("#cleanupSupplierSelect").selectOption("resize-vendor");
         await page.locator("#cleanupModelSelect").selectOption("custom-text-model");
-        await page.locator('[data-settings-tab="meeting"]').click();
         await page.locator("#summarySupplierSelect").selectOption("resize-vendor");
         await page.locator("#summaryModelSelect").selectOption("custom-text-model");
         await page.locator('[data-settings-tab="cleaner"]').click();

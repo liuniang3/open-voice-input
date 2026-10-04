@@ -1,9 +1,9 @@
 "use strict";
 
-const CAPABILITY_PRESET_REVISION = 2;
+const CAPABILITY_PRESET_REVISION = 3;
 
 const GENERIC_MODEL_CAPABILITY = Object.freeze({
-  contextWindow: 128000,
+  contextWindow: 256000,
   maxOutput: 8192,
   reasoning: "",
   timeoutMs: 180000,
@@ -75,6 +75,96 @@ const MODEL_CAPABILITY_PRESETS = Object.freeze([
     pattern: /(?:^|\/)gpt-5\.(?:4-mini|5)(?:$|[-_:])/i,
     capability: {
       contextWindow: 230000,
+      maxOutput: 32768,
+      reasoning: "",
+      timeoutMs: 300000,
+      capabilitySource: "compatibility"
+    }
+  },
+  {
+    pattern: /(?:^|\/)gpt-4\.1(?:-(?:mini|nano))?(?:$|[-_:])/i,
+    capability: {
+      contextWindow: 1048576,
+      maxOutput: 32768,
+      reasoning: "",
+      timeoutMs: 300000,
+      capabilitySource: "compatibility"
+    }
+  },
+  {
+    pattern: /(?:^|\/)gpt-4o(?:-(?:mini|audio|realtime))?(?:$|[-_:])/i,
+    capability: {
+      contextWindow: 128000,
+      maxOutput: 16384,
+      reasoning: "",
+      timeoutMs: 300000,
+      capabilitySource: "compatibility"
+    }
+  },
+  {
+    pattern: /(?:^|\/)(?:o3|o4-mini)(?:$|[-_:])/i,
+    capability: {
+      contextWindow: 200000,
+      maxOutput: 32768,
+      reasoning: "high",
+      timeoutMs: 300000,
+      capabilitySource: "compatibility"
+    }
+  },
+  {
+    pattern: /(?:^|\/)(?:gemini-2\.5-(?:pro|flash|flash-lite)|gemini-2\.0-(?:pro|flash))(?:$|[-_:])/i,
+    capability: {
+      contextWindow: 1048576,
+      maxOutput: 65536,
+      reasoning: "",
+      timeoutMs: 300000,
+      capabilitySource: "compatibility"
+    }
+  },
+  {
+    pattern: /(?:^|\/)(?:claude-(?:3(?:\.5|\.7)?|4(?:\.0)?)(?:-(?:sonnet|opus|haiku))?)(?:$|[-_:])/i,
+    capability: {
+      contextWindow: 200000,
+      maxOutput: 32768,
+      reasoning: "",
+      timeoutMs: 300000,
+      capabilitySource: "compatibility"
+    }
+  },
+  {
+    pattern: /(?:^|\/)(?:qwen3(?:-[a-z0-9.-]+)?|qwen-(?:plus|max|turbo|long)|qwen-plus|qwen-max|qwen-turbo)(?:$|[-_:])/i,
+    capability: {
+      contextWindow: 256000,
+      maxOutput: 32768,
+      reasoning: "",
+      timeoutMs: 300000,
+      capabilitySource: "compatibility"
+    }
+  },
+  {
+    pattern: /(?:^|\/)(?:glm-4\.(?:5|6)|glm-4)(?:$|[-_:])/i,
+    capability: {
+      contextWindow: 256000,
+      maxOutput: 32768,
+      reasoning: "",
+      timeoutMs: 300000,
+      capabilitySource: "compatibility"
+    }
+  },
+  {
+    pattern: /(?:^|\/)(?:deepseek-(?:v3|v3\.1|chat|reasoner))(?:$|[-_:])/i,
+    capability: {
+      contextWindow: 128000,
+      maxOutput: 8192,
+      reasoning: "",
+      timeoutMs: 300000,
+      capabilitySource: "compatibility"
+    }
+  },
+  {
+    pattern: /(?:^|\/)(?:kimi-k2|moonshot-v1|moonshot-v1-\d+k)(?:$|[-_:])/i,
+    capability: {
+      contextWindow: 256000,
       maxOutput: 32768,
       reasoning: "",
       timeoutMs: 300000,

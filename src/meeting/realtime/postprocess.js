@@ -43,8 +43,9 @@ function digest(value) { return crypto.createHash("sha256").update(JSON.stringif
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function requireValue(test, code = "postprocess_invalid_json") { if (!test) throw fault(code); }
 function textValue(value, max = 12000, empty = false) {
-  requireValue(typeof value === "string" && value.length <= max && (empty || value.trim().length > 0)
+  requireValue(typeof value === "string" && (empty || value.trim().length > 0)
     && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value));
+  requireValue(value.length <= max, "postprocess_structure_limit");
   return value;
 }
 function object(value) { requireValue(value && typeof value === "object" && !Array.isArray(value)); }
@@ -56,13 +57,23 @@ function boundedJson(response, max) {
   let serialized;
   try { serialized = typeof response === "string" ? response : JSON.stringify(response); }
   catch { throw fault("postprocess_invalid_json"); }
-  requireValue(typeof serialized === "string" && serialized.length <= max);
+  requireValue(typeof serialized === "string");
+  // Accept only a complete, standalone JSON envelope, never extract a fragment
+  // from commentary or repair truncated JSON. Bound the raw envelope as well.
+  requireValue(serialized.length <= max + 32, "postprocess_output_limit");
+  let json = serialized.replace(/^\uFEFF/, "").trim();
+  const fenced = /^```(?:json)?[ \t]*\r?\n([\s\S]*)\r?\n```$/i.exec(json);
+  if (fenced) json = fenced[1].trim();
+  requireValue(json.length <= max, "postprocess_output_limit");
   try {
-    return JSON.parse(serialized, (key, value) => {
-      requireValue(!["__proto__", "prototype", "constructor"].includes(key));
+    return JSON.parse(json, (key, value) => {
+      requireValue(!["__proto__", "prototype", "constructor"].includes(key), "postprocess_unsafe_json");
       return value;
     });
-  } catch { throw fault("postprocess_invalid_json"); }
+  } catch (error) {
+    if (error.code === "postprocess_unsafe_json") throw error;
+    throw fault("postprocess_invalid_json");
+  }
 }
 
 async function atomicJson(file, value) {
@@ -108,6 +119,27 @@ the readable paragraph text. When reducing earlier chunks, integrate their artic
 dropping significant details or presenting compressed notes as new facts.
 Return one JSON object matching outputSchema, no markdown, HTML, links or extra keys.
 Keep the whole response within maxOutputChars and leave room for evidence and the mindmap.`;
+
+// Put transport-independent constraints in the system prompt, not task input:
+// existing validated checkpoints must keep their identity and remain reusable.
+function summaryRules(limits) {
+  return `${SUMMARY_RULES}
+Validation contract: title <= 300 characters; each paragraph.text <= ${limits.paragraphChars}
+characters; each mindmap text and evidence quote <= ${limits.fragmentChars} characters;
+section heading and evidence sourceId <= 200 characters.
+Use at most ${limits.maxNodes} total paragraphs plus mindmap nodes, mindmap depth <= ${limits.maxDepth}
+(root depth is 0), and 1..${limits.maxEvidence} evidence entries per paragraph or node.
+Every node, including leaves, needs text, evidence, uncertain (a boolean), and children (an array).
+Every paragraph needs text, evidence and uncertain (a boolean). Every section needs heading,
+paragraphs and items: []. Evidence entries have only sourceId and quote; sourceId must exactly
+match a supplied item.id, not an index, timestamp or invented ID. Split long prose into connected
+paragraphs without dropping substantive content. The entire serialized JSON, including string
+escaping, evidence and mindmap, must fit within maxOutputChars.`;
+}
+const VALIDATION_RETRY_CODES = new Set([
+  "postprocess_invalid_json", "postprocess_schema_invalid", "postprocess_structure_limit", "postprocess_evidence_invalid"
+]);
+const VALIDATION_RETRY_RULE = "The previous response failed local JSON/schema validation. Regenerate from the original input, following every validation limit. Return only complete JSON with all required fields, exact source IDs, and no extra keys.";
 
 const CLAIM_SCHEMA = { text: "supported text", evidence: [{ sourceId: "input id", quote: "exact substring" }], uncertain: false };
 const SUMMARY_SCHEMA = { title: "topic", mindmap: { ...CLAIM_SCHEMA, children: [] },
@@ -260,43 +292,48 @@ function validateReconciliation(response, target, sources, limits, modelId) {
 
 function validateSummary(response, items, limits) {
   const value = boundedJson(response, limits.maxOutputChars);
-  // Some compatible reasoning models echo these two input metadata fields even
-  // when instructed to follow outputSchema. They are validated and discarded;
-  // every content-bearing field remains strict.
-  keys(value, ["title", "mindmap", "sections", "sourceIncomplete", "missingRangeCount"]);
-  if (Object.hasOwn(value, "sourceIncomplete")) requireValue(typeof value.sourceIncomplete === "boolean");
-  if (Object.hasOwn(value, "missingRangeCount")) {
-    requireValue(Number.isSafeInteger(value.missingRangeCount) && value.missingRangeCount >= 0);
-  }
-  const sources = new Map(items.map(item => [item.id, item]));
-  let count = 0;
-  function claim(input, depth, tree, maxText = limits.fragmentChars) {
-    requireValue(++count <= limits.maxNodes && depth <= limits.maxDepth);
-    keys(input, tree ? ["text", "evidence", "uncertain", "children"] : ["text", "evidence", "uncertain"]);
-    const text = textValue(input.text, maxText);
-    requireValue(typeof input.uncertain === "boolean");
-    const evidence = validateEvidence(input.evidence, sources, limits);
-    const provenance = evidence.items;
-    const uncertain = input.uncertain || input.evidence.some(entry => sources.get(entry.sourceId).uncertain);
-    const result = { text, provenance, uncertain: Boolean(uncertain || evidence.repaired) };
-    if (tree) {
-      requireValue(Array.isArray(input.children) && input.children.length <= limits.maxNodes);
-      result.children = input.children.map(child => claim(child, depth + 1, true));
+  try {
+    // Some compatible reasoning models echo these two input metadata fields even
+    // when instructed to follow outputSchema. They are validated and discarded;
+    // every content-bearing field remains strict.
+    keys(value, ["title", "mindmap", "sections", "sourceIncomplete", "missingRangeCount"]);
+    if (Object.hasOwn(value, "sourceIncomplete")) requireValue(typeof value.sourceIncomplete === "boolean");
+    if (Object.hasOwn(value, "missingRangeCount")) {
+      requireValue(Number.isSafeInteger(value.missingRangeCount) && value.missingRangeCount >= 0);
     }
-    return result;
+    const sources = new Map(items.map(item => [item.id, item]));
+    let count = 0;
+    function claim(input, depth, tree, maxText = limits.fragmentChars) {
+      requireValue(++count <= limits.maxNodes && depth <= limits.maxDepth, "postprocess_structure_limit");
+      keys(input, tree ? ["text", "evidence", "uncertain", "children"] : ["text", "evidence", "uncertain"]);
+      const text = textValue(input.text, maxText);
+      requireValue(typeof input.uncertain === "boolean");
+      const evidence = validateEvidence(input.evidence, sources, limits);
+      const provenance = evidence.items;
+      const uncertain = input.uncertain || input.evidence.some(entry => sources.get(entry.sourceId).uncertain);
+      const result = { text, provenance, uncertain: Boolean(uncertain || evidence.repaired) };
+      if (tree) {
+        requireValue(Array.isArray(input.children) && input.children.length <= limits.maxNodes);
+        result.children = input.children.map(child => claim(child, depth + 1, true));
+      }
+      return result;
+    }
+    requireValue(Array.isArray(value.sections) && value.sections.length > 0 && value.sections.length <= 30);
+    const mindmap = claim(value.mindmap, 0, true);
+    const paragraphs = value.sections.flatMap(section => {
+        keys(section, ["heading", "paragraphs", "items"]);
+        textValue(section.heading, 200);
+        requireValue(Array.isArray(section.items) && section.items.length === 0);
+        requireValue(Array.isArray(section.paragraphs) && section.paragraphs.length >= 1
+          && section.paragraphs.length <= limits.maxNodes);
+        return section.paragraphs.map(item => claim(item, 0, false, limits.paragraphChars));
+      });
+    return { title: textValue(value.title, 300), mindmap,
+      sections: [{ heading: "正文", paragraphs, items: [] }] };
+  } catch (error) {
+    if (error.code === "postprocess_invalid_json") throw fault("postprocess_schema_invalid");
+    throw error;
   }
-  requireValue(Array.isArray(value.sections) && value.sections.length > 0 && value.sections.length <= 30);
-  const mindmap = claim(value.mindmap, 0, true);
-  const paragraphs = value.sections.flatMap(section => {
-      keys(section, ["heading", "paragraphs", "items"]);
-      textValue(section.heading, 200);
-      requireValue(Array.isArray(section.items) && section.items.length === 0);
-      requireValue(Array.isArray(section.paragraphs) && section.paragraphs.length >= 1
-        && section.paragraphs.length <= limits.maxNodes);
-      return section.paragraphs.map(item => claim(item, 0, false, limits.paragraphChars));
-    });
-  return { title: textValue(value.title, 300), mindmap,
-    sections: [{ heading: "正文", paragraphs, items: [] }] };
 }
 
 // The UI should still use textContent. This export also makes legacy HTML interpolation inert;
@@ -516,7 +553,7 @@ function createMeetingPostprocessService({ sessionDir, getState, audio, asr, llm
     await saveManifest(env);
     env.requests++;
     let result;
-    try { result = await request(env, signal => run(signal), managedTransport); }
+    try { result = await request(env, signal => run(signal, entry), managedTransport); }
     catch (error) {
       entry.status = "failed";
       const errorCode = ({ request_timeout: "postprocess_timeout", connection_timeout: "postprocess_connection_timeout",
@@ -527,7 +564,8 @@ function createMeetingPostprocessService({ sessionDir, getState, audio, asr, llm
       })[error?.code] || (error?.status === 401 || error?.status === 403 ? "postprocess_credentials_invalid"
         : error?.status === 429 ? "postprocess_rate_limited" : error?.code);
       entry.error = { code: env.signal.aborted ? "postprocess_cancelled" :
-        ["postprocess_invalid_json", "postprocess_evidence_invalid", "postprocess_evidence_limit", "postprocess_timeout", "postprocess_audio_limit",
+        ["postprocess_invalid_json", "postprocess_schema_invalid", "postprocess_structure_limit", "postprocess_unsafe_json",
+          "postprocess_evidence_invalid", "postprocess_evidence_limit", "postprocess_timeout", "postprocess_audio_limit",
           "postprocess_connection_timeout", "postprocess_stream_idle", "postprocess_network_error", "postprocess_response_incomplete",
           "postprocess_output_limit", "postprocess_context_limit", "postprocess_credentials_missing", "postprocess_credentials_invalid",
           "postprocess_rate_limited", "postprocess_response_failed"].includes(errorCode)
@@ -565,30 +603,52 @@ function createMeetingPostprocessService({ sessionDir, getState, audio, asr, llm
     return { ...clone(status), result };
   }
   async function llmTask(env, id, taskName, input, validate) {
-    const system = taskName === "reconcile" ? RECONCILE_RULES : SUMMARY_RULES;
+    const isSummary = taskName !== "reconcile";
+    const system = isSummary ? summaryRules(limits) : RECONCILE_RULES;
     const body = { ...input, context: env.context, maxOutputChars: limits.maxOutputChars };
     const messages = [{ role: "system", content: system }, { role: "user", content: JSON.stringify(body) }];
-    requireValue(JSON.stringify(messages).length <= limits.maxInputChars, "postprocess_input_limit");
-    if (limits.inputTokenBudget) requireValue(estimateTokens(messages) <= limits.inputTokenBudget, "postprocess_input_limit");
+    const fits = candidate => JSON.stringify(candidate).length <= limits.maxInputChars
+      && (!limits.inputTokenBudget || estimateTokens(candidate) <= limits.inputTokenBudget);
+    requireValue(fits(messages), "postprocess_input_limit");
+    const retryMessages = [{ role: "system", content: `${system}\n${VALIDATION_RETRY_RULE}` }, messages[1]];
     let lastProgress = 0;
-    return task(env, id, body, async signal => {
+    return task(env, id, body, async (signal, entry) => {
       update({ progress: { ...status.progress, stage: "connecting", attempt: 0, retry: 0, maxRetries: 5,
-        delayMs: 0, outputChars: 0, reasoningChars: 0 } });
-      return validate(await llm.complete({
-      task: taskName, messages, input: body, maxOutputChars: limits.maxOutputChars, signal,
-      onProgress: progress => {
-        if (signal.aborted) return;
-        const stage = ["connecting", "thinking", "receiving", "waiting", "retrying", "validating"].includes(progress?.stage) ? progress.stage : "thinking";
-        const now = Date.now();
-        if (stage === status.progress.stage && now - lastProgress < 250) return;
-        lastProgress = now;
-        const safe = { stage };
-        for (const field of ["attempt", "retry", "maxRetries", "delayMs", "outputChars", "reasoningChars"]) {
-          if (Number.isSafeInteger(progress?.[field]) && progress[field] >= 0) safe[field] = progress[field];
+        delayMs: 0, outputChars: 0, reasoningChars: 0, validationRetry: 0 } });
+      for (let validationRetry = 0; ; validationRetry++) {
+        if (signal.aborted) throw fault("postprocess_cancelled");
+        const response = await llm.complete({
+          task: taskName, messages: validationRetry ? retryMessages : messages, input: body,
+          maxOutputChars: limits.maxOutputChars, signal,
+          onProgress: progress => {
+            if (signal.aborted) return;
+            const stage = ["connecting", "thinking", "receiving", "waiting", "retrying", "validating"].includes(progress?.stage) ? progress.stage : "thinking";
+            const now = Date.now();
+            if (stage === status.progress.stage && now - lastProgress < 250) return;
+            lastProgress = now;
+            const safe = { stage };
+            for (const field of ["attempt", "retry", "maxRetries", "delayMs", "outputChars", "reasoningChars"]) {
+              if (Number.isSafeInteger(progress?.[field]) && progress[field] >= 0) safe[field] = progress[field];
+            }
+            update({ progress: { ...status.progress, ...safe } });
+          }
+        });
+        if (signal.aborted) throw fault("postprocess_cancelled");
+        try { return validate(response); }
+        catch (error) {
+          // One bounded regeneration, using the same immutable inputs/model.
+          // Never send the invalid response back as instructions or persist it.
+          if (!isSummary || validationRetry || !VALIDATION_RETRY_CODES.has(error.code)
+            || env.requests >= limits.maxRequestsPerRun || !fits(retryMessages)) throw error;
+          env.requests++;
+          entry.attempts++;
+          await saveManifest(env);
+          if (signal.aborted) throw fault("postprocess_cancelled");
+          lastProgress = 0;
+          update({ progress: { ...status.progress, stage: "validation_retry", validationRetry: 1,
+            attempt: 0, retry: 0, delayMs: 0, outputChars: 0, reasoningChars: 0 } });
         }
-        update({ progress: { ...status.progress, ...safe } });
       }
-      }));
     }, llm.managesTransport === true);
   }
 
@@ -817,7 +877,7 @@ function createMeetingPostprocessService({ sessionDir, getState, audio, asr, llm
         let group = [];
         function fits(candidate) {
           if (!limits.inputTokenBudget) return JSON.stringify(candidate.map(publicItem)).length <= limits.maxInputChars / 2;
-          const messages = [{ role: "system", content: SUMMARY_RULES }, { role: "user", content: JSON.stringify(
+          const messages = [{ role: "system", content: summaryRules(limits) }, { role: "user", content: JSON.stringify(
             summaryInput(SUMMARY_SCHEMA, candidate.map(publicItem), env.context, limits, sourceIncomplete,
               gaps.filter(gap => !gap.resolvedByReview).length)) }];
           return JSON.stringify(messages).length <= limits.maxInputChars && estimateTokens(messages) <= limits.inputTokenBudget;
@@ -982,8 +1042,11 @@ function createMeetingPostprocessor({ sessionDir, getState, readMixed, review: r
             const response = await llmImpl({ task, messages, input, signal, onProgress,
               stream: managesTransport, maxTokens: maxOutputTokens });
             if (typeof response === "string") return response;
-            requireValue(response && (!response.finishReason || response.finishReason === "stop")
-              && (!response.finish_reason || response.finish_reason === "stop"), "postprocess_invalid_json");
+            requireValue(response, "postprocess_response_incomplete");
+            for (const finish of [response.finishReason, response.finish_reason]) {
+              if (finish && finish !== "stop") throw fault(finish === "length"
+                ? "postprocess_output_limit" : "postprocess_response_failed");
+            }
             return response.content;
           } }
       });
