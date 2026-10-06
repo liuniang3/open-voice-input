@@ -31,15 +31,24 @@ async function run() {
   assert.match(main, /else showWindowOnly\(\)/);
   assert.match(html, /homeHotkeyEdit/);
   assert.doesNotMatch(html.slice(html.indexOf('id="homePanel"'), html.indexOf('id="onboardingPanel"')), /id="recordBtn"/);
+  const featureCards = html.match(/<div class="home-feature-grid">([\s\S]*?)<\/div>/)[1];
+  assert.equal((featureCards.match(/<button\b/g) || []).length, 2, "each feature is a single button, without nested controls");
+  for (const id of ["homeFileOpen", "homeMeetingOpen"]) assert.match(featureCards, new RegExp(`<button id="${id}"`));
+  assert.doesNotMatch(featureCards, /选择文件|开始会议|进入会议/);
 
   const nodes = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(match => [match[1], element()]));
   const pending = [];
   const historyNavigation = [];
+  const workspaceNavigation = [];
   let historyRows = [];
   let historyFailed = false;
   let historyUpdated;
   const ui = createHomeUi({ document: { getElementById: id => nodes.get(id), createElement: element },
-    setInterval: () => 1, clearInterval() {}, setSettingsTab: (...args) => historyNavigation.push(args), mimoInput: {
+    setInterval: () => 1, clearInterval() {}, setSettingsTab: (...args) => historyNavigation.push(args),
+    FileTranscriptionUi: {
+      openWorkspace: async () => workspaceNavigation.push("file"),
+      chooseFile: async () => workspaceNavigation.push("unexpected-file-picker")
+    }, mimoInput: {
       getHomeOverview: () => new Promise(resolve => pending.push(resolve)),
       listVoiceHistory: async payload => {
         assert.deepEqual(payload, { limit: 6 });
@@ -47,6 +56,7 @@ async function run() {
         return { ok: true, entries: historyRows, total: historyRows.length };
       },
       openSettings: async () => historyNavigation.push("settings"),
+      openMeetingWorkspace: async () => workspaceNavigation.push("meeting"),
       onVoiceHistoryUpdated: callback => { historyUpdated = callback; }
     } });
   const initial = ui.open(); await tick();
@@ -57,6 +67,9 @@ async function run() {
   assert.notEqual(nodes.get("homeTodayCount").textContent, "999");
   pending[1](dto); await reopened;
   assert.equal(nodes.get("homeTodayCount").textContent, "2");
+  await nodes.get("homeFileOpen").listeners.click();
+  await nodes.get("homeMeetingOpen").listeners.click();
+  assert.deepEqual(workspaceNavigation, ["file", "meeting"], "Home cards navigate without choosing files or starting recording");
   assert.equal(nodes.get("homeRecentEmpty").hidden, false);
   assert.equal(nodes.get("homeVoiceRecentEmpty").hidden, false);
   historyRows = [{ requestId: "00000000-0000-4000-a000-000000000001", preview: "<script>fixture text</script>",
@@ -108,6 +121,8 @@ async function verifyHomeBrowser(page, directory) {
   const errors = await prepareBrowser(page);
   await page.waitForFunction(() => document.getElementById("homeTodayCount").textContent === "18");
   assert.equal(await page.locator("#homePanel").isVisible(), true);
+  assert.equal(await page.locator(".home-feature-grid > button").count(), 2);
+  assert.equal(await page.locator(".home-feature button, .home-feature input").count(), 0);
   assert.equal(await page.locator("#settingsPanel").isVisible(), false);
   assert.equal(await page.locator("#onboardingPanel").isVisible(), false);
   assert.equal(await page.locator("#homeRecentList button").count(), 2);
@@ -183,14 +198,26 @@ async function verifyHomeBrowser(page, directory) {
   assert.equal(await page.locator("#hotkeyInput").evaluate(el => document.activeElement === el), true);
   await page.locator("#homeBtn").click();
   await page.waitForFunction(() => document.body.classList.contains("home-mode"));
-  await page.locator("#homeMeetingOpen").click();
+  const meetingCard = await page.locator("#homeMeetingOpen").boundingBox();
+  await page.locator("#homeMeetingOpen").click({ position: { x: meetingCard.width - 16, y: meetingCard.height - 16 } });
   await page.waitForFunction(() => document.body.classList.contains("meeting-mode"));
   await page.locator("#homeBtn").click();
   await page.waitForFunction(() => document.body.classList.contains("home-mode"));
-  await page.locator("#homeFileOpen").click();
+  const fileCard = await page.locator("#homeFileOpen").boundingBox();
+  await page.locator("#homeFileOpen").click({ position: { x: fileCard.width - 16, y: fileCard.height - 16 } });
   await page.waitForFunction(() => document.body.classList.contains("file-mode"));
   await page.locator("#homeBtn").click();
   await page.waitForFunction(() => document.body.classList.contains("home-mode"));
+
+  for (const [id, mode, key] of [["homeFileOpen", "file", "Enter"], ["homeMeetingOpen", "meeting", "Space"]]) {
+    await page.locator(`#${id}`).focus();
+    await page.keyboard.press(key);
+    await page.waitForFunction(mode => document.body.classList.contains(`${mode}-mode`), mode);
+    await page.locator("#homeBtn").click();
+    await page.waitForFunction(() => document.body.classList.contains("home-mode"));
+  }
+  const automaticActions = await page.evaluate(() => window.mockCalls.filter(call => ["fileChooseMedia", "meetingChooseMedia", "meetingLiveStart", "startRealtimeAsr", "transcribe"].includes(call.name)));
+  assert.deepEqual(automaticActions, [], "mouse and keyboard entry must only open workspaces, never start a task or file chooser");
 
   await page.evaluate(async () => {
     window.mockHome.onboarding = { status: "pending" };
@@ -293,6 +320,19 @@ async function verifyNativeApp() {
     await page.locator("#guideSkip").click();
     await page.waitForFunction(() => document.getElementById("homePanel").hidden === false && document.getElementById("homeTodayCount").textContent === "0");
     assert.equal(await page.locator("#homeSetupNotice").isVisible(), true);
+    await application.evaluate(({ dialog }) => {
+      globalThis.oviTestFilePickerCalls = 0;
+      dialog.showOpenDialog = async () => { globalThis.oviTestFilePickerCalls++; return { canceled: true, filePaths: [] }; };
+    });
+    for (const [id, mode] of [["homeFileOpen", "file"], ["homeMeetingOpen", "meeting"]]) {
+      const bounds = await page.locator(`#${id}`).boundingBox();
+      await page.locator(`#${id}`).click({ position: { x: bounds.width - 12, y: bounds.height - 12 } });
+      await page.waitForFunction(mode => document.body.classList.contains(`${mode}-mode`), mode);
+      if (mode === "meeting") assert.equal((await page.evaluate(() => window.mimoInput.meetingLiveStatus())).recording, false);
+      await page.locator("#homeBtn").click();
+      await page.waitForFunction(() => document.body.classList.contains("home-mode"));
+    }
+    assert.equal(await application.evaluate(() => globalThis.oviTestFilePickerCalls), 0, "native Home navigation must not open file dialogs");
     await page.locator("#settingsBtn").click();
     await page.waitForFunction(() => document.body.classList.contains("settings-open"));
     await page.locator("#homeBtn").click();

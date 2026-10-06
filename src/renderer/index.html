@@ -51,8 +51,8 @@
         </div>
         <div id="homeSetupNotice" class="home-notice" hidden><span class="ui-icon icon-info" aria-hidden="true"></span><span>尚未配置语音识别</span><button id="homeSetupStart" type="button">快速上手<span class="ui-icon icon-arrow" aria-hidden="true"></span></button></div>
         <div class="home-feature-grid">
-          <article class="home-feature"><img src="./brand/file.svg" alt="" /><div><h2>文件转写</h2><span class="home-muted">音频 / 视频</span></div><button id="homeFileOpen" type="button">选择文件<span class="ui-icon icon-arrow" aria-hidden="true"></span></button></article>
-          <article class="home-feature home-feature-meeting"><img src="./brand/meeting.svg" alt="" /><div><h2>实时会议转录</h2><span class="home-muted">麦克风 / 系统声音</span></div><button id="homeMeetingOpen" type="button">开始会议<span class="ui-icon icon-arrow" aria-hidden="true"></span></button></article>
+          <button id="homeFileOpen" class="home-feature home-feature-file" type="button" aria-label="打开文件转写页面"><img src="./brand/file.svg" alt="" /><span class="home-feature-copy"><strong class="home-feature-title">文件转写</strong><span class="home-muted">音频 / 视频</span></span><span class="ui-icon icon-arrow home-feature-arrow" aria-hidden="true"></span></button>
+          <button id="homeMeetingOpen" class="home-feature home-feature-meeting" type="button" aria-label="打开实时会议转录页面"><img src="./brand/meeting.svg" alt="" /><span class="home-feature-copy"><strong class="home-feature-title">实时会议转录</strong><span class="home-muted">麦克风 / 系统声音</span></span><span class="ui-icon icon-arrow home-feature-arrow" aria-hidden="true"></span></button>
         </div>
         <section class="home-recent" aria-labelledby="homeRecentTitle">
           <div class="home-section-heading"><h2 id="homeRecentTitle">最近记录</h2><button id="homeRefresh" class="icon-btn" type="button" title="刷新主页" aria-label="刷新主页"><span class="ui-icon icon-refresh" aria-hidden="true"></span></button></div>
@@ -377,9 +377,10 @@
               </div>
               <div class="provider-grid text-model-picker">
                 <label class="field"><span>供应商</span><select id="cleanupSupplierSelect"></select></label>
-                <label class="field"><span>模型</span><select id="cleanupModelSelect"></select></label>
+                <label class="field"><span>模型</span><select id="cleanupModelSelect" aria-describedby="expressionModelRecommendation"></select></label>
               </div>
-              <label id="cleanupCustomModelField" class="field" hidden><span>自定义模型 ID</span><input id="cleanupCustomModelInput" type="text" maxlength="256" autocomplete="off" /></label>
+              <label id="cleanupCustomModelField" class="field" hidden><span>自定义模型 ID</span><input id="cleanupCustomModelInput" type="text" maxlength="256" autocomplete="off" aria-describedby="expressionModelRecommendation" /></label>
+              <p id="expressionModelRecommendation" class="settings-note">推荐优先使用 Flash 等快速模型，以缩短表达整理等待时间，提升语音输入法响应速度。</p>
               <small id="cleanupModelHint" class="model-catalog-status" role="status"></small>
               <div class="provider-grid legacy-text-config" hidden>
                 <div class="field">

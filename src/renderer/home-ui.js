@@ -63,8 +63,7 @@
         ["homeWeekCount", "week", "count"], ["homeWeekChars", "week", "characters"]]) {
         $(id).textContent = value.usage ? number(value.usage[period]?.[field]) : "—";
       }
-      const meetingLabel = $("homeMeetingOpen").firstChild;
-      meetingLabel.textContent = value.meetingRecording ? "返回会议" : "进入会议";
+      $("homeMeetingOpen").setAttribute("aria-label", value.meetingRecording ? "返回实时会议转录页面" : "打开实时会议转录页面");
       $("homeRecentList").replaceChildren();
       const recent = value.recent || [];
       $("homeRecentEmpty").hidden = recent.length > 0;
@@ -172,10 +171,13 @@
       $(id)?.addEventListener("click", () => { void win.OnboardingUi.open(); });
     }
     $("homeFileOpen").addEventListener("click", async () => {
-      try { await win.FileTranscriptionUi.openWorkspace(); await win.FileTranscriptionUi.chooseFile(); }
-      catch { error("文件选择暂时无法打开，请稍后重试。"); }
+      try { await win.FileTranscriptionUi.openWorkspace(); }
+      catch { error("文件转写页面暂时无法打开，请稍后重试。"); }
     });
-    $("homeMeetingOpen").addEventListener("click", () => { void api.openMeetingWorkspace(); });
+    $("homeMeetingOpen").addEventListener("click", async () => {
+      try { await api.openMeetingWorkspace(); }
+      catch { error("实时会议转录页面暂时无法打开，请稍后重试。"); }
+    });
     api.onUsageUpdated?.(requestRefresh);
     api.onVoiceHistoryUpdated?.(requestRefresh);
     return { open, close, refresh, getSnapshot: () => snapshot };

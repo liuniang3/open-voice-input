@@ -22,6 +22,8 @@ function unitTests() {
   const cleaner = html.slice(html.indexOf('id="settingsCleanerPanel"'), html.indexOf('id="legacySummarySettings"'));
   for (const id of ["stableModeBtn", "fastModeBtn", "hotkeyInput", "meetingHotkeyInput", "microphoneSelect", "asrProviderSelect", "mimoApiKeyInput", "aliyunApiKeyInput", "asrModelPresetSelect"]) assert.ok(asr.includes(`id="${id}"`), `${id} belongs to recognition settings`);
   for (const id of ["textSupplierManage", "textSupplierBack", "textSupplierManagerView", "textSupplierCards", "cleanupSupplierSelect", "cleanupModelSelect"]) assert.ok(cleaner.includes(`id="${id}"`), `${id} belongs to expression settings`);
+  assert.match(cleaner, /id="expressionModelRecommendation"[^>]*>推荐优先使用 Flash 等快速模型/);
+  assert.match(cleaner, /id="cleanupModelSelect"[^>]*aria-describedby="expressionModelRecommendation"/);
   for (const id of ["summarySupplierSelect", "summaryModelSelect"]) assert.ok(!html.includes(`id="${id}"`), `${id} is removed; summaries use workspace pickers`);
   for (const id of ["meetingAnalysisContextInput", "meetingAnalysisMaxOutputInput"]) assert.ok(!cleaner.includes(`id="${id}"`), `${id} is compatibility-only, not expression settings`);
   const nodes = new Map();
@@ -118,6 +120,8 @@ async function verifyBrowser(page, output) {
   assert.equal(await page.locator("#textSupplierManage").isVisible(), true);
   assert.equal(await page.locator("#textSupplierEditor").isVisible(), false, "new users shouldn't see disabled supplier details");
   assert.equal(await page.locator("#cleanupModelSelect").isVisible(), true);
+  assert.equal(await page.locator("#expressionModelRecommendation").isVisible(), true);
+  assert.match(await page.locator("#expressionModelRecommendation").innerText(), /Flash.*语音输入法响应速度/);
   assert.equal(await page.locator('#cleanupSupplierSelect option[value="__legacy__"]').count(), 0, "new users see no legacy supplier route");
   assert.equal(await page.locator("#summarySupplierSelect, #summaryModelSelect").count(), 0);
   assert.equal(await page.locator("#meetingAnalysisContextInput").isVisible(), false);

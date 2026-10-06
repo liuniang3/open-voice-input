@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## v0.4.16 - 2026-10-07
+
+### Changed
+
+- Home file-transcription and live-meeting entries are now full-card buttons with mouse and keyboard activation. They open their workspaces only; Home no longer triggers the file picker or starts a recording.
+- Expression Organization settings recommend Flash/fast models to reduce dictation cleanup latency. The guidance is accessible from the model picker and does not change the selected model or its configuration.
+
+### Verification
+
+- Shared regression suite passed locally: `58/58` scripts. Homepage/settings browser checks passed, covering card navigation, keyboard activation, model recommendations and responsive layouts.
+- Windows Electron navigation checks use isolated test settings and confirm that Home navigation does not open the file picker or start recording.
+- Secret scan and `git diff --check` passed before publication; no user credentials, settings, recordings, transcripts or diagnostic screenshots are committed.
+- Windows and Intel/Apple Silicon macOS CI build the same shared UI. Native macOS recording, permissions and paste behavior still require hardware verification.
+
+
 ## v0.4.15 - 2026-10-07
 
 ### Added

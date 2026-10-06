@@ -71,12 +71,16 @@ body.home-mode .status-panel, body.home-mode .advanced-field, body.home-mode .ac
 .connection-badge[data-state="ready"] { color: #117d75; }
 .connection-badge[data-state="ready"]::before { background: #15968b; }
 .home-feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
-.home-feature { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px 16px; align-items: center; padding: 22px; border: 1px solid var(--ovi-border); border-radius: 8px; background: rgba(255,255,255,.5); }
+.home-feature { display: grid; grid-template-columns: 48px minmax(0, 1fr) 18px; gap: 16px; align-items: center; width: 100%; min-width: 0; height: auto; min-height: 132px; padding: 22px; border: 1px solid var(--ovi-border); border-radius: 8px; background: rgba(255,255,255,.5); color: var(--ovi-text); text-align: left; cursor: pointer; }
 .home-feature > img { width: 48px; height: 48px; }
-.home-feature h2 { font-size: 18px; }
+.home-feature-copy { min-width: 0; white-space: normal; }
+.home-feature-title { display: block; font-size: 18px; font-weight: 650; line-height: 1.5; overflow-wrap: anywhere; }
 .home-feature .home-muted { display: block; margin-top: 4px; }
-.home-feature button { grid-column: 1 / -1; justify-self: start; display: flex; gap: 18px; align-items: center; height: 36px; min-height: 36px; margin-top: 14px; padding: 0 13px; border-color: #d5e5f0; background: #ecf4fa; color: #2a668e; font-weight: 600; }
-.home-feature-meeting button { background: #e8f5f1; border-color: #c9e5df; color: #087a73; }
+.home-feature-file .home-feature-arrow { color: #2a668e; }
+.home-feature-meeting .home-feature-arrow { color: #087a73; }
+.home-feature-file:hover:not(:disabled) { background: #edf5fa; border-color: #abcddd; }
+.home-feature-meeting:hover:not(:disabled) { background: #eaf5f1; border-color: #a2cec4; }
+.home-feature:active:not(:disabled) { border-color: var(--ovi-primary-border); }
 .home-recent { flex: 1 0 auto; }
 .home-section-heading { display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; }
 .home-section-heading h2 { font-size: 17px; }
@@ -163,7 +167,6 @@ body.meeting-mode .live-transport, body.file-mode .file-process { background: rg
   .home-stat { padding-left: 16px; }
   .home-stat strong { font-size: 27px; }
   .home-feature { padding: 16px; gap: 8px 12px; }
-  .home-feature h2 { font-size: 16px; }
   .home-feature-grid { gap: 14px; }
   .home-recent-groups { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .home-recent-group + .home-recent-group { border-left: 0; padding-left: 0; border-top: 1px solid var(--ovi-border); padding-top: 16px; }
