@@ -69,6 +69,21 @@ async function test(name, fn) {
     assert.equal(updater.feed.channel, "latest-arm64");
   });
 
+  await test("release notes survive downloads, reset on current and remain bounded", async () => {
+    const updater = new FakeUpdater();
+    const service = createUpdateService({ autoUpdater: updater, currentVersion: "0.4.11", isPackaged: true, platform: "win32" });
+    updater.emit("update-available", { version: "0.4.12", releaseNotes: "<h2>Updates</h2><p>Local history</p>" });
+    assert.match(service.status().releaseNotes, /Local history/);
+    await service.download();
+    assert.match(service.status().releaseNotes, /Local history/, "download event without notes keeps the check notes");
+    updater.emit("update-not-available");
+    assert.equal(service.status().releaseNotes, "");
+    updater.emit("update-available", { version: "0.4.12", releaseNotes: [{ version: "0.4.12", note: "First" }, { version: "0.4.11", note: "Second" }] });
+    assert.equal(service.status().releaseNotes, "First\n\nSecond");
+    updater.emit("update-available", { version: "0.4.12", releaseNotes: "A".repeat(40000) });
+    assert.equal(service.status().releaseNotes.length, 32000);
+  });
+
   await test("unsigned macOS opens the verified local package instead of invoking Squirrel", async () => {
     const updater = new FakeUpdater();
     const opened = [];

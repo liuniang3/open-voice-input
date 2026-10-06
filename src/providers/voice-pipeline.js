@@ -20,7 +20,7 @@ const QWEN_ASR_OPENAI_MODEL = "qwen3-asr-flash";
 const QWEN_ASR_OPENAI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const QWEN_ASR_MODES = new Set(["batch", "realtime"]);
 
-function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) {
+function createVoicePipeline({ getSettings, logEvent, providerOverrides = {}, onTranscript }) {
   // Per-invocation settings scope: concurrent requests each keep their own
   // snapshot instead of clobbering a shared override mid-flight.
   const settingsScope = new AsyncLocalStorage();
@@ -151,7 +151,20 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     return mode === "fast" ? "fast" : "stable";
   }
 
-  async function transcribe({ audioDataUrl, pcm16Base64, audioSegments, shortContext, transcriptionMode, settingsSnapshot }) {
+  async function completed(text, rawText, mode, history, cleanupApplied = false) {
+    if (history?.requestId && text && typeof onTranscript === "function") {
+      const settings = readSettings();
+      try {
+        await onTranscript({ requestId: history.requestId, durationMs: history.durationMs,
+          rawText, text, transcriptionMode: mode, cleanupApplied,
+          asrModel: settings.asrMode === "realtime" ? settings.asrRealtimeModel : settings.asrModel,
+          cleanerModel: cleanupApplied ? settings.textModelSelections?.cleanup?.modelId || settings.cleanerModel : "" });
+      } catch { logEvent?.("voice-history: persistence unavailable"); }
+    }
+    return text;
+  }
+
+  async function transcribe({ audioDataUrl, pcm16Base64, audioSegments, shortContext, transcriptionMode, settingsSnapshot, history }) {
     return withSettingsSnapshot(settingsSnapshot, async () => {
       const settings = readSettings();
       const mode = normalizeTranscriptionMode(transcriptionMode || settings.transcriptionMode);
@@ -171,11 +184,14 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
 
       if (mode === "fast") {
         const texts = await transcribeAudioSegments(asrProvider, "transcribeFast", segments, shortContext);
-        return cleanTranscript(joinTranscriptSegments(texts));
+        const rawText = joinTranscriptSegments(texts);
+        const text = cleanTranscript(rawText);
+        return completed(text, rawText, mode, history);
       }
 
       const rawTexts = await transcribeAudioSegments(asrProvider, "transcribeRaw", segments, shortContext);
-      const rawTranscript = cleanTranscript(joinTranscriptSegments(rawTexts));
+      const historyRaw = joinTranscriptSegments(rawTexts);
+      const rawTranscript = cleanTranscript(historyRaw);
       if (!rawTranscript) return "";
 
       try {
@@ -183,15 +199,15 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
         logEvent?.("voice-pipeline: cleaner start", `${cleanerProvider.id}:${resolveCleanerModel()}`);
         const cleanedResult = await cleanerProvider.clean({ rawText: rawTranscript, shortContext });
         logEvent?.("voice-pipeline: cleaner done", cleanedResult.text ? "accepted" : "fallback-empty-or-unsafe");
-        return cleanedResult.text || rawTranscript;
+        return completed(cleanedResult.text || rawTranscript, historyRaw, mode, history, Boolean(cleanedResult.text));
       } catch (error) {
         logEvent?.("voice-pipeline: cleaner failed, using raw", error?.message || String(error));
-        return rawTranscript;
+        return completed(rawTranscript, historyRaw, mode, history);
       }
     });
   }
 
-  async function cleanText({ rawText, shortContext, settingsSnapshot }) {
+  async function cleanText({ rawText, shortContext, settingsSnapshot, history }) {
     return withSettingsSnapshot(settingsSnapshot, async () => {
       const text = cleanTranscript(rawText);
       if (!text) return "";
@@ -203,10 +219,10 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
         logEvent?.("voice-pipeline: cleaner start", `${cleanerProvider.id}:${resolveCleanerModel()}`);
         const cleanedResult = await cleanerProvider.clean({ rawText: text, shortContext });
         logEvent?.("voice-pipeline: cleaner done", cleanedResult.text ? "accepted" : "fallback-empty-or-unsafe");
-        return cleanedResult.text || text;
+        return completed(cleanedResult.text || text, String(rawText).trim(), "stable", history, Boolean(cleanedResult.text));
       } catch (error) {
         logEvent?.("voice-pipeline: cleaner failed, using raw", error?.message || String(error));
-        return text;
+        return completed(text, String(rawText).trim(), "stable", history);
       }
     });
   }

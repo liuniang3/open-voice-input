@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+
+- Local short-dictation history with searchable original/organized text, timestamps, model labels and copy actions. Recording retries update the same entry; realtime previews, individual upload chunks, cancelled recordings and history copies do not create extra records or inflate usage statistics. Saving new records can be disabled without losing existing history.
+- About & Updates shows the detected release's notes in-app, retaining them through download progress. Release HTML is converted to inert plain text, never embedded as active markup.
+
+### Changed
+
+- Settings use four vertical navigation items: Speech Recognition, Expression Organization, Speech History, and About & Updates. Recording mode, microphone, shortcuts, ASR connection and model settings now share one page. Language supplier management and both expression/summary model selections share the organization page.
+- Keep ASR and language credentials isolated, preserve existing settings and translate old settings deep links to the new pages. A missing organization model no longer prevents configuring ASR first. Update-check preferences save directly on the updates page.
+- Shared Windows/macOS UI includes responsive sidebar layouts and keyboard tab navigation. Local history persistence errors never stop dictation, and stored history never becomes model context.
+
 ## v0.4.11 - 2026-10-06
 
 ### Fixed

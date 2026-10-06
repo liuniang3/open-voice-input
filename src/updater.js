@@ -48,7 +48,10 @@ function publicInfo(info) {
   return {
     version: typeof info.version === "string" ? info.version.slice(0, 64) : "",
     releaseName: typeof info.releaseName === "string" ? info.releaseName.slice(0, 200) : "",
-    releaseDate: typeof info.releaseDate === "string" ? info.releaseDate.slice(0, 64) : ""
+    releaseDate: typeof info.releaseDate === "string" ? info.releaseDate.slice(0, 64) : "",
+    releaseNotes: (typeof info.releaseNotes === "string" ? info.releaseNotes
+      : Array.isArray(info.releaseNotes) ? info.releaseNotes.map(entry => typeof entry?.note === "string" ? entry.note : "").join("\n\n")
+        : "").slice(0, 32000)
   };
 }
 
@@ -81,6 +84,7 @@ function createUpdateService({
     availableVersion: "",
     releaseName: "",
     releaseDate: "",
+    releaseNotes: "",
     downloaded: false,
     progress: null,
     error: null,
@@ -126,10 +130,10 @@ function createUpdateService({
   autoUpdater.on("update-available", (info) => {
     const clean = publicInfo(info);
     publish({ status: "available", availableVersion: clean.version, releaseName: clean.releaseName,
-      releaseDate: clean.releaseDate, downloaded: false, progress: null, error: null });
+      releaseDate: clean.releaseDate, releaseNotes: clean.releaseNotes, downloaded: false, progress: null, error: null });
   });
   autoUpdater.on("update-not-available", () => publish({ status: "current", availableVersion: "",
-    releaseName: "", releaseDate: "", downloaded: false, progress: null, error: null }));
+    releaseName: "", releaseDate: "", releaseNotes: "", downloaded: false, progress: null, error: null }));
   autoUpdater.on("download-progress", (progress = {}) => publish({
     status: "downloading",
     error: null,
@@ -146,6 +150,7 @@ function createUpdateService({
     downloadedFile = candidate && path.isAbsolute(candidate) && /\.(?:zip|dmg|pkg)$/i.test(candidate) ? candidate : "";
     publish({ status: "downloaded", availableVersion: clean.version || state.availableVersion,
       releaseName: clean.releaseName || state.releaseName, releaseDate: clean.releaseDate || state.releaseDate,
+      releaseNotes: clean.releaseNotes || state.releaseNotes,
       downloaded: true, progress: { ...(state.progress || {}), percent: 100 }, installMode, error: null });
   });
   // electron-updater emits errors even when the initiating promise also rejects.

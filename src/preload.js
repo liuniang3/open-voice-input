@@ -15,6 +15,14 @@ contextBridge.exposeInMainWorld("mimoInput", {
   transcribe: (payload) => ipcRenderer.invoke("voice:transcribe", payload),
   transcribeSegment: (payload) => ipcRenderer.invoke("voice:segment:transcribe", payload),
   cleanText: (payload) => ipcRenderer.invoke("voice:clean-text", payload),
+  recordVoiceHistory: (payload) => ipcRenderer.invoke("voice:history:record", payload),
+  listVoiceHistory: (payload) => ipcRenderer.invoke("voice:history:list", payload),
+  getVoiceHistory: (payload) => ipcRenderer.invoke("voice:history:get", payload),
+  onVoiceHistoryUpdated: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("voice:history:updated", listener);
+    return () => ipcRenderer.removeListener("voice:history:updated", listener);
+  },
   startRealtimeAsr: () => ipcRenderer.invoke("voice:realtime:start"),
   appendRealtimeAudio: (base64Audio) => ipcRenderer.invoke("voice:realtime:append", base64Audio),
   finishRealtimeAsr: (payload) => ipcRenderer.invoke("voice:realtime:finish", payload),

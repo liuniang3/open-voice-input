@@ -38,6 +38,8 @@ jobs:
       - run: npm run test:clean
       - run: node scripts/test-home-usage.js
       - run: node scripts/test-home-ui.js
+      - run: node scripts/test-settings-workspace.js
+      - run: node scripts/test-voice-history.js
 
   desktop:
     runs-on: ${{ matrix.runner }}

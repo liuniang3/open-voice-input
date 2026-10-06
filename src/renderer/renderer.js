@@ -109,6 +109,7 @@ const secretToggleButtons = [...document.querySelectorAll("[data-secret-toggle]"
 const secretCopyButtons = [...document.querySelectorAll("[data-secret-copy]")];
 const textSupplierUi = window.TextSupplierUi;
 let textSupplierManager;
+let voiceHistoryUi;
 const audioTools = window.OpenVoiceAudio;
 
 const desktopPlatform = /Mac/i.test(navigator.userAgentData?.platform || navigator.platform || "")
@@ -482,7 +483,7 @@ let activeMeetingFileAsrModelDraft = "";
 let activeMeetingFunModelDraft = "";
 let activeMeetingAnalysisModelDraft = "";
 let activeMeetingAnalysisCapabilityBaseline = null;
-let activeSettingsTab = "general";
+let activeSettingsTab = "asr";
 
 function createSettingsSnapshot() {
   return window.VoiceSettingsSnapshot.createVoiceSettingsSnapshot(appSettings);
@@ -1136,12 +1137,16 @@ function handleMeetingProfileModelChange(kind) {
 }
 
 function setSettingsTab(tabName) {
+  const previousTab = activeSettingsTab;
   const available = new Set(settingsTabButtons.map((button) => button.dataset.settingsTab));
-  activeSettingsTab = available.has(tabName) ? tabName : "general";
+  const requestedTab = window.SettingsWorkspace.settingsTab(tabName);
+  activeSettingsTab = available.has(requestedTab) ? requestedTab : "asr";
+  if (previousTab !== activeSettingsTab) document.getElementById("settingsFeedback").hidden = true;
   for (const button of settingsTabButtons) {
     const active = button.dataset.settingsTab === activeSettingsTab;
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
     if (active) button.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }
   for (const panel of settingsTabPanels) {
@@ -1151,6 +1156,14 @@ function setSettingsTab(tabName) {
   }
   const content = document.querySelector(".settings-tab-content");
   if (content) content.scrollTop = 0;
+  document.getElementById("settingsPageSubtitle").textContent = settingsTabButtons.find(button => button.dataset.settingsTab === activeSettingsTab)?.textContent.trim() || "语音识别";
+  saveSettingsBtn.hidden = activeSettingsTab === "history" || activeSettingsTab === "updates";
+  if (activeSettingsTab === "history") {
+    voiceHistoryUi ||= window.VoiceHistoryUi.createVoiceHistoryUi({ document, api: window.mimoInput,
+      onSettings: saved => { appSettings = { ...appSettings, voiceHistoryEnabled: saved.voiceHistoryEnabled }; } });
+    void voiceHistoryUi.open(appSettings);
+  } else voiceHistoryUi?.close();
+  window.SettingsWorkspace.renderRecognitionSettings(document, appSettings.transcriptionMode);
   if (activeSettingsTab === "updates") void refreshUpdateStatus();
 }
 
@@ -1216,6 +1229,11 @@ function renderUpdateStatus(next) {
       ? "当前 macOS 构建未使用 Developer ID 签名，因此系统不允许静默替换；安装包会在本机打开，不会跳转 GitHub。"
       : "此 macOS 构建已签名，可在应用内自动安装更新。"
     : "Windows 安装版会在下载完成后退出并运行安装程序。";
+  const notesBlock = document.getElementById("updateReleaseNotesBlock");
+  notesBlock.hidden = !next.availableVersion;
+  document.getElementById("updateReleaseNotesTitle").textContent = `v${next.availableVersion || ""} 更新内容`;
+  document.getElementById("updateReleaseNotesText").textContent = window.SettingsWorkspace.releaseNotesText(next.releaseNotes, document)
+    || "此版本没有提供更新说明。";
 }
 
 async function refreshUpdateStatus() {
@@ -1562,6 +1580,7 @@ async function stopRecording() {
 
     queueBufferedRecordingAudio(segmentState, { transcribe: !realtimeSucceeded });
     const transcriptionRequest = {
+      history: { requestId: voiceUsageRequestId, durationMs },
       audioSegments: segmentState.payloads,
       shortContext: recordingShortContext,
       transcriptionMode,
@@ -1694,8 +1713,16 @@ async function completeRawTranscript(rawText, request) {
     transcript = await window.mimoInput.cleanText({
       rawText: transcript,
       shortContext: request.shortContext,
-      settingsSnapshot: request.settingsSnapshot
+      settingsSnapshot: request.settingsSnapshot,
+      history: request.history
     });
+  } else if (transcript && request.history) {
+    const snapshot = request.settingsSnapshot || {};
+    try {
+      await window.mimoInput.recordVoiceHistory?.({ ...request.history, rawText: transcript, text: transcript,
+        transcriptionMode: "fast", cleanupApplied: false,
+        asrModel: snapshot.asrMode === "realtime" ? snapshot.asrRealtimeModel : snapshot.asrModel });
+    } catch { logRenderer("voice-history: persistence unavailable"); }
   }
   await handleTranscriptResult(transcript, {
     retry: false,
@@ -1735,7 +1762,8 @@ async function runVoiceRequest(request, { bytes = 0, retry = false, allowActive 
       audioSegments: request.audioSegments,
       shortContext: request.shortContext,
       transcriptionMode,
-      settingsSnapshot: request.settingsSnapshot
+      settingsSnapshot: request.settingsSnapshot,
+      history: request.history
     });
     logRenderer(retry ? "mimo: retry done" : "mimo: transcribe done", `chars=${transcript.length}`);
     await handleTranscriptResult(transcript, {
@@ -2251,6 +2279,8 @@ function fillSettingsForm() {
   renderTextModelPicker("cleanup");
   renderTextModelPicker("summary");
   if (updateAutoCheckInput) updateAutoCheckInput.checked = appSettings.updateAutoCheck !== false;
+  document.getElementById("voiceHistoryEnabled").checked = appSettings.voiceHistoryEnabled !== false;
+  window.SettingsWorkspace.renderRecognitionSettings(document, appSettings.transcriptionMode);
   syncWorkbenchProcessModeFromSettings({ silent: true });
 }
 
@@ -2347,6 +2377,7 @@ function selectedTextModel(slot, { allowEmpty = false } = {}) {
   if (!supplierId) return null;
   const modelId = textSupplierUi.modelIdOf(elements.model.value === textSupplierUi.CUSTOM_MODEL_VALUE
     ? elements.customInput.value : elements.model.value);
+  if (!modelId && allowEmpty) return null;
   if (!modelId && !(allowEmpty && supplierId === textSupplierUi.LEGACY_SUPPLIER_ID)) {
     throw new Error(`${slot === "cleanup" ? "表达整理" : "会议摘要"}：请选择或填写模型 ID。`);
   }
@@ -2376,6 +2407,7 @@ function renderTranscriptionMode(mode) {
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
   }
+  window.SettingsWorkspace.renderRecognitionSettings(document, mode);
 }
 
 async function setTranscriptionMode(mode, { silent = false } = {}) {
@@ -2395,6 +2427,7 @@ async function setTranscriptionMode(mode, { silent = false } = {}) {
 }
 
 function applyWindowMode(mode) {
+  if (mode !== "settings") voiceHistoryUi?.close();
   currentWindowMode = mode;
   document.body.classList.toggle("recording-mode", mode === "recording" || mode === "compact");
   document.body.classList.toggle("recording-active", mode === "recording");
@@ -2447,7 +2480,7 @@ async function showResultWindow() {
 }
 
 async function saveAllSettings() {
-  const cleanupSelection = selectedTextModel("cleanup");
+  const cleanupSelection = selectedTextModel("cleanup", { allowEmpty: true });
   const summarySelection = selectedTextModel("summary", { allowEmpty: true });
   normalizeProviderSettingsDraft();
   const asrModel = normalizeAsrModelForSelectedProvider(selectedAsrModel());
@@ -2770,10 +2803,31 @@ for (const input of [
 }
 for (const button of settingsTabButtons) {
   button.addEventListener("click", () => setSettingsTab(button.dataset.settingsTab));
+  button.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = window.SettingsWorkspace.nextSettingsTab(button.dataset.settingsTab, event.key);
+    setSettingsTab(next);
+    settingsTabButtons.find(item => item.dataset.settingsTab === next)?.focus();
+  });
+}
+for (const field of [asrProviderSelect, asrModelPresetSelect, mimoApiKeyInput, aliyunApiKeyInput]) {
+  field.addEventListener("change", () => window.SettingsWorkspace.renderRecognitionSettings(document, appSettings.transcriptionMode));
 }
 updateCheckBtn?.addEventListener("click", () => runUpdateAction("checkForUpdates", updateCheckBtn));
 updateDownloadBtn?.addEventListener("click", () => runUpdateAction("downloadUpdate", updateDownloadBtn));
 updateInstallBtn?.addEventListener("click", () => runUpdateAction("installUpdate", updateInstallBtn));
+updateAutoCheckInput?.addEventListener("change", async () => {
+  const enabled = updateAutoCheckInput.checked;
+  updateAutoCheckInput.disabled = true;
+  try {
+    await window.mimoInput.saveSettings({ updateAutoCheck: enabled });
+    appSettings = { ...appSettings, updateAutoCheck: enabled };
+  } catch {
+    updateAutoCheckInput.checked = !enabled;
+    setStatus("error", "设置保存失败", "自动检查更新选项未修改，请重试。");
+  } finally { updateAutoCheckInput.disabled = false; }
+});
 for (const button of secretToggleButtons) {
   button.addEventListener("click", () => toggleSecretVisibility(button));
 }

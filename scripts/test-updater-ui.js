@@ -15,7 +15,8 @@ const workflow = read(".github/workflows/release.yml");
 const pkg = JSON.parse(read("package.json"));
 
 for (const id of ["updateCurrentVersion", "updateStateBadge", "updateStatusTitle", "updateStatusDetail",
-  "updateProgress", "updateCheckBtn", "updateDownloadBtn", "updateInstallBtn", "updateAutoCheckInput"]) {
+  "updateProgress", "updateCheckBtn", "updateDownloadBtn", "updateInstallBtn", "updateAutoCheckInput",
+  "updateReleaseNotesBlock", "updateReleaseNotesText"]) {
   assert.match(html, new RegExp(`id=["']${id}["']`), `missing updater control ${id}`);
 }
 assert.match(html, /data-settings-tab="updates"/);

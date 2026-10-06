@@ -109,7 +109,7 @@
     $("homeRefresh").addEventListener("click", () => { void refresh(); });
     $("homeHotkeyEdit").addEventListener("click", async () => {
       await api.openSettings();
-      win.setSettingsTab?.("general");
+      win.setSettingsTab?.("asr");
       $("hotkeyInput").focus();
     });
     for (const id of ["homeGuideOpen", "homeSetupStart", "settingsGuideOpen"]) {

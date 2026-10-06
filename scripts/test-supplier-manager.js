@@ -83,8 +83,13 @@ async function run() {
 async function verifySupplierBrowser(page, output) {
   const { prepareBrowser } = require("./test-meeting-live-ui");
   const errors = await prepareBrowser(page);
-  await page.evaluate(async () => { await window.mimoInput.saveSettings({ _languageSuppliersMigrated: true }); window.mockOpenSettings(); });
-  await page.locator('[data-settings-tab="connections"]').click();
+  await page.evaluate(async () => {
+    // This fixture exercises a gateway without /models before explicitly
+    // switching to successful discovery later in the test.
+    window.mockApiOverrides = { listProviderModels: async () => ({ ok: false, error: { message: "fixture model discovery unavailable" } }) };
+    await window.mimoInput.saveSettings({ _languageSuppliersMigrated: true }); window.mockOpenSettings();
+  });
+  await page.locator('[data-settings-tab="cleaner"]').click();
   await page.locator("#textSupplierAdd").click();
   assert(await page.locator("#textSupplierDialog").isVisible());
   await page.locator('[data-preset="mimo-plan"]').click();
@@ -187,7 +192,7 @@ async function verifySupplierBrowser(page, output) {
     } });
     window.mockOpenSettings();
   });
-  await page.locator('[data-settings-tab="connections"]').click();
+  await page.locator('[data-settings-tab="cleaner"]').click();
   await page.locator('[data-supplier-id="provider-2"]').click();
   await page.locator("#textSupplierDelete").click();
   assert(await page.locator("#textSupplierDeleteDialog").isVisible());

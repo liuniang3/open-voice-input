@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="./app-shell.css" />
     <link rel="stylesheet" href="./reading-layout.css" />
     <link rel="stylesheet" href="./supplier-manager.css" />
+    <link rel="stylesheet" href="./settings-workspace.css" />
   </head>
   <body>
     <main class="shell">
@@ -118,7 +119,7 @@
         <div class="settings-head">
           <div>
             <strong>设置</strong>
-            <span>语音识别与语言处理分别配置。</span>
+            <span id="settingsPageSubtitle">语音识别</span>
           </div>
           <div class="settings-head-actions">
             <button id="settingsGuideOpen" class="icon-btn" type="button" title="重新打开快速上手" aria-label="重新打开快速上手"><span class="ui-icon icon-info" aria-hidden="true"></span></button>
@@ -127,21 +128,19 @@
         </div>
 
         <p id="settingsFeedback" class="settings-feedback" role="status" hidden></p>
-        <nav class="settings-tabs" role="tablist" aria-label="设置分类">
-          <button type="button" class="settings-tab is-active" role="tab" aria-selected="true" data-settings-tab="general">常规</button>
-          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="asr-connections">语音识别供应商</button>
-          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="connections">语言处理供应商</button>
-          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="asr">语音识别</button>
-          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="cleaner">表达整理</button>
-          <button type="button" class="settings-tab" role="tab" aria-selected="false" data-settings-tab="updates">关于与更新</button>
+        <div class="settings-workspace">
+        <nav class="settings-tabs" role="tablist" aria-label="设置分类" aria-orientation="vertical">
+          <button id="settingsTabAsr" type="button" class="settings-tab is-active" role="tab" aria-selected="true" aria-controls="settingsAsrPanel" data-settings-tab="asr"><span class="ui-icon icon-mic" aria-hidden="true"></span><span>语音识别</span></button>
+          <button id="settingsTabCleaner" type="button" class="settings-tab" role="tab" aria-selected="false" aria-controls="settingsCleanerPanel" tabindex="-1" data-settings-tab="cleaner"><span class="ui-icon icon-type" aria-hidden="true"></span><span>表达整理</span></button>
+          <button id="settingsTabHistory" type="button" class="settings-tab" role="tab" aria-selected="false" aria-controls="settingsHistoryPanel" tabindex="-1" data-settings-tab="history"><span class="ui-icon icon-history" aria-hidden="true"></span><span>语音识别历史记录</span></button>
+          <button id="settingsTabUpdates" type="button" class="settings-tab" role="tab" aria-selected="false" aria-controls="settingsUpdatesPanel" tabindex="-1" data-settings-tab="updates"><span class="ui-icon icon-info" aria-hidden="true"></span><span>关于与更新</span></button>
         </nav>
 
         <div class="settings-tab-content">
-          <div class="settings-tab-panel is-active" role="tabpanel" data-settings-panel="general">
-            <section class="settings-group">
+          <div id="settingsAsrPanel" class="settings-tab-panel is-active" role="tabpanel" aria-labelledby="settingsTabAsr" data-settings-panel="asr">
+            <section class="settings-group" id="voiceBasics">
               <div class="section-title">
-                <strong>工作方式</strong>
-                <span>决定速度、质量和快捷键。</span>
+                <strong><span class="settings-step">01</span> 工作方式</strong>
               </div>
               <fieldset class="field mode-field">
                 <span>转写模式</span>
@@ -156,6 +155,22 @@
                   </button>
                 </div>
               </fieldset>
+            </section>
+
+            <section class="settings-group" id="voiceDevices">
+              <div class="section-title">
+                <strong><span class="settings-step">02</span> 麦克风与快捷键</strong>
+              </div>
+              <div class="microphone-picker-row">
+              <label class="field">
+                <span>麦克风</span>
+                <select id="microphoneSelect">
+                  <option value="">系统默认麦克风</option>
+                </select>
+                <small id="microphoneHint" class="microphone-hint">录音时会显示实际使用的输入源。</small>
+              </label>
+              <button id="refreshDevicesBtn" type="button" class="icon-btn" title="刷新麦克风" aria-label="刷新麦克风"><span class="ui-icon icon-refresh" aria-hidden="true"></span></button>
+              </div>
               <label class="field">
                 <span>短语音输入快捷键</span>
                 <input id="hotkeyInput" type="text" placeholder="CommandOrControl+Alt+M" autocomplete="off" />
@@ -169,24 +184,113 @@
                 <small id="meetingHotkeyStatus" class="hotkey-hint" aria-live="polite"></small>
               </label>
             </section>
+            <section class="settings-group" id="voiceConnectionSelection">
+              <div class="section-title"><strong><span class="settings-step">03</span> 语音识别供应商</strong><span id="asrConfigurationStatus" role="status"></span></div>
+              <label class="field"><span>供应商</span><select id="asrProviderSelect"><option value="mimo">MiMo ASR</option><option value="qwen3-asr">Qwen3-ASR · 阿里云</option><option value="fun-asr">Fun-ASR · 阿里云</option></select></label>
+            </section>
+            <section class="settings-group provider-connection-group" data-asr-connection="mimo" aria-labelledby="mimoConnectionTitle">
+              <div class="section-title">
+                <strong id="mimoConnectionTitle">MiMo · 语音识别</strong>
+                <span id="mimoConnectionDescription">用于短语音、文件转写、会议分段转写与音频核对；独立于语言处理连接。Token Plan 请填写 token-plan-cn 地址和 tp- Key。</span>
+              </div>
+              <label class="field">
+                <span>MiMo Base URL</span>
+                <input id="mimoBaseUrlInput" type="url" placeholder="https://api.xiaomimimo.com/v1" autocomplete="off" aria-describedby="mimoConnectionDescription" />
+              </label>
+              <div class="field">
+                <label for="mimoApiKeyInput">MiMo API Key</label>
+                <div class="secret-control">
+                  <input id="mimoApiKeyInput" type="password" placeholder="MiMo ASR API Key" autocomplete="off" aria-describedby="mimoConnectionDescription" />
+                  <button type="button" class="secret-action" data-secret-toggle="mimoApiKeyInput" title="显示或隐藏 MiMo API Key">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="mimoApiKeyInput" title="复制 MiMo API Key">复制</button>
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button type="button" data-provider-connection-test="mimo">测试 MiMo ASR</button>
+                <span class="provider-test-result" data-provider-test-result="mimo" aria-live="polite"></span>
+              </div>
+            </section>
+
+            <section class="settings-group provider-connection-group" data-asr-connection="aliyun" aria-labelledby="aliyunConnectionTitle">
+              <div class="section-title">
+                <strong id="aliyunConnectionTitle">阿里云百炼 · 语音识别</strong>
+                <span id="aliyunConnectionDescription">用于 Qwen ASR、Fun-ASR 和会议实时识别；Qwen 文本整理与摘要模型请单独配置语言处理供应商。</span>
+              </div>
+              <label class="field">
+                <span>阿里云 Base URL</span>
+                <input id="aliyunBaseUrlInput" type="url" placeholder="https://dashscope.aliyuncs.com" autocomplete="off" aria-describedby="aliyunConnectionDescription" />
+              </label>
+              <div class="field">
+                <label for="aliyunApiKeyInput">阿里云 API Key</label>
+                <div class="secret-control">
+                  <input id="aliyunApiKeyInput" type="password" placeholder="Qwen、Fun-ASR 与实时模型共用" autocomplete="off" aria-describedby="aliyunConnectionDescription" />
+                  <button type="button" class="secret-action" data-secret-toggle="aliyunApiKeyInput" title="显示或隐藏阿里云 API Key">显示</button>
+                  <button type="button" class="secret-action" data-secret-copy="aliyunApiKeyInput" title="复制阿里云 API Key">复制</button>
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button type="button" data-provider-connection-test="aliyun">测试阿里云</button>
+                <span class="provider-test-result" data-provider-test-result="aliyun" aria-live="polite"></span>
+              </div>
+            </section>
 
             <section class="settings-group">
               <div class="section-title">
-                <strong>输入设备</strong>
-                <span>选择麦克风并刷新设备列表。</span>
+                <strong><span class="settings-step">04</span> 识别模型</strong>
               </div>
-              <label class="field">
-                <span>麦克风</span>
-                <select id="microphoneSelect">
-                  <option value="">系统默认麦克风</option>
-                </select>
-                <small id="microphoneHint" class="microphone-hint">录音时会显示实际使用的输入源。</small>
+              <div class="provider-grid">
+                <label class="field">
+                  <span>ASR 模型</span>
+                  <select id="asrModelPresetSelect">
+                    <option value="mimo-v2.5-asr">MiMo V2.5 ASR（推荐）</option>
+                    <option value="qwen3-asr-flash">Qwen3-ASR Flash</option>
+                    <option value="fun-asr">Fun-ASR</option>
+                    <option value="__custom__">自定义模型</option>
+                  </select>
+                </label>
+              </div>
+              <div class="provider-grid">
+                <label id="asrCustomModelField" class="field" hidden>
+                  <span>自定义最终转写模型</span>
+                  <input id="asrModelInput" type="text" placeholder="输入 ASR 模型 ID" />
+                </label>
+                <label class="field">
+                  <span>识别显示模式</span>
+                  <select id="asrModeSelect">
+                    <option value="batch">非实时：录完后转写</option>
+                    <option value="realtime">实时预览：边录边显示</option>
+                  </select>
+                </label>
+              </div>
+              <div class="provider-grid">
+                <label class="field">
+                  <span>实时预览模型</span>
+                  <select id="asrRealtimeModelPresetSelect">
+                    <option value="mimo-v2.5-asr" data-asr-provider="mimo">MiMo V2.5 ASR</option>
+                    <option value="qwen-audio-3.0-asr-flash-streaming" data-asr-provider="qwen3-asr">Qwen Audio 3.0 实时语音（推荐）</option>
+                    <option value="qwen3-asr-flash-realtime-2026-02-10" data-asr-provider="qwen3-asr">Qwen3-ASR Flash Realtime 2026-02-10（旧版）</option>
+                    <option value="fun-asr-realtime" data-asr-provider="fun-asr">Fun-ASR Realtime</option>
+                    <option value="__custom_realtime__">自定义实时模型</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>识别语言</span>
+                  <input id="asrLanguageInput" type="text" placeholder="可选，例如 zh 或 en" />
+                </label>
+              </div>
+              <label id="asrCustomRealtimeModelField" class="field" hidden>
+                <span>自定义实时预览模型</span>
+                <input id="asrRealtimeModelInput" type="text" placeholder="输入实时模型 ID" />
               </label>
-              <button id="refreshDevicesBtn" type="button">刷新麦克风</button>
+              <label class="check-field">
+                <input id="asrEnableItnInput" type="checkbox" />
+                <span>启用数字、日期等文本规范化</span>
+              </label>
             </section>
           </div>
 
-          <div class="settings-tab-panel" role="tabpanel" data-settings-panel="connections" hidden>
+          <div id="settingsCleanerPanel" class="settings-tab-panel" role="tabpanel" aria-labelledby="settingsTabCleaner" data-settings-panel="cleaner" hidden>
+            <p id="expressionModeNotice" class="settings-mode-notice" role="status"></p>
             <section class="settings-group text-supplier-group" aria-labelledby="textSupplierTitle">
               <div class="text-supplier-toolbar">
                 <div>
@@ -195,7 +299,7 @@
                 </div>
                 <button id="textSupplierAdd" type="button" class="primary"><span class="ui-icon icon-plus" aria-hidden="true"></span>添加供应商</button>
               </div>
-              <div class="text-supplier-layout">
+              <div id="textSupplierLayout" class="text-supplier-layout">
                 <div class="text-supplier-list-wrap">
                   <label class="field"><span class="sr-only">搜索供应商</span><input id="textSupplierSearch" type="search" placeholder="搜索供应商" autocomplete="off" /></label>
                   <div id="textSupplierCards" class="text-supplier-cards" role="listbox" aria-label="已添加的文本模型供应商"></div>
@@ -248,126 +352,9 @@
                 </div>
               </div>
             </section>
-          </div>
-
-          <div class="settings-tab-panel" role="tabpanel" data-settings-panel="asr-connections" hidden>
-            <section class="settings-group provider-connection-group" aria-labelledby="mimoConnectionTitle">
-              <div class="section-title">
-                <strong id="mimoConnectionTitle">MiMo · 语音识别</strong>
-                <span id="mimoConnectionDescription">用于短语音、文件转写、会议分段转写与音频核对；独立于语言处理连接。Token Plan 请填写 token-plan-cn 地址和 tp- Key。</span>
-              </div>
-              <label class="field">
-                <span>MiMo Base URL</span>
-                <input id="mimoBaseUrlInput" type="url" placeholder="https://api.xiaomimimo.com/v1" autocomplete="off" aria-describedby="mimoConnectionDescription" />
-              </label>
-              <div class="field">
-                <label for="mimoApiKeyInput">MiMo API Key</label>
-                <div class="secret-control">
-                  <input id="mimoApiKeyInput" type="password" placeholder="MiMo ASR API Key" autocomplete="off" aria-describedby="mimoConnectionDescription" />
-                  <button type="button" class="secret-action" data-secret-toggle="mimoApiKeyInput" title="显示或隐藏 MiMo API Key">显示</button>
-                  <button type="button" class="secret-action" data-secret-copy="mimoApiKeyInput" title="复制 MiMo API Key">复制</button>
-                </div>
-              </div>
-              <div class="settings-actions">
-                <button type="button" data-provider-connection-test="mimo">测试 MiMo ASR</button>
-                <span class="provider-test-result" data-provider-test-result="mimo" aria-live="polite"></span>
-              </div>
-            </section>
-
-            <section class="settings-group provider-connection-group" aria-labelledby="aliyunConnectionTitle">
-              <div class="section-title">
-                <strong id="aliyunConnectionTitle">阿里云百炼 · 语音识别</strong>
-                <span id="aliyunConnectionDescription">用于 Qwen ASR、Fun-ASR 和会议实时识别；Qwen 文本整理与摘要模型请单独配置语言处理供应商。</span>
-              </div>
-              <label class="field">
-                <span>阿里云 Base URL</span>
-                <input id="aliyunBaseUrlInput" type="url" placeholder="https://dashscope.aliyuncs.com" autocomplete="off" aria-describedby="aliyunConnectionDescription" />
-              </label>
-              <div class="field">
-                <label for="aliyunApiKeyInput">阿里云 API Key</label>
-                <div class="secret-control">
-                  <input id="aliyunApiKeyInput" type="password" placeholder="Qwen、Fun-ASR 与实时模型共用" autocomplete="off" aria-describedby="aliyunConnectionDescription" />
-                  <button type="button" class="secret-action" data-secret-toggle="aliyunApiKeyInput" title="显示或隐藏阿里云 API Key">显示</button>
-                  <button type="button" class="secret-action" data-secret-copy="aliyunApiKeyInput" title="复制阿里云 API Key">复制</button>
-                </div>
-              </div>
-              <div class="settings-actions">
-                <button type="button" data-provider-connection-test="aliyun">测试阿里云</button>
-                <span class="provider-test-result" data-provider-test-result="aliyun" aria-live="polite"></span>
-              </div>
-            </section>
-
-          </div>
-
-          <div class="settings-tab-panel" role="tabpanel" data-settings-panel="asr" hidden>
             <section class="settings-group">
               <div class="section-title">
-                <strong>第一步：语音识别</strong>
-                <span>连接来自“语音识别供应商”，与表达整理、摘要的语言处理连接独立。</span>
-              </div>
-              <div class="provider-grid">
-                <label class="field">
-                  <span>ASR 模型</span>
-                  <select id="asrModelPresetSelect">
-                    <option value="mimo-v2.5-asr">MiMo V2.5 ASR（推荐）</option>
-                    <option value="qwen3-asr-flash">Qwen3-ASR Flash</option>
-                    <option value="fun-asr">Fun-ASR</option>
-                    <option value="__custom__">自定义模型</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>语音识别供应商</span>
-                  <select id="asrProviderSelect">
-                    <option value="mimo">MiMo ASR</option>
-                    <option value="qwen3-asr">Qwen3-ASR</option>
-                    <option value="fun-asr">Fun-ASR</option>
-                  </select>
-                </label>
-              </div>
-              <div class="provider-grid">
-                <label id="asrCustomModelField" class="field" hidden>
-                  <span>自定义最终转写模型</span>
-                  <input id="asrModelInput" type="text" placeholder="输入 ASR 模型 ID" />
-                </label>
-                <label class="field">
-                  <span>识别显示模式</span>
-                  <select id="asrModeSelect">
-                    <option value="batch">非实时：录完后转写</option>
-                    <option value="realtime">实时预览：边录边显示</option>
-                  </select>
-                </label>
-              </div>
-              <div class="provider-grid">
-                <label class="field">
-                  <span>实时预览模型</span>
-                  <select id="asrRealtimeModelPresetSelect">
-                    <option value="mimo-v2.5-asr" data-asr-provider="mimo">MiMo V2.5 ASR</option>
-                    <option value="qwen-audio-3.0-asr-flash-streaming" data-asr-provider="qwen3-asr">Qwen Audio 3.0 实时语音（推荐）</option>
-                    <option value="qwen3-asr-flash-realtime-2026-02-10" data-asr-provider="qwen3-asr">Qwen3-ASR Flash Realtime 2026-02-10（旧版）</option>
-                    <option value="fun-asr-realtime" data-asr-provider="fun-asr">Fun-ASR Realtime</option>
-                    <option value="__custom_realtime__">自定义实时模型</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>识别语言</span>
-                  <input id="asrLanguageInput" type="text" placeholder="可选，例如 zh 或 en" />
-                </label>
-              </div>
-              <label id="asrCustomRealtimeModelField" class="field" hidden>
-                <span>自定义实时预览模型</span>
-                <input id="asrRealtimeModelInput" type="text" placeholder="输入实时模型 ID" />
-              </label>
-              <label class="check-field">
-                <input id="asrEnableItnInput" type="checkbox" />
-                <span>启用数字、日期等文本规范化</span>
-              </label>
-            </section>
-          </div>
-
-          <div class="settings-tab-panel" role="tabpanel" data-settings-panel="cleaner" hidden>
-            <section class="settings-group">
-              <div class="section-title">
-                <strong>第二步：表达整理</strong>
+                <strong>语音输入 · 表达整理模型</strong>
                 <span>理解本次转写语境，保留原意并整理成清晰、连贯、可直接使用的段落。</span>
               </div>
               <div class="provider-grid text-model-picker">
@@ -486,7 +473,7 @@
             </section>
           </div>
 
-          <div class="settings-tab-panel" role="tabpanel" data-settings-panel="meeting" hidden>
+          <div id="legacyMeetingSettings" class="legacy-meeting-settings" hidden>
             <section class="settings-group legacy-meeting-settings" hidden>
               <div class="section-title">
                 <strong>默认处理</strong>
@@ -634,7 +621,24 @@
             </section>
           </div>
 
-          <div class="settings-tab-panel update-panel" role="tabpanel" data-settings-panel="updates" hidden>
+          <div id="settingsHistoryPanel" class="settings-tab-panel" role="tabpanel" aria-labelledby="settingsTabHistory" data-settings-panel="history" hidden>
+            <section class="settings-group voice-history-header">
+              <div class="section-title"><strong>语音识别历史记录</strong><span>仅保存在本机，不会加入后续识别或整理的上下文。</span></div>
+              <label class="switch-field"><input id="voiceHistoryEnabled" type="checkbox" checked /><span>保存新的语音输入记录</span></label>
+              <div class="voice-history-toolbar"><label class="field"><span class="sr-only">搜索语音记录</span><input id="voiceHistorySearch" type="search" placeholder="搜索识别原文或整理结果" autocomplete="off" /></label><button id="voiceHistoryRefresh" class="icon-btn" type="button" title="刷新历史记录" aria-label="刷新历史记录"><span class="ui-icon icon-refresh" aria-hidden="true"></span></button></div>
+              <p id="voiceHistoryStatus" class="settings-note" role="status"></p>
+            </section>
+            <div class="voice-history-layout">
+              <div class="voice-history-list-wrap"><div id="voiceHistoryList" class="voice-history-list" aria-label="语音输入记录"></div><button id="voiceHistoryMore" type="button" hidden>加载更多</button></div>
+              <section id="voiceHistoryDetail" class="voice-history-detail" aria-label="记录详情" hidden>
+                <div class="voice-history-detail-head"><strong id="voiceHistoryDate"></strong><span id="voiceHistoryMeta"></span></div>
+                <div class="voice-history-text-head"><strong>识别原文</strong><button id="voiceHistoryCopyRaw" type="button" class="icon-btn" title="复制识别原文" aria-label="复制识别原文"><span class="ui-icon icon-copy" aria-hidden="true"></span></button></div>
+                <div id="voiceHistoryRaw" class="voice-history-text"></div>
+                <div id="voiceHistoryResultBlock" hidden><div class="voice-history-text-head"><strong>整理结果</strong><button id="voiceHistoryCopyResult" type="button" class="icon-btn" title="复制整理结果" aria-label="复制整理结果"><span class="ui-icon icon-copy" aria-hidden="true"></span></button></div><div id="voiceHistoryResult" class="voice-history-text"></div></div>
+              </section>
+            </div>
+          </div>
+          <div id="settingsUpdatesPanel" class="settings-tab-panel update-panel" role="tabpanel" aria-labelledby="settingsTabUpdates" data-settings-panel="updates" hidden>
             <section class="settings-group update-group">
               <div class="update-title-row">
                 <div>
@@ -658,8 +662,10 @@
                 <span>启动后自动检查更新</span>
               </label>
               <p id="updatePlatformNote" class="settings-note"></p>
+              <section id="updateReleaseNotesBlock" class="update-release-notes" hidden aria-labelledby="updateReleaseNotesTitle"><strong id="updateReleaseNotesTitle">新版本更新内容</strong><p id="updateReleaseNotesText"></p></section>
             </section>
           </div>
+        </div>
         </div>
       </section>
 
@@ -1134,6 +1140,8 @@
     <script src="./live-meeting-ui.js"></script>
     <script src="./home-ui.js"></script>
     <script src="./onboarding-ui.js"></script>
+    <script src="./settings-workspace.js"></script>
+    <script src="./voice-history-ui.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

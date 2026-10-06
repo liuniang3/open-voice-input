@@ -49,6 +49,7 @@ const { ensureConnectionProfiles } = require("./settings/connection-profiles");
 const { mergeAsrConnections, resolveProviderConnection } = require("./settings/provider-connections");
 const { validateHotkey, normalizeAccelerator } = require("./hotkeys/validate-hotkey");
 const { createUsageStats } = require("./usage-stats");
+const { createVoiceHistory } = require("./voice-history");
 const { createOnboardingState } = require("./onboarding-state");
 const { normalizePresentation, minimalBounds, visibleBounds, createMeetingWindowStore } = require("./settings/meeting-window");
 const { createTransparentPreview } = require("./meeting/transparent-preview");
@@ -277,7 +278,8 @@ const DEFAULT_SETTINGS = {
   meetingAnalysisMaxOutput: 8192,
   meetingAnalysisReasoning: "",
   meetingAnalysisTimeoutMs: 120000,
-  updateAutoCheck: true
+  updateAutoCheck: true,
+  voiceHistoryEnabled: true
 };
 
 app.setPath("userData", path.join(app.getPath("appData"), STABLE_USER_DATA_DIR));
@@ -292,10 +294,27 @@ let hotkeyHelperProcess = null;
 let shortcutCaptureSuspended = false;
 let windowMode = "compact";
 let usageStats;
+let voiceHistory;
 let onboardingState;
 
 function getUsageStats() {
   return usageStats ||= createUsageStats({ directory: app.getPath("userData") });
+}
+
+function getVoiceHistory() {
+  return voiceHistory ||= createVoiceHistory({ directory: app.getPath("userData") });
+}
+
+async function recordVoiceHistory(payload) {
+  if (settings.voiceHistoryEnabled === false) return { ok: true, recorded: false };
+  try {
+    const result = await getVoiceHistory().record(payload);
+    mainWindow?.webContents.send("voice:history:updated");
+    return { ok: true, ...result };
+  } catch {
+    logEvent("voice-history: persistence unavailable");
+    return { ok: false, error: { message: "历史记录暂时无法保存，语音输入不受影响。" } };
+  }
 }
 
 function getOnboardingState() {
@@ -2067,6 +2086,20 @@ ipcMain.handle("voice:transcribe", async (_event, payload) => voicePipeline.tran
 ipcMain.handle("mimo:transcribe", async (_event, payload) => voicePipeline.transcribe(payload));
 ipcMain.handle("voice:segment:transcribe", async (_event, payload) => voicePipeline.transcribeSegment(payload));
 ipcMain.handle("voice:clean-text", async (_event, payload) => voicePipeline.cleanText(payload));
+ipcMain.handle("voice:history:record", async (event, payload) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };
+  return recordVoiceHistory(payload);
+});
+ipcMain.handle("voice:history:list", async (event, payload) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };
+  try { return { ok: true, ...await getVoiceHistory().list(payload || {}) }; }
+  catch { return { ok: false, error: { message: "历史记录暂时无法读取。" } }; }
+});
+ipcMain.handle("voice:history:get", async (event, payload) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };
+  try { return { ok: true, entry: await getVoiceHistory().get(payload?.requestId) }; }
+  catch { return { ok: false, error: { message: "历史记录暂时无法读取。" } }; }
+});
 ipcMain.handle("voice:realtime:start", async (event) => startRealtimeAsr(event));
 ipcMain.handle("voice:realtime:append", async (_event, base64Audio) => appendRealtimeAudio(base64Audio));
 ipcMain.handle("voice:realtime:finish", async (_event, payload) => finishRealtimeAsr(payload));
@@ -3248,7 +3281,7 @@ app.whenReady().then(async () => {
   await loadSettings();
   liveWindowStore = createMeetingWindowStore(app.getPath("userData"));
   livePresentation = await liveWindowStore.read();
-  voicePipeline = createVoicePipeline({ getSettings: () => settings, logEvent });
+  voicePipeline = createVoicePipeline({ getSettings: () => settings, logEvent, onTranscript: recordVoiceHistory });
   logEvent("settings: loaded", JSON.stringify({ hotkey: settings.hotkey, microphoneDeviceId: settings.microphoneDeviceId, transcriptionMode: settings.transcriptionMode }));
   configurePermissions();
   createWindow();

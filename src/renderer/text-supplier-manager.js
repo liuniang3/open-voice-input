@@ -74,6 +74,8 @@
       const suppliers = ui.listSuppliers(settings);
       selectedId = suppliers.some(item => item.id === preferredId) ? preferredId : suppliers[0]?.id || "";
       const entry = suppliers.find(item => item.id === selectedId);
+      $("textSupplierEditor").hidden = !entry;
+      $("textSupplierLayout").dataset.state = entry ? "configured" : "empty";
       $("textSupplierCount").textContent = `${suppliers.length} 个供应商`;
       const query = $("textSupplierSearch").value.trim().toLowerCase();
       const visible = suppliers.filter(item => `${item.name} ${item.baseUrl}`.toLowerCase().includes(query));

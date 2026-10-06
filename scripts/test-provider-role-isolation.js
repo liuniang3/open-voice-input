@@ -118,7 +118,7 @@ async function verifyBrowser(page, output) {
   const errors = await prepareBrowser(page);
   const fixture = isolatedSettings();
   await page.evaluate(async value => { await window.mimoInput.saveSettings(value); window.mockOpenSettings(); }, fixture);
-  await page.locator('[data-settings-tab="asr-connections"]').click();
+  await page.locator('[data-settings-tab="asr"]').click();
   assert.equal(await page.locator("#mimoBaseUrlInput").inputValue(), "https://asr.example/v1");
   assert.equal(await page.locator("#mimoApiKeyInput").inputValue(), "fixture-asr");
   assert.equal(await page.locator("#textSupplierCards").isVisible(), false);
@@ -128,7 +128,7 @@ async function verifyBrowser(page, output) {
   const state = await page.evaluate(() => ({ text: window.mockSettings().textSuppliers[0].baseUrl,
     legacy: window.mockSettings().providerConnections.mimo.baseUrl }));
   assert.deepEqual(state, { text: "https://text.example/v1", legacy: "https://stale.example/v1" });
-  await page.locator('[data-settings-tab="connections"]').click();
+  await page.locator('[data-settings-tab="cleaner"]').click();
   assert.equal(await page.locator("#mimoBaseUrlInput").isVisible(), false);
   assert.equal(await page.locator("#textSupplierCards").isVisible(), true);
   await page.locator('[data-settings-tab="cleaner"]').click();
@@ -136,7 +136,7 @@ async function verifyBrowser(page, output) {
   assert.equal(await page.locator("#cleanupSupplierSelect").inputValue(), "mimo-text");
   for (const size of [{ width: 1180, height: 800 }, { width: 640, height: 520 }]) {
     await page.setViewportSize(size);
-    for (const tab of ["asr-connections", "connections"]) {
+    for (const tab of ["asr", "cleaner"]) {
       await page.locator(`[data-settings-tab="${tab}"]`).click();
       const overflow = await page.locator("#settingsPanel").evaluate(el => el.scrollWidth > el.clientWidth + 1);
       assert.equal(overflow, false, `${tab} overflow at ${size.width}`);

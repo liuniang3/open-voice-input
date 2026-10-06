@@ -22,11 +22,10 @@ function test(name, run) {
 }
 
 test("ASR and language supplier panels expose separate connections and controls", () => {
-  assert.match(html, /data-settings-tab="connections"/);
-  assert.match(html, /data-settings-tab="asr-connections">语音识别供应商/);
-  assert.match(html, /data-settings-tab="connections">语言处理供应商/);
-  const textPanel = html.slice(html.indexOf('data-settings-panel="connections"'), html.indexOf('data-settings-panel="asr-connections"'));
-  const asrPanel = html.slice(html.indexOf('data-settings-panel="asr-connections"'), html.indexOf('data-settings-panel="asr"'));
+  assert.match(html, /data-settings-tab="asr"/);
+  assert.match(html, /data-settings-tab="cleaner"/);
+  const textPanel = html.slice(html.indexOf('data-settings-panel="cleaner"'), html.indexOf('id="legacyMeetingSettings"'));
+  const asrPanel = html.slice(html.indexOf('data-settings-panel="asr"'), html.indexOf('data-settings-panel="cleaner"'));
   assert.match(textPanel, /id="textSupplierCards"/);
   assert.doesNotMatch(textPanel, /id="(?:mimo|aliyun)ApiKeyInput"/);
   assert.doesNotMatch(asrPanel, /id="textSupplier/);

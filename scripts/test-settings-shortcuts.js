@@ -274,7 +274,8 @@ test("settings UI separates ASR and language connections with model-only vendor 
   const html = fs.readFileSync(path.join(root, "src", "renderer", "index.html"), "utf8");
   const js = fs.readFileSync(path.join(root, "src", "renderer", "renderer.js"), "utf8");
   const saveJs = js.slice(js.indexOf("async function saveAllSettings"), js.indexOf("async function runMeetingEnhancedTest"));
-  assert.match(html, /data-settings-tab="connections"/);
+  assert.match(html, /data-settings-tab="cleaner"/);
+  assert.match(html, /data-settings-tab="asr"/);
   for (const family of ["mimo", "aliyun"]) {
     assert.match(html, new RegExp(`id="${family}BaseUrlInput"`));
     assert.match(html, new RegExp(`id="${family}ApiKeyInput"`));
