@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## v0.4.12 - 2026-10-06
+
 ### Added
 
 - Local short-dictation history with searchable original/organized text, timestamps, model labels and copy actions. Recording retries update the same entry; realtime previews, individual upload chunks, cancelled recordings and history copies do not create extra records or inflate usage statistics. Saving new records can be disabled without losing existing history.
