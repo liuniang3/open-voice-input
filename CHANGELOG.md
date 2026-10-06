@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## v0.4.13 - 2026-10-06
+
+### Fixed
+
+- Stabilized the managed-stream cancellation regression test on slower Windows CI runners by waiting until the simulated provider request is active before asserting abort propagation. This keeps the release gate meaningful without weakening cancellation coverage.
+
+### Release Notes
+
+- This patch release supersedes `v0.4.12` with the same settings and local voice-history feature set, plus a complete cross-platform release build.
+
 ## v0.4.12 - 2026-10-06
 
 ### Added

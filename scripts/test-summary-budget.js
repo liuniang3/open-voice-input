@@ -113,11 +113,16 @@ async function main() {
     assert.equal((await service.summarize()).status, "completed");
     const controller = new AbortController();
     const fresh = await fixture();
+    let requestStartedResolve;
+    const requestStarted = new Promise(resolve => { requestStartedResolve = resolve; });
     const cancelled = createMeetingPostprocessService({ sessionDir: fresh.directory, getState: () => fresh.state,
       llm: { modelId: "unit", managesTransport: true, complete: request => {
-        signal = request.signal; return new Promise(resolve => setTimeout(() => resolve(response(request.input)), 70));
+        signal = request.signal;
+        requestStartedResolve();
+        return new Promise(resolve => setTimeout(() => resolve(response(request.input)), 70));
       } } });
     const running = cancelled.summarize({ signal: controller.signal });
+    await requestStarted;
     setTimeout(() => controller.abort(), 20);
     const result = await running;
     assert.equal(result.status, "cancelled"); assert.equal(signal.aborted, true);
