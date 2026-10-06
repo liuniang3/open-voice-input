@@ -16,6 +16,13 @@ async function run() {
   assert.equal(next.id, "provider"); assert.equal(next.baseUrl, "https://second.invalid/v1");
   assert.equal(ui.uniqueSupplierId("Custom provider", { textSuppliers: [{ id: "custom-provider" }, { id: "custom-provider-2" }] }), "custom-provider-3");
   assert.equal(ui.uniqueSupplierName("我的服务", settings), "我的服务 2");
+  const hiddenLegacyGo = ensureTextSuppliers({
+    textSuppliers: [{ id: "opencode-go", name: "OpenCode Go", baseUrl: "https://opencode.ai/zen/go/v1", apiKey: "fixture-go", migratedFrom: "opencode-go" }]
+  });
+  assert.equal(ui.listSuppliers(hiddenLegacyGo)[0].name, "兼容旧供应商配置");
+  assert.equal(ui.supplierDraft(hiddenLegacyGo, {
+    name: "OpenCode Go", baseUrl: "https://opencode.ai/zen/go/v1", apiStyle: "chat-completions", apiKey: "fixture-new-go"
+  }).name, "OpenCode Go", "hidden legacy entry must not block the visible OpenCode Go preset");
   const edited = ui.supplierDraft(settings, { ...draft, name: "改名", authStyle: "api-key" }, "first");
   assert.equal(edited.apiKey, settings.textSuppliers[0].apiKey);
   assert.equal(edited.id, "first"); assert.deepEqual(edited.requestHeaders, { "X-Client": "demo" });

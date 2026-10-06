@@ -485,23 +485,7 @@ let activeMeetingAnalysisCapabilityBaseline = null;
 let activeSettingsTab = "general";
 
 function createSettingsSnapshot() {
-  return {
-    model: appSettings.model,
-    asrProvider: appSettings.asrProvider,
-    asrMode: appSettings.asrMode,
-    asrModel: appSettings.asrModel,
-    asrRealtimeModel: appSettings.asrRealtimeModel,
-    asrApiKey: appSettings.asrApiKey,
-    asrBaseUrl: appSettings.asrBaseUrl,
-    asrLanguage: appSettings.asrLanguage,
-    asrEnableItn: appSettings.asrEnableItn,
-    cleanerProvider: appSettings.cleanerProvider,
-    cleanerModel: appSettings.cleanerModel,
-    cleanerApiKey: appSettings.cleanerApiKey,
-    cleanerBaseUrl: appSettings.cleanerBaseUrl,
-    transcriptionMode: appSettings.transcriptionMode,
-    requestTimeoutMs: appSettings.requestTimeoutMs
-  };
+  return window.VoiceSettingsSnapshot.createVoiceSettingsSnapshot(appSettings);
 }
 
 function createFinalTranscriptionSnapshot() {

@@ -50,6 +50,14 @@ assert.equal(
   "请缩小实时转写窗口，并在按下回车后整理文本。"
 );
 assert.equal(parseAndValidateCleanupResponse('{"text":"整理后的文本：请缩小窗口。"}', "请把窗口缩小。"), "");
+assert.equal(parseAndValidateCleanupResponse(
+  '{"text":"To strictly follow the rules, I should remove filler words and merge repeated fragments."}',
+  "我希望把窗口缩小。"
+), "");
+assert.equal(parseAndValidateCleanupResponse(
+  '{"text":"第二句：请把窗口缩小。"}',
+  "请把窗口缩小。"
+), "");
 assert.equal(parseAndValidateCleanupResponse('{"text":"请缩小窗口。","reason":"done"}', "请把窗口缩小。"), "请缩小窗口。");
 assert.equal(parseAndValidateCleanupResponse('{"text":"- 请缩小窗口。"}', "请把窗口缩小。"), "");
 assert.equal(

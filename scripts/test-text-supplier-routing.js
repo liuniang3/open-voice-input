@@ -1,7 +1,9 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 const { ensureTextSuppliers, textModelSelectionFor } = require("../src/settings/text-suppliers");
 const {
   createTextSupplierChat,
@@ -11,6 +13,20 @@ const { meetingTextProfile, languageModel } = require("../src/meeting/realtime/p
 const { createVoicePipeline } = require("../src/providers/voice-pipeline");
 
 const root = path.resolve(__dirname, "..");
+const snapshotSource = fs.readFileSync(path.join(root, "src/renderer/voice-settings-snapshot.js"), "utf8");
+const rendererSource = fs.readFileSync(path.join(root, "src/renderer/renderer.js"), "utf8");
+const snapshotFunctions = rendererSource.slice(rendererSource.indexOf("function createSettingsSnapshot()"),
+  rendererSource.indexOf("function normalizeTranscriptionMode("));
+
+function recordingSnapshot(settings) {
+  // Execute the same browser export and recording snapshot wrapper as the UI,
+  // rather than supplying the pipeline with a complete settings fixture.
+  const context = { window: {}, structuredClone, appSettings: settings, normalizeAsrMode: value => value };
+  vm.runInNewContext(snapshotSource, context);
+  vm.runInNewContext(snapshotFunctions, context);
+  return context.createFinalTranscriptionSnapshot();
+}
+
 let passed = 0;
 async function test(name, run) {
   await run(); passed++;
@@ -57,6 +73,78 @@ function baseSettings(extra = {}) {
 }
 
 async function main() {
+  await test("browser recording snapshot keeps canonical routing and deep-copies model settings", () => {
+    const settings = baseSettings({
+      asrMode: "realtime",
+      asrConnections: { mimo: { apiKey: "", baseUrl: "https://asr.example/v1" } },
+      textModelSelections: { cleanup: { supplierId: "alpha", modelId: "glm-5.2" } },
+      meetingOssAccessKeySecret: "fixture-private-meeting-setting",
+      meetingRealtimeDestination: "fixture-private-note"
+    });
+    const snapshot = recordingSnapshot(settings);
+    assert.equal(snapshot.asrMode, "batch");
+    assert.equal(settings.asrMode, "realtime", "snapshot must not modify the UI settings");
+    assert.equal(snapshot._languageSuppliersMigrated, true);
+    assert.deepEqual(snapshot.textModelSelections, settings.textModelSelections);
+    assert.deepEqual(snapshot.asrConnections, settings.asrConnections);
+    assert.equal(Object.hasOwn(snapshot, "meetingOssAccessKeySecret"), false);
+    assert.equal(Object.hasOwn(snapshot, "meetingRealtimeDestination"), false);
+    settings.textSuppliers[0].apiKey = "changed-after-recording";
+    settings.textSupplierCatalogs.alpha.capabilities["glm-5.2"].maxOutput = 256;
+    settings.textModelSelections.cleanup.supplierId = "beta";
+    assert.equal(snapshot.textSuppliers[0].apiKey, "sk-alpha");
+    assert.equal(snapshot.textSupplierCatalogs.alpha.capabilities["glm-5.2"].maxOutput, 4096);
+    assert.equal(snapshot.textModelSelections.cleanup.supplierId, "alpha");
+    const html = fs.readFileSync(path.join(root, "src/renderer/index.html"), "utf8");
+    const helperAt = html.indexOf('src="./voice-settings-snapshot.js"');
+    assert.ok(helperAt >= 0 && helperAt < html.indexOf('src="./renderer.js"'), "helper must load before renderer");
+  });
+
+  for (const apiStyle of ["chat-completions", "responses"]) {
+    await test(`${apiStyle}: recorded and retried cleanup stays on Go despite stale MiMo settings`, async () => {
+      const modelId = apiStyle === "chat-completions" ? "mimo-v2.6-flash" : "deepseek-v4.1-flash";
+      const settings = baseSettings({
+        asrProvider: "mimo", asrMode: "realtime", transcriptionMode: "stable",
+        cleanerProvider: "opencode-go", cleanerModel: modelId,
+        cleanerApiKey: "fixture-stale-mimo-key", cleanerBaseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+        providerConnections: { mimo: { apiKey: "fixture-stale-mimo-key", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1" } },
+        textSuppliers: [{ id: "opencode-go1", name: "OpenCode Go1", apiKey: "fixture-selected-go-key",
+          baseUrl: "https://opencode.ai/zen/go/v1", apiStyle }],
+        textSupplierCatalogs: { "opencode-go1": { models: [modelId],
+          capabilities: { [modelId]: { contextWindow: 1000000, maxOutput: 384000 } } } },
+        textModelSelections: { cleanup: { supplierId: "opencode-go1", modelId } }
+      });
+      const snapshot = recordingSnapshot(settings);
+      const logs = [];
+      const pipeline = createVoicePipeline({
+        getSettings: () => settings,
+        logEvent: (message, detail) => logs.push(`${message} ${detail || ""}`),
+        providerOverrides: { asrProviders: { mimo: { id: "asr", transcribeRaw: async () => ({ text: "呃，请把窗口缩小。" }) } } }
+      });
+      const seen = [];
+      await withMockFetch(async (url, init) => {
+        seen.push({ url: String(url), auth: init.headers.Authorization, body: JSON.parse(init.body) });
+        return okResponse('{"text":"请缩小窗口。"}');
+      }, async () => {
+        // Realtime final text, segmented batch transcription and retry must all
+        // route through the frozen frontend snapshot, even after a UI switch.
+        assert.equal(await pipeline.cleanText({ rawText: "呃，请把窗口缩小。", settingsSnapshot: snapshot }), "请缩小窗口。");
+        settings.textModelSelections.cleanup = { supplierId: "deleted-after-recording", modelId: "other" };
+        assert.equal(await pipeline.transcribe({ audioDataUrl: "data:audio/wav;base64,fixture", settingsSnapshot: snapshot }), "请缩小窗口。");
+        assert.equal(await pipeline.cleanText({ rawText: "呃，请把窗口缩小。", settingsSnapshot: snapshot }), "请缩小窗口。");
+      });
+      assert.equal(seen.length, 3);
+      for (const call of seen) {
+        assert.equal(call.url, `https://opencode.ai/zen/go/v1/${apiStyle === "responses" ? "responses" : "chat/completions"}`);
+        assert.equal(call.auth, "Bearer fixture-selected-go-key");
+        assert.equal(call.body.model, modelId);
+        assert.equal(call.body[apiStyle === "responses" ? "max_output_tokens" : "max_completion_tokens"], 384000);
+      }
+      assert.ok(logs.some(line => line.includes(`text-supplier:opencode-go1:${modelId}`)));
+      assert.ok(logs.every(line => !line.includes("fixture-selected-go-key") && !line.includes("fixture-stale-mimo-key")));
+    });
+  }
+
   await test("same model ID at two suppliers routes to each supplier's own endpoint and key", async () => {
     const settings = baseSettings({
       textModelSelections: {
@@ -158,6 +246,27 @@ async function main() {
       }
     });
     assert.equal(await pipeline.cleanText({ rawText: "hello" }), "hello!");
+  });
+
+  await test("voice cleanup uses the selected supplier model output budget", async () => {
+    const settings = baseSettings({
+      textModelSelections: { cleanup: { supplierId: "alpha", modelId: "glm-5.2" } }
+    });
+    const bodies = [];
+    const pipeline = createVoicePipeline({
+      getSettings: () => ({ ...settings, transcriptionMode: "stable" }),
+      logEvent: () => {},
+      providerOverrides: {
+        asrProviders: { mimo: { id: "asr", transcribeRaw: async () => ({ text: "raw" }) } }
+      }
+    });
+    await withMockFetch(async (_url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return okResponse('{"text":"窗口"}');
+    }, async () => {
+      assert.equal(await pipeline.cleanText({ rawText: "呃 窗口" }), "窗口。");
+    });
+    assert.equal(bodies[0].max_completion_tokens, 4096);
   });
 
   await test("live and file summaries share the same routing adapter", async () => {

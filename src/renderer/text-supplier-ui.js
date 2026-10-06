@@ -47,7 +47,14 @@ function supplierDraft(settings, draft, existingId = "") {
   if (existingId && !existing) throw new Error("此供应商已不存在，请重新打开配置。");
   const name = trim(draft.name);
   if (!name || name.length > 120) throw new Error("请填写供应商名称（不超过 120 字）。");
-  if (list.some(item => item.id !== existingId && trim(item.name).toLowerCase() === name.toLowerCase())) throw new Error("已有同名供应商，请使用不同的名称。");
+  // Compare against the same public names that the settings page renders.
+  // A migrated legacy OpenCode Go entry keeps its raw name for compatibility
+  // but is displayed as "兼容旧供应商配置". Comparing raw names made a new
+  // visible "OpenCode Go" preset look duplicated even when the user could not
+  // see an existing supplier with that name.
+  if (listSuppliers(settings).some(item => item.id !== existingId && item.name.toLowerCase() === name.toLowerCase())) {
+    throw new Error("已有同名供应商，请使用不同的名称。");
+  }
   const id = existingId || trim(draft.id) || uniqueSupplierId(name, settings);
   if (!supplierIdOf(id) || id === LEGACY_SUPPLIER_ID) throw new Error("内部标识只能包含英文字母、数字、点、横线和下划线。");
   if (!existingId && list.some(item => item.id === id)) throw new Error("内部标识已存在。");

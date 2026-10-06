@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here.
 
+## v0.4.11 - 2026-10-06
+
+### Fixed
+
+- Dictation recording snapshots now include the selected language supplier, model catalog capabilities, migration state and canonical ASR/provider connections. Realtime completion, batch transcription and retries no longer fall back to stale legacy MiMo endpoints when an OpenCode Go or other named supplier is selected.
+- Deep-copy nested routing settings at recording start so subsequent supplier/model edits cannot change an in-flight dictation or its retry. Unrelated meeting paths and OSS settings are excluded from the snapshot.
+- Retain the selected supplier model's configured maximum output for dictation expression cleanup; no fixed 2048-token override is imposed on the named-supplier route.
+- Supplier name checks use the same visible names as the settings list, preventing legacy migrated OpenCode Go entries from blocking a new visible OpenCode Go supplier.
+- Reject additional explanation-style cleanup responses without inserting model commentary into the dictated text.
+
+### Tests
+
+- Added browser-export and actual renderer snapshot tests, including Chat Completions/Responses routing, stale MiMo endpoint isolation, recording/retry immutability and model-specific output budgets.
+- Live cleanup checks through the same recording snapshot and production pipeline succeeded with an existing local OpenCode Go connection using `mimo-v2.6-flash` and `deepseek-v4.1-flash`. No keys, local settings, transcripts or provider response bodies are stored in the repository.
+
 ## v0.4.10 - 2026-10-04
 
 ### Added

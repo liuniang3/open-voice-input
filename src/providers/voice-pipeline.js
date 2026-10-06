@@ -134,6 +134,9 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
       id: `text-supplier:${profile.supplierId}`,
       modelId: profile.modelId,
       async clean({ rawText, shortContext }) {
+        // Use the selected model's configured output capability. The shared
+        // supplier adapter already caps requests at that model-specific value;
+        // dictation cleanup must not impose a separate fixed budget.
         const response = await chat(buildTextCleanupMessages(rawText, shortContext));
         return {
           provider: "text-supplier",

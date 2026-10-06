@@ -176,6 +176,9 @@ function hasIntroducedMetaResponse(rawText, cleanedText) {
     /^(?:整理|润色|改写|清理|修订|优化)(?:后|后的)?(?:文本|内容|结果)?\s*[:：]/i,
     /^(?:根据|基于)(?:你的|用户的|原始)?(?:要求|内容|转写)/i,
     /^(?:这段话|这段内容|用户|说话者)(?:主要)?(?:表达|说明|想说|的意思)/i,
+    /^(?:第(?:[一二三四五六七八九十\d]+)句|(?:句子|片段)\s*\d+)\s*[:：]/iu,
+    /^(?:to\s+strictly\s+follow|to\s+follow\s+the\s+rules|here(?:'s| is)\s+(?:the|a)\s+(?:cleaned|revised|polished)|i\s+(?:should|will|can)\s+(?:remove|clean|rewrite|merge|整理|删除))/i,
+    /^(?:the\s+(?:cleaned|revised|polished)\s+(?:text|version|result)|as\s+an?\s+ai|i\s+(?:cannot|can't|am\s+unable\s+to))\b/i,
     /(?:作为(?:一个)?(?:AI|人工智能|语言模型)|我无法(?:帮助|执行|完成)|我不能(?:帮助|执行|完成))/i,
     /<(?:raw_transcript|reference_vocabulary)>/i
   ];
