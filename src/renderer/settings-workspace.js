@@ -35,6 +35,11 @@
     const hasKey = Boolean($(family === "mimo" ? "mimoApiKeyInput" : "aliyunApiKeyInput").value.trim());
     $("asrConfigurationStatus").textContent = hasKey ? "已配置连接" : "尚未填写 API Key";
     $("asrConfigurationStatus").dataset.kind = hasKey ? "ready" : "missing";
+    const info = root?.AsrProviderInfo?.consoleInfo($("asrProviderSelect").value);
+    if (info) {
+      $("asrConsoleLabel").textContent = info.label;
+      $("asrConsoleOpen").title = `打开 ${info.label}，获取 API Key`;
+    }
     $("expressionModeNotice").textContent = mode === "fast"
       ? "当前为快速模式，语音输入不会执行表达整理；会议与文件摘要仍可独立使用。"
       : "当前为稳定模式，语音识别完成后使用下方模型进行表达整理。";

@@ -54,7 +54,19 @@
           <article class="home-feature"><img src="./brand/file.svg" alt="" /><div><h2>文件转写</h2><span class="home-muted">音频 / 视频</span></div><button id="homeFileOpen" type="button">选择文件<span class="ui-icon icon-arrow" aria-hidden="true"></span></button></article>
           <article class="home-feature home-feature-meeting"><img src="./brand/meeting.svg" alt="" /><div><h2>实时会议转录</h2><span class="home-muted">麦克风 / 系统声音</span></div><button id="homeMeetingOpen" type="button">开始会议<span class="ui-icon icon-arrow" aria-hidden="true"></span></button></article>
         </div>
-        <section class="home-recent" aria-labelledby="homeRecentTitle"><div class="home-section-heading"><h2 id="homeRecentTitle">最近记录</h2><button id="homeRefresh" class="icon-btn" type="button" title="刷新主页" aria-label="刷新主页"><span class="ui-icon icon-refresh" aria-hidden="true"></span></button></div><div id="homeRecentList"></div><p id="homeRecentEmpty" class="home-muted">暂无文件或会议记录</p></section>
+        <section class="home-recent" aria-labelledby="homeRecentTitle">
+          <div class="home-section-heading"><h2 id="homeRecentTitle">最近记录</h2><button id="homeRefresh" class="icon-btn" type="button" title="刷新主页" aria-label="刷新主页"><span class="ui-icon icon-refresh" aria-hidden="true"></span></button></div>
+          <div class="home-recent-groups">
+            <section class="home-recent-group" aria-labelledby="homeTranscriptionTitle">
+              <div class="home-recent-group-heading"><h3 id="homeTranscriptionTitle">会议 / 文件转录</h3></div>
+              <div id="homeRecentList"></div><p id="homeRecentEmpty" class="home-muted">暂无会议或文件转录记录</p>
+            </section>
+            <section class="home-recent-group" aria-labelledby="homeVoiceTitle">
+              <div class="home-recent-group-heading"><h3 id="homeVoiceTitle">语音输入法记录</h3><button id="homeVoiceHistoryOpen" class="icon-btn" type="button" title="查看全部语音输入记录" aria-label="查看全部语音输入记录"><span class="ui-icon icon-arrow" aria-hidden="true"></span></button></div>
+              <div id="homeVoiceRecentList"></div><p id="homeVoiceRecentEmpty" class="home-muted">暂无语音输入记录</p>
+            </section>
+          </div>
+        </section>
         <div class="home-footer"><div><span id="homeAsrConnection" class="connection-badge">语音识别未配置</span><span id="homeCleanerConnection" class="connection-badge">表达整理未配置</span></div><button id="homeGuideOpen" type="button"><span class="ui-icon icon-info" aria-hidden="true"></span>快速上手</button><span class="home-muted">统计保存在本机</span></div>
         <p id="homeError" class="inline-error" role="status" hidden></p>
       </section>
@@ -64,7 +76,7 @@
         <ol class="onboarding-steps"><li data-guide-step="0">语音识别</li><li data-guide-step="1">表达整理<span>可选</span></li><li data-guide-step="2">麦克风与快捷键</li></ol>
         <div class="onboarding-body">
           <section data-guide-panel="0"><h3>连接语音识别</h3>
-            <label class="field"><span>供应商</span><select id="guideAsrProvider"><option value="mimo">MiMo</option><option value="qwen3-asr">千问 ASR</option><option value="fun-asr">Fun-ASR</option></select></label>
+            <div class="asr-supplier-picker"><label class="field"><span>供应商</span><select id="guideAsrProvider"><option value="mimo">MiMo</option><option value="qwen3-asr">Qwen · 阿里云</option></select></label><button id="guideAsrConsole" type="button" class="asr-console-action" title="打开 MiMo API 控制台，获取 API Key"><span class="ui-icon icon-link" aria-hidden="true"></span><span id="guideAsrConsoleLabel">MiMo API 控制台</span></button></div>
             <label class="field"><span>API 地址</span><input id="guideAsrUrl" type="url" autocomplete="off" placeholder="https://example.com/v1" /></label>
             <label class="field"><span>API Key</span><div class="secret-control"><input id="guideAsrKey" type="password" autocomplete="off" /><button type="button" data-secret-toggle="guideAsrKey" class="secret-action" title="显示或隐藏 API Key">显示</button><button type="button" data-secret-copy="guideAsrKey" class="secret-action" title="复制 API Key">复制</button></div></label>
             <label class="field"><span>模型</span><input id="guideAsrModel" type="text" list="guideAsrPresets" autocomplete="off" /><datalist id="guideAsrPresets"></datalist></label>
@@ -186,7 +198,8 @@
             </section>
             <section class="settings-group" id="voiceConnectionSelection">
               <div class="section-title"><strong><span class="settings-step">03</span> 语音识别供应商</strong><span id="asrConfigurationStatus" role="status"></span></div>
-              <label class="field"><span>供应商</span><select id="asrProviderSelect"><option value="mimo">MiMo ASR</option><option value="qwen3-asr">Qwen3-ASR · 阿里云</option><option value="fun-asr">Fun-ASR · 阿里云</option></select></label>
+              <div class="asr-supplier-picker"><label class="field"><span>供应商</span><select id="asrProviderSelect"><option value="mimo">MiMo</option><option value="qwen3-asr">Qwen · 阿里云</option></select></label><button id="asrConsoleOpen" type="button" class="asr-console-action" title="打开 MiMo API 控制台，获取 API Key"><span class="ui-icon icon-link" aria-hidden="true"></span><span id="asrConsoleLabel">MiMo API 控制台</span></button></div>
+              <p id="asrConsoleStatus" class="settings-note" role="status" hidden></p>
             </section>
             <section class="settings-group provider-connection-group" data-asr-connection="mimo" aria-labelledby="mimoConnectionTitle">
               <div class="section-title">
@@ -242,8 +255,8 @@
                 <label class="field">
                   <span>ASR 模型</span>
                   <select id="asrModelPresetSelect">
-                    <option value="mimo-v2.5-asr">MiMo V2.5 ASR（推荐）</option>
-                    <option value="qwen3-asr-flash">Qwen3-ASR Flash</option>
+                    <option value="mimo-v2.5-asr">MiMo V2.5 ASR</option>
+                    <option value="qwen3-asr-flash">Qwen3-ASR Flash（推荐）</option>
                     <option value="fun-asr">Fun-ASR</option>
                     <option value="__custom__">自定义模型</option>
                   </select>
@@ -1140,6 +1153,7 @@
       </div>
     </dialog>
     <script src="../audio-utils.js"></script>
+    <script src="../asr-provider-info.js"></script>
     <script src="./meeting-ui.js"></script>
     <script src="./text-supplier-ui.js"></script>
     <script src="./text-supplier-manager.js"></script>

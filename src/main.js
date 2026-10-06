@@ -51,6 +51,7 @@ const { validateHotkey, normalizeAccelerator } = require("./hotkeys/validate-hot
 const { createUsageStats } = require("./usage-stats");
 const { createVoiceHistory } = require("./voice-history");
 const { createOnboardingState } = require("./onboarding-state");
+const { openConsole: openAsrProviderConsole } = require("./asr-provider-info");
 const { normalizePresentation, minimalBounds, visibleBounds, createMeetingWindowStore } = require("./settings/meeting-window");
 const { createTransparentPreview } = require("./meeting/transparent-preview");
 
@@ -2029,6 +2030,10 @@ ipcMain.handle("window:is-maximized", async (event) => {
   return { ok: true, maximized: Boolean(win && !win.isDestroyed() && win.isMaximized()) };
 });
 ipcMain.handle("window:settings", async () => showSettings());
+ipcMain.handle("asr:console:open", async (event, provider) => openAsrProviderConsole(provider, {
+  authorized: isAppSender(event.sender, event.senderFrame?.url),
+  openExternal: url => shell.openExternal(url)
+}));
 ipcMain.handle("window:home", async () => showHome());
 ipcMain.handle("home:overview", async (event) => {
   if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };

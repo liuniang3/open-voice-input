@@ -571,14 +571,15 @@ function normalizeFunAsrRealtimeModel(model) {
 
 function normalizeProviderSettingsDraft() {
   syncAsrRealtimeModelOptions(asrProviderSelect.value);
+  const provider = window.AsrProviderInfo.transportProvider(asrProviderSelect.value, selectedAsrModel());
   let realtimeModel = selectedAsrRealtimeModel();
-  if (asrProviderSelect.value === "qwen3-asr") {
+  if (provider === "qwen3-asr") {
     asrModelInput.value = normalizeQwenAsrModel(asrModelInput.value);
     realtimeModel = normalizeQwenRealtimeModel(realtimeModel);
-  } else if (asrProviderSelect.value === "fun-asr") {
+  } else if (provider === "fun-asr") {
     asrModelInput.value = normalizeFunAsrModel(asrModelInput.value);
     realtimeModel = normalizeFunAsrRealtimeModel(realtimeModel);
-  } else if (asrProviderSelect.value === "mimo") {
+  } else if (provider === "mimo") {
     asrModelInput.value = normalizeMimoAsrModel(asrModelInput.value);
     realtimeModel = normalizeMimoAsrModel(realtimeModel);
   }
@@ -626,9 +627,10 @@ function renderCustomAsrRealtimeModelField() {
 }
 
 function syncAsrRealtimeModelOptions(provider) {
+  const transport = window.AsrProviderInfo.transportProvider(provider, selectedAsrModel());
   for (const option of asrRealtimeModelPresetSelect.options) {
     const optionProvider = option.dataset.asrProvider;
-    const compatible = !optionProvider || optionProvider === provider;
+    const compatible = !optionProvider || optionProvider === transport;
     option.hidden = !compatible;
     option.disabled = !compatible;
   }
@@ -725,7 +727,7 @@ function cacheAsrProfileDraft(model, { provider = asrProviderSelect.value } = {}
   appSettings.asrProfiles = {
     ...(appSettings.asrProfiles || {}),
     [value]: {
-      provider,
+      provider: window.AsrProviderInfo.transportProvider(provider, value),
       mode: normalizeAsrMode(asrModeSelect.value),
       realtimeModel: selectedAsrRealtimeModel(),
       language: asrLanguageInput.value.trim(),
@@ -737,14 +739,15 @@ function cacheAsrProfileDraft(model, { provider = asrProviderSelect.value } = {}
 function loadAsrProfileDraft(model) {
   const profile = appSettings.asrProfiles?.[model] || defaultAsrProfile(model);
   fillAsrModel(model);
-  asrProviderSelect.value = profile.provider;
-  syncAsrRealtimeModelOptions(profile.provider);
+  asrProviderSelect.value = window.AsrProviderInfo.supplierId(profile.provider) || "mimo";
+  syncAsrRealtimeModelOptions(asrProviderSelect.value);
   asrModeSelect.value = normalizeAsrMode(profile.mode);
   fillAsrRealtimeModel(profile.realtimeModel || defaultRealtimeModelForProvider(profile.provider));
   asrLanguageInput.value = profile.language || "";
   asrEnableItnInput.checked = Boolean(profile.enableItn);
   normalizeProviderSettingsDraft();
-  activeAsrProviderDraft = asrProviderSelect.value;
+  activeAsrProviderDraft = window.AsrProviderInfo.transportProvider(asrProviderSelect.value, model);
+  window.SettingsWorkspace.renderRecognitionSettings(document, appSettings.transcriptionMode);
 }
 
 function handleAsrModelPresetChange() {
@@ -761,14 +764,14 @@ function handleAsrModelPresetChange() {
 }
 
 function handleAsrProviderChange() {
+  document.getElementById("asrConsoleStatus").hidden = true;
   if (asrModelPresetSelect.value === CUSTOM_ASR_MODEL) {
     normalizeProviderSettingsDraft();
     return;
   }
   const modelByProvider = {
     mimo: MIMO_ASR_MODEL,
-    "qwen3-asr": QWEN_ASR_OPENAI_MODEL,
-    "fun-asr": FUN_ASR_MODEL
+    "qwen3-asr": QWEN_ASR_OPENAI_MODEL
   };
   const nextModel = modelByProvider[asrProviderSelect.value] || MIMO_ASR_MODEL;
   if (nextModel !== activeAsrModelDraft) {
@@ -1137,7 +1140,7 @@ function handleMeetingProfileModelChange(kind) {
   }
 }
 
-function setSettingsTab(tabName) {
+function setSettingsTab(tabName, { requestId } = {}) {
   const previousTab = activeSettingsTab;
   const available = new Set(settingsTabButtons.map((button) => button.dataset.settingsTab));
   const requestedTab = window.SettingsWorkspace.settingsTab(tabName);
@@ -1160,13 +1163,15 @@ function setSettingsTab(tabName) {
   document.getElementById("settingsPageSubtitle").textContent = settingsTabButtons.find(button => button.dataset.settingsTab === activeSettingsTab)?.textContent.trim() || "语音识别";
   saveSettingsBtn.hidden = activeSettingsTab === "history" || activeSettingsTab === "updates";
   setTextSupplierView(activeSettingsTab === "cleaner" && tabName === "connections" ? "manager" : "overview");
+  let historyLoad;
   if (activeSettingsTab === "history") {
     voiceHistoryUi ||= window.VoiceHistoryUi.createVoiceHistoryUi({ document, api: window.mimoInput,
       onSettings: saved => { appSettings = { ...appSettings, voiceHistoryEnabled: saved.voiceHistoryEnabled }; } });
-    void voiceHistoryUi.open(appSettings);
+    historyLoad = voiceHistoryUi.open(appSettings, { requestId });
   } else voiceHistoryUi?.close();
   window.SettingsWorkspace.renderRecognitionSettings(document, appSettings.transcriptionMode);
   if (activeSettingsTab === "updates") void refreshUpdateStatus();
+  return historyLoad;
 }
 
 function formatUpdateRate(value) {
@@ -1300,21 +1305,21 @@ async function copySecretValue(button) {
 }
 
 function normalizeAsrModelForSelectedProvider(value) {
+  if (window.AsrProviderInfo.transportProvider(asrProviderSelect.value, value) === "fun-asr") {
+    return normalizeFunAsrModel(value);
+  }
   if (asrProviderSelect.value === "qwen3-asr") {
     return normalizeQwenAsrModel(value);
-  }
-  if (asrProviderSelect.value === "fun-asr") {
-    return normalizeFunAsrModel(value);
   }
   return normalizeMimoAsrModel(value);
 }
 
 function normalizeRealtimeModelForSelectedProvider(value) {
+  if (window.AsrProviderInfo.transportProvider(asrProviderSelect.value, selectedAsrModel()) === "fun-asr") {
+    return normalizeFunAsrRealtimeModel(value);
+  }
   if (asrProviderSelect.value === "qwen3-asr") {
     return normalizeQwenRealtimeModel(value);
-  }
-  if (asrProviderSelect.value === "fun-asr") {
-    return normalizeFunAsrRealtimeModel(value);
   }
   return String(value || "").trim();
 }
@@ -2539,7 +2544,7 @@ async function saveAllSettings() {
     openCodeGoModelCatalog: openCodeGoCatalogModels(),
     openCodeGoModelCapabilities: appSettings.openCodeGoModelCapabilities || {},
     openCodeGoModelCatalogUpdatedAt: appSettings.openCodeGoModelCatalogUpdatedAt || "",
-    asrProvider: asrProviderSelect.value,
+    asrProvider: window.AsrProviderInfo.transportProvider(asrProviderSelect.value, asrModel),
     asrMode: normalizeAsrMode(asrModeSelect.value),
     asrModel,
     asrRealtimeModel: normalizeRealtimeModelForSelectedProvider(selectedAsrRealtimeModel()),
@@ -2759,6 +2764,17 @@ microphoneSelect.addEventListener("change", saveMicrophoneSelection);
 asrModelPresetSelect.addEventListener("change", handleAsrModelPresetChange);
 asrRealtimeModelPresetSelect.addEventListener("change", handleAsrRealtimeModelPresetChange);
 asrProviderSelect.addEventListener("change", handleAsrProviderChange);
+document.getElementById("asrConsoleOpen").addEventListener("click", async () => {
+  const button = document.getElementById("asrConsoleOpen");
+  const status = document.getElementById("asrConsoleStatus");
+  button.disabled = true; status.hidden = true;
+  try {
+    const result = await window.mimoInput.openAsrConsole(asrProviderSelect.value);
+    if (!result?.ok) throw new Error("console unavailable");
+  } catch {
+    status.textContent = "无法打开 API 控制台，请检查默认浏览器后重试。"; status.hidden = false;
+  } finally { button.disabled = false; }
+});
 asrModeSelect.addEventListener("change", normalizeProviderSettingsDraft);
 asrModelInput.addEventListener("input", () => {
   if (asrModelPresetSelect.value === CUSTOM_ASR_MODEL) {

@@ -550,6 +550,7 @@ async function prepareBrowser(page) {
       "/home-ui.js": ["src/renderer/home-ui.js", "text/javascript"],
       "/onboarding-ui.js": ["src/renderer/onboarding-ui.js", "text/javascript"],
       "/audio-utils.js": ["src/audio-utils.js", "text/javascript"],
+      "/asr-provider-info.js": ["src/asr-provider-info.js", "text/javascript"],
       "/meeting-ui.js": ["src/renderer/meeting-ui.js", "text/javascript"],
       "/text-supplier-ui.js": ["src/renderer/text-supplier-ui.js", "text/javascript"],
       "/text-supplier-manager.js": ["src/renderer/text-supplier-manager.js", "text/javascript"],
@@ -582,6 +583,12 @@ async function prepareBrowser(page) {
       ]
     };
     window.mockSettings = () => settings;
+    window.mockVoiceRecords = [
+      { requestId: "00000000-0000-4000-a000-000000000002", createdAt: "2026-10-07T02:00:00.000Z",
+        rawText: "呃，请检查测试页面的布局。", text: "请检查测试页面的布局。", transcriptionMode: "stable", cleanupApplied: true },
+      { requestId: "00000000-0000-4000-a000-000000000001", createdAt: "2026-10-06T01:00:00.000Z",
+        rawText: "这是较早的一条语音输入测试记录。", text: "这是较早的一条语音输入测试记录。", transcriptionMode: "fast", cleanupApplied: false }
+    ];
     window.mockHooks = hooks;
     window.mockCalls = [];
     window.mockPush = (patch) => { dto = { ...dto, ...patch }; hooks.onMeetingLiveUpdate?.(dto); };
@@ -596,6 +603,12 @@ async function prepareBrowser(page) {
         window.mockCalls.push({ name, payload });
         if (name === "getSettings") return settings;
         if (name === "getHomeOverview") return window.mockHome;
+        if (name === "listVoiceHistory") {
+          const rows = window.mockVoiceRecords.filter(row => !payload?.query || (row.rawText + row.text).includes(payload.query));
+          return { ok: true, total: rows.length, entries: rows.slice(payload?.offset || 0, (payload?.offset || 0) + (payload?.limit || 40))
+            .map(({ requestId, createdAt, transcriptionMode, cleanupApplied, text }) => ({ requestId, createdAt, transcriptionMode, cleanupApplied, preview: text.slice(0, 160) })) };
+        }
+        if (name === "getVoiceHistory") return { ok: true, entry: window.mockVoiceRecords.find(row => row.requestId === payload.requestId) };
         if (name === "openHome") { hooks.onOpenHome?.(); return { ok: true }; }
         if (name === "openSettings") { hooks.onOpenSettings?.(); return { ok: true }; }
         if (name === "openMeetingWorkspace") { hooks.onOpenMeeting?.(); return { ok: true }; }

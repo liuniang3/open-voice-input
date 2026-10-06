@@ -3,8 +3,7 @@
 (function installOnboardingUi(root) {
   const ASR = {
     mimo: { family: "mimo", model: "mimo-v2.5-asr", url: "https://api.xiaomimimo.com/v1" },
-    "qwen3-asr": { family: "aliyun", model: "qwen3-asr-flash", url: "https://dashscope.aliyuncs.com" },
-    "fun-asr": { family: "aliyun", model: "fun-asr", url: "https://dashscope.aliyuncs.com" }
+    "qwen3-asr": { family: "aliyun", model: "qwen3-asr-flash", url: "https://dashscope.aliyuncs.com" }
   };
   function validateUrl(value) {
     let url;
@@ -70,14 +69,17 @@
     function fillAsr() {
       const provider = $("guideAsrProvider").value;
       const preset = ASR[provider];
-      const model = settings.asrProvider === provider ? settings.asrModel || preset.model : preset.model;
+      const model = win.AsrProviderInfo.supplierId(settings.asrProvider) === provider ? settings.asrModel || preset.model : preset.model;
       const profile = settings.asrProfiles?.[model] || {};
       const connections = settings.asrConnections || settings.providerConnections;
       const connection = connections?.[preset.family];
       $("guideAsrUrl").value = connection?.baseUrl || profile.baseUrl || preset.url;
       $("guideAsrKey").value = settings.asrConnections ? connection?.apiKey || "" : connection?.apiKey || profile.apiKey || "";
       $("guideAsrModel").value = model;
-      options($("guideAsrPresets"), [...new Set([preset.model, ...Object.keys(settings.asrProfiles || {}).filter(id => settings.asrProfiles[id].provider === provider)])].map(id => [id, id]));
+      options($("guideAsrPresets"), [...new Set([preset.model, ...Object.keys(settings.asrProfiles || {}).filter(id => win.AsrProviderInfo.supplierId(settings.asrProfiles[id].provider) === provider)])].map(id => [id, id]));
+      const info = win.AsrProviderInfo.consoleInfo(provider);
+      $("guideAsrConsoleLabel").textContent = info.label;
+      $("guideAsrConsole").title = `打开 ${info.label}，获取 API Key`;
       $("guideAsrTestStatus").textContent = "尚未测试";
     }
     function legacyCleaner() {
@@ -110,11 +112,12 @@
     }
     async function saveAsr() {
       const token = epoch;
-      const provider = $("guideAsrProvider").value;
-      const family = ASR[provider].family;
+      const supplier = $("guideAsrProvider").value;
+      const family = ASR[supplier].family;
       const baseUrl = validateUrl($("guideAsrUrl").value.trim());
       const apiKey = $("guideAsrKey").value.trim();
       const model = picker.modelIdOf($("guideAsrModel").value);
+      const provider = win.AsrProviderInfo.transportProvider(supplier, model);
       if (!apiKey || !model) throw new Error("请填写 API Key 和语音识别模型。");
       const realtime = /(?:realtime|streaming)/i.test(model) && provider !== "mimo";
       const saved = await api.saveSettings({
@@ -259,7 +262,7 @@
       if (token !== epoch) return;
       settings = loaded;
       opened = true; step = 0; error();
-      $("guideAsrProvider").value = ASR[settings.asrProvider] ? settings.asrProvider : "mimo"; fillAsr();
+      $("guideAsrProvider").value = win.AsrProviderInfo.supplierId(settings.asrProvider) || "mimo"; fillAsr();
       const selected = settings.textModelSelections?.cleanup?.supplierId || (legacyCleaner().apiKey ? "__legacy__" : "__new__");
       $("guideCleanupEnabled").checked = settings.transcriptionMode === "stable" && selected !== "__new__";
       fillSupplierList(selected);
@@ -319,6 +322,11 @@
     $("guideBack").addEventListener("click", () => { void action(async (token) => { await stopProbe(); await endCapture(); ensureActive(token); step = Math.max(0, step - 1); }); });
     $("guideSkip").addEventListener("click", () => { void action(() => finish(true)); });
     $("guideAsrProvider").addEventListener("change", fillAsr);
+    $("guideAsrConsole").addEventListener("click", () => { void action(async token => {
+      const result = await api.openAsrConsole($("guideAsrProvider").value);
+      ensureActive(token);
+      if (!result?.ok) throw new Error("无法打开 API 控制台，请检查默认浏览器后重试。");
+    }); });
     $("guideCleanupEnabled").addEventListener("change", render);
     $("guideCleanerSupplier").addEventListener("change", fillCleaner);
     $("guideAsrTest").addEventListener("click", () => { void action(async (token) => {

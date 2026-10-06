@@ -14,7 +14,7 @@ Release history: [CHANGELOG.md](CHANGELOG.md)
 
 ## Home And First-Run Setup
 
-Normal launch, the local `.vbs` launcher and an idle tray double-click open Home. During recording, tray double-click brings the active recorder forward. Short dictation remains hotkey-driven; Home shows the shortcut, today/week usage, file and live-meeting entries, and recent file/meeting records. Settings stay available through the gear button, and each workspace can return Home.
+Normal launch, the local `.vbs` launcher and an idle tray double-click open Home. During recording, tray double-click brings the active recorder forward. Short dictation remains hotkey-driven; Home shows the shortcut, today/week usage, file and live-meeting entries, and separate recent meeting/file and voice-input records. Voice entries open the corresponding original/organized text in local history, with a shortcut to all voice history. Settings stay available through the gear button, and each workspace can return Home.
 
 The three-step guide configures and tests ASR, optionally adds a text supplier and discovers/selects a cleanup model, then checks the microphone and hotkeys. Local microphone testing never uploads audio; provider connectivity tests run only on request. The guide can be skipped and reopened from Home or Settings. Existing configured users retain their credentials and are not forced through setup again.
 
@@ -206,6 +206,8 @@ ASR providers:
 - `MiMo`: the official dedicated `mimo-v2.5-asr` model. It supports regular MiMo and Token Plan endpoints, parses streamed responses, and is currently the best-adapted first-stage speech backend in this project.
 - `Qwen3-ASR`: dedicated ASR through DashScope-compatible configuration. Supports batch and realtime modes.
 - `Fun-ASR`: dedicated DashScope ASR. Realtime recording uses the WebSocket API. Batch URL transcription uses the REST API when a public audio URL is provided.
+
+Speech-recognition supplier selectors in Settings and first-run setup show **MiMo** and **Qwen / Aliyun** only. Fun-ASR remains an Aliyun model rather than a separate visible supplier; existing Fun model choices, URLs, keys and transport protocols stay unchanged. The supplier-aware **API Console** button opens the official key-management page in the system browser. It does not save configuration, retrieve keys or send credentials, and custom API URLs do not replace this official shortcut.
 
 Text Supplier Setup:
 

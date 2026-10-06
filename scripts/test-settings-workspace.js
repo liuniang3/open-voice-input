@@ -37,6 +37,10 @@ function unitTests() {
   assert.equal(nodes.get("textSupplierManagerView").hidden, true);
   assert.equal(nodes.get("expressionModelSettings").hidden, false);
   assert.equal((html.match(/id="asrProviderSelect"/g) || []).length, 1);
+  const recognitionModels = html.match(/<select id="asrModelPresetSelect">([\s\S]*?)<\/select>/)[1];
+  assert.match(recognitionModels, /value="qwen3-asr-flash">Qwen3-ASR Flash（推荐）/);
+  assert.doesNotMatch(recognitionModels, /MiMo[^<]*推荐/);
+  assert.equal((recognitionModels.match(/推荐/g) || []).length, 1);
   assert.match(html, /aria-orientation="vertical"/);
   console.log("Settings navigation, migration aliases, keyboard navigation and same-page configuration contracts passed.");
 }
@@ -65,12 +69,48 @@ async function verifyBrowser(page, output) {
   assert.equal(await page.locator("#settingsPanel").locator("#hotkeyInput").isVisible(), true);
   assert.equal(await page.locator("#mimoApiKeyInput").isVisible(), true);
   assert.equal(await page.locator("#aliyunApiKeyInput").isVisible(), false);
+  assert.deepEqual(await page.locator("#asrProviderSelect option").evaluateAll(options => options.map(item => item.value)), ["mimo", "qwen3-asr"]);
+  assert.equal(await page.locator("#asrConsoleLabel").innerText(), "MiMo API 控制台");
+  await page.locator("#asrConsoleOpen").click();
+  await page.waitForFunction(() => window.mockCalls.some(call => call.name === "openAsrConsole" && call.payload === "mimo"));
   await page.locator("#asrProviderSelect").selectOption("qwen3-asr");
+  assert.equal(await page.locator("#asrConsoleLabel").innerText(), "Qwen API 控制台");
+  await page.locator("#asrConsoleOpen").click();
+  await page.waitForFunction(() => window.mockCalls.some(call => call.name === "openAsrConsole" && call.payload === "qwen3-asr"));
   assert.equal(await page.locator("#mimoApiKeyInput").isVisible(), false);
   assert.equal(await page.locator("#aliyunApiKeyInput").isVisible(), true);
   assert.equal(await page.locator("#asrModelPresetSelect").inputValue(), "qwen3-asr-flash");
+  assert.equal(await page.locator('#asrModelPresetSelect option[value="qwen3-asr-flash"]').innerText(), "Qwen3-ASR Flash（推荐）");
   await page.locator("#saveSettingsBtn").click();
   await page.waitForFunction(() => window.mockSettings().asrProvider === "qwen3-asr");
+  await page.evaluate(async () => {
+    const current = window.mockSettings();
+    await window.mimoInput.saveSettings({ asrProvider: "fun-asr", asrModel: "fun-asr", asrRealtimeModel: "fun-asr-realtime",
+      asrConnections: { ...current.asrConnections, aliyun: { baseUrl: "https://example.invalid/ali", apiKey: "test-only-retained-ali-key" } },
+      asrProfiles: { ...current.asrProfiles, "fun-asr": { provider: "fun-asr", mode: "realtime", realtimeModel: "fun-asr-realtime", enableItn: true } } });
+    await window.mockOpenSettings();
+  });
+  await page.waitForFunction(() => document.getElementById("asrModelPresetSelect").value === "fun-asr");
+  assert.equal(await page.locator("#asrProviderSelect").inputValue(), "qwen3-asr", "legacy Fun uses the Qwen supplier label");
+  assert.equal(await page.locator("#asrConsoleLabel").innerText(), "Qwen API 控制台");
+  assert.equal(await page.locator("#asrRealtimeModelPresetSelect").inputValue(), "fun-asr-realtime");
+  await page.locator("#saveSettingsBtn").click();
+  await page.waitForFunction(() => !document.getElementById("saveSettingsBtn").disabled);
+  const retained = await page.evaluate(() => window.mockSettings());
+  assert.equal(retained.asrProvider, "fun-asr", "UI grouping never replaces the model's wire protocol");
+  assert.equal(retained.asrProfiles["fun-asr"].provider, "fun-asr");
+  assert.equal(retained.asrRealtimeModel, "fun-asr-realtime");
+  assert.equal(retained.asrConnections.aliyun.baseUrl, "https://example.invalid/ali");
+  assert.equal(retained.asrConnections.aliyun.apiKey, "test-only-retained-ali-key");
+  await page.evaluate(() => { window.mockApiOverrides.openAsrConsole = async () => { throw new Error("private browser failure"); }; });
+  await page.locator("#asrConsoleOpen").click();
+  await page.waitForFunction(() => !document.getElementById("asrConsoleStatus").hidden);
+  assert.doesNotMatch(await page.locator("#asrConsoleStatus").innerText(), /private browser/);
+  assert.equal(await page.locator("#asrConsoleOpen").isEnabled(), true);
+  await page.evaluate(() => { delete window.mockApiOverrides.openAsrConsole; });
+  await page.locator("#asrProviderSelect").selectOption("mimo");
+  assert.equal(await page.locator("#asrConsoleStatus").isVisible(), false);
+  await page.locator("#asrProviderSelect").selectOption("qwen3-asr");
   await page.locator("#fastModeBtn").click();
   await page.locator('[data-settings-tab="cleaner"]').click();
   assert.match(await page.locator("#expressionModeNotice").innerText(), /快速模式/);
@@ -209,6 +249,13 @@ async function verifyNativeSettings() {
     assert.equal(await page.locator('[data-settings-tab]').count(), 4);
     assert.equal(await page.locator("#settingsAsrPanel").isVisible(), true);
     assert.equal(await page.locator("#mimoApiKeyInput").inputValue(), "", "native fixture must not inherit real keys");
+    await page.locator("#asrConsoleOpen").click();
+    await page.locator("#asrProviderSelect").selectOption("qwen3-asr");
+    await page.locator("#asrConsoleOpen").click();
+    const openedUrls = await application.evaluate(() => globalThis.oviTestConsoleUrls);
+    assert.deepEqual(openedUrls, ["https://platform.xiaomimimo.com/console/api-keys", "https://bailian.console.aliyun.com/?tab=globalset#/efm/api_key"]);
+    assert.deepEqual(await page.evaluate(() => window.mimoInput.openAsrConsole("https://example.invalid")), { ok: false });
+    assert.equal(await application.evaluate(() => globalThis.oviTestConsoleUrls.length), 2);
     await page.locator('[data-settings-tab="cleaner"]').click();
     assert.equal(await page.locator("#textSupplierManage").isVisible(), true);
     assert.equal(await page.locator("#textSupplierAdd").isVisible(), false);

@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld("mimoInput", {
   isWindowMaximized: () => ipcRenderer.invoke("window:is-maximized"),
   onWindowMaximized: (callback) => ipcRenderer.on("window-maximized", (_event, maximized) => callback(Boolean(maximized))),
   openSettings: () => ipcRenderer.invoke("window:settings"),
+  openAsrConsole: (provider) => ipcRenderer.invoke("asr:console:open", provider),
   openHome: () => ipcRenderer.invoke("window:home"),
   getHomeOverview: () => ipcRenderer.invoke("home:overview"),
   finishOnboarding: (payload) => ipcRenderer.invoke("onboarding:finish", payload),

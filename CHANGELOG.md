@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## v0.4.15 - 2026-10-07
+
+### Added
+
+- Speech-recognition supplier selectors in Settings and first-run setup now show MiMo and Qwen only. Fun-ASR remains an Aliyun model/transport, and existing Fun model choices, connection URLs and keys are preserved rather than silently changed to the Qwen protocol.
+- Added a supplier-aware API console shortcut in Settings and first-run setup. Only fixed official MiMo/API Key and Aliyun Bailian/API Key destinations can open in the system browser; the IPC validates local app senders and never accepts a custom URL or sends saved credentials.
+- Home recent records are split into independent meeting/file transcription and voice-input groups, with a side-by-side desktop layout and stacked groups in narrow windows. Voice entries show a local text preview, timestamp and organization status, and open the exact history entry; the group also links to all voice-input history.
+- Home refreshes when voice history changes, coalescing updates received during an in-flight refresh. History read failures remain isolated from meeting/file records, and viewing history never starts transcription or changes usage counts.
+
+### Changed
+
+- The speech-recognition model picker now recommends Qwen3-ASR Flash instead of MiMo V2.5 ASR. This label change preserves existing model selections, credentials and realtime-preview settings.
+
 ## v0.4.14 - 2026-10-06
 
 ### Changed

@@ -49,7 +49,7 @@
         if (opened && version === detailRevision) status("无法读取这条记录，请刷新后重试。", "error");
       }
     }
-    async function load(more = false) {
+    async function load(more = false, requestId) {
       const version = ++revision;
       if (!more) detailRevision++;
       $("voiceHistoryMore").disabled = true;
@@ -65,7 +65,8 @@
           selected = null; $("voiceHistoryDetail").hidden = true;
         }
         renderList();
-        if (!selected && rows.length) await select(rows[0].requestId);
+        if (requestId) await select(requestId);
+        else if (!selected && rows.length) await select(rows[0].requestId);
       } catch {
         if (opened && version === revision) status("历史记录暂时无法读取，语音输入不受影响。", "error");
       } finally {
@@ -99,7 +100,16 @@
     });
     api.onVoiceHistoryUpdated?.(() => { if (opened) void load(); });
     return {
-      open(settings) { opened = true; $("voiceHistoryEnabled").checked = settings?.voiceHistoryEnabled !== false; return load(); },
+      open(settings, { requestId } = {}) {
+        opened = true;
+        if (requestId) {
+          clearTimeout(timer);
+          $("voiceHistorySearch").value = "";
+          selected = null; $("voiceHistoryDetail").hidden = true;
+        }
+        $("voiceHistoryEnabled").checked = settings?.voiceHistoryEnabled !== false;
+        return load(false, requestId);
+      },
       close() { opened = false; revision++; detailRevision++; clearTimeout(timer); }
     };
   }
