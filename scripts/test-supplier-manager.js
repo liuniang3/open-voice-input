@@ -90,6 +90,7 @@ async function verifySupplierBrowser(page, output) {
     await window.mimoInput.saveSettings({ _languageSuppliersMigrated: true }); window.mockOpenSettings();
   });
   await page.locator('[data-settings-tab="cleaner"]').click();
+  await page.locator("#textSupplierManage").click();
   await page.locator("#textSupplierAdd").click();
   assert(await page.locator("#textSupplierDialog").isVisible());
   await page.locator('[data-preset="mimo-plan"]').click();
@@ -193,6 +194,7 @@ async function verifySupplierBrowser(page, output) {
     window.mockOpenSettings();
   });
   await page.locator('[data-settings-tab="cleaner"]').click();
+  await page.locator("#textSupplierManage").click();
   await page.locator('[data-supplier-id="provider-2"]').click();
   await page.locator("#textSupplierDelete").click();
   assert(await page.locator("#textSupplierDeleteDialog").isVisible());

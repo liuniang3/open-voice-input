@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## v0.4.14 - 2026-10-06
+
+### Changed
+
+- Expression Organization settings now show the selected dictation supplier/model and a compact supplier overview. Connection details, model discovery, testing and per-model capabilities live in an in-app supplier management subpage with Back/Escape navigation.
+- Model capability settings are collapsed by default. The shared Windows/macOS layout adapts to narrow windows without expanding the expression settings overview into a full supplier editor.
+- Removed duplicate meeting/file summary model selectors and capability fields from Expression Organization. Summary models remain selectable within each workspace, and saving dictation settings preserves existing summary selections, credentials and capabilities.
+
+### Verification
+
+- Shared regression tests, browser settings tests, supplier-management tests and window-layout tests pass locally.
+- Secret scan and `git diff --check` pass.
+- Known limitation: the Windows native edge-resize cursor probe is still not fully passing on all sampled edges; native resize behavior was not expanded in this release.
+
 ## v0.4.13 - 2026-10-06
 
 ### Fixed

@@ -484,6 +484,7 @@ let activeMeetingFunModelDraft = "";
 let activeMeetingAnalysisModelDraft = "";
 let activeMeetingAnalysisCapabilityBaseline = null;
 let activeSettingsTab = "asr";
+let activeTextSupplierView = "overview";
 
 function createSettingsSnapshot() {
   return window.VoiceSettingsSnapshot.createVoiceSettingsSnapshot(appSettings);
@@ -1158,6 +1159,7 @@ function setSettingsTab(tabName) {
   if (content) content.scrollTop = 0;
   document.getElementById("settingsPageSubtitle").textContent = settingsTabButtons.find(button => button.dataset.settingsTab === activeSettingsTab)?.textContent.trim() || "语音识别";
   saveSettingsBtn.hidden = activeSettingsTab === "history" || activeSettingsTab === "updates";
+  setTextSupplierView(activeSettingsTab === "cleaner" && tabName === "connections" ? "manager" : "overview");
   if (activeSettingsTab === "history") {
     voiceHistoryUi ||= window.VoiceHistoryUi.createVoiceHistoryUi({ document, api: window.mimoInput,
       onSettings: saved => { appSettings = { ...appSettings, voiceHistoryEnabled: saved.voiceHistoryEnabled }; } });
@@ -2277,7 +2279,6 @@ function fillSettingsForm() {
   loadMeetingAnalysisProfileDraft(appSettings.meetingAnalysisModel || "gpt-5.4-mini");
   renderTextSupplierEditor();
   renderTextModelPicker("cleanup");
-  renderTextModelPicker("summary");
   if (updateAutoCheckInput) updateAutoCheckInput.checked = appSettings.updateAutoCheck !== false;
   document.getElementById("voiceHistoryEnabled").checked = appSettings.voiceHistoryEnabled !== false;
   window.SettingsWorkspace.renderRecognitionSettings(document, appSettings.transcriptionMode);
@@ -2313,6 +2314,31 @@ function renderTextSupplierEditor(preferredId) {
   textSupplierManager?.render(preferredId);
 }
 
+function setTextSupplierView(view, { focus = false } = {}) {
+  activeTextSupplierView = window.SettingsWorkspace.setSupplierView(document, view);
+  if (activeSettingsTab === "cleaner") {
+    saveSettingsBtn.hidden = activeTextSupplierView === "manager";
+    document.getElementById("settingsPageSubtitle").textContent = activeTextSupplierView === "manager"
+      ? "表达整理 · 语言处理供应商" : "表达整理";
+  }
+  document.querySelector(".settings-tab-content").scrollTop = 0;
+  if (activeTextSupplierView === "manager") {
+    renderTextSupplierEditor(currentTextModelSelection("cleanup").supplierId);
+  }
+  if (focus) document.getElementById(activeTextSupplierView === "manager" ? "textSupplierBack" : "textSupplierManage").focus();
+}
+
+function renderTextSupplierOverview() {
+  const suppliers = textSupplierUi.listSuppliers(appSettings);
+  const selection = currentTextModelSelection("cleanup");
+  const supplier = suppliers.find(entry => entry.id === selection.supplierId);
+  const totalModels = suppliers.reduce((count, entry) => count + textSupplierUi.catalogModels(appSettings, entry.id).length, 0);
+  document.getElementById("textSupplierOverviewName").textContent = supplier?.name
+    || (selection.supplierId === textSupplierUi.LEGACY_SUPPLIER_ID ? "旧语言处理配置（兼容）" : "尚未选择供应商");
+  const connection = supplier ? ` · ${supplier.hasApiKey ? "已配置 Key" : "未配置 Key"}` : "";
+  document.getElementById("textSupplierOverviewMeta").textContent = `${suppliers.length} 个供应商 · ${totalModels} 个模型${connection}`;
+}
+
 function renderTextModelPicker(slot, selection = textSupplierUi.selectionFor(appSettings, slot)) {
   if (!textSupplierUi) return;
   const elements = textPickerElements(slot);
@@ -2334,7 +2360,7 @@ function renderTextModelPicker(slot, selection = textSupplierUi.selectionFor(app
 
 function currentTextModelSelection(slot) {
   const elements = textPickerElements(slot);
-  if (!elements.supplier.value) return textSupplierUi.selectionFor(appSettings, slot);
+  if (!elements.supplier.options.length) return textSupplierUi.selectionFor(appSettings, slot);
   const modelId = elements.model.value === textSupplierUi.CUSTOM_MODEL_VALUE
     ? elements.customInput.value : elements.model.value;
   return { supplierId: elements.supplier.value, modelId };
@@ -2342,11 +2368,9 @@ function currentTextModelSelection(slot) {
 
 function refreshTextModelPickers() {
   const cleanup = currentTextModelSelection("cleanup");
-  const summary = currentTextModelSelection("summary");
   const valid = selection => !selection.supplierId || selection.supplierId === textSupplierUi.LEGACY_SUPPLIER_ID
     || (appSettings.textSuppliers || []).some(item => item.id === selection.supplierId);
   renderTextModelPicker("cleanup", valid(cleanup) ? cleanup : textSupplierUi.selectionFor(appSettings, "cleanup"));
-  renderTextModelPicker("summary", valid(summary) ? summary : textSupplierUi.selectionFor(appSettings, "summary"));
 }
 
 function renderTextPickerModels(slot, preferredModel = "") {
@@ -2369,6 +2393,7 @@ function renderTextPickerModels(slot, preferredModel = "") {
   elements.hint.textContent = !supplierId ? "" : supplierId !== textSupplierUi.LEGACY_SUPPLIER_ID && !supplier
     ? "该供应商已删除。请重新选择后保存。"
     : supplier && !models.length ? "此供应商没有缓存模型；可手动填写模型 ID。" : "";
+  renderTextSupplierOverview();
 }
 
 function selectedTextModel(slot, { allowEmpty = false } = {}) {
@@ -2481,7 +2506,6 @@ async function showResultWindow() {
 
 async function saveAllSettings() {
   const cleanupSelection = selectedTextModel("cleanup", { allowEmpty: true });
-  const summarySelection = selectedTextModel("summary", { allowEmpty: true });
   normalizeProviderSettingsDraft();
   const asrModel = normalizeAsrModelForSelectedProvider(selectedAsrModel());
   if (!asrModel) throw new Error("请填写 ASR 模型 ID。");
@@ -2568,30 +2592,20 @@ async function saveAllSettings() {
     meetingAnalysisModel: appSettings.meetingAnalysisModel || "",
     meetingAnalysisProviderFamily: appSettings.meetingAnalysisProviderFamily || meetingAnalysisProviderSelect.value,
     meetingAnalysisProfiles: appSettings.meetingAnalysisProfiles || {},
-    meetingAnalysisContextWindow: Number(meetingAnalysisContextInput?.value) || GENERIC_ANALYSIS_CAPABILITY.contextWindow,
-    meetingAnalysisMaxOutput: Number(meetingAnalysisMaxOutputInput?.value) || GENERIC_ANALYSIS_CAPABILITY.maxOutput,
-    meetingAnalysisReasoning: meetingAnalysisReasoningInput?.value.trim() || "",
-    meetingAnalysisTimeoutMs: Number(meetingAnalysisTimeoutInput?.value) || GENERIC_ANALYSIS_CAPABILITY.timeoutMs,
     updateAutoCheck: updateAutoCheckInput?.checked !== false
   };
   nextSettings.textModelSelections = {
     ...appSettings.textModelSelections,
     cleanup: !cleanupSelection || cleanupSelection.supplierId === textSupplierUi.LEGACY_SUPPLIER_ID
-      ? null : cleanupSelection,
-    summary: !summarySelection || summarySelection.supplierId === textSupplierUi.LEGACY_SUPPLIER_ID
-      ? null : summarySelection
+      ? null : cleanupSelection
   };
   if (cleanupSelection?.supplierId === textSupplierUi.LEGACY_SUPPLIER_ID) {
     nextSettings.cleanerModel = cleanupSelection.modelId;
-  }
-  if (summarySelection?.supplierId === textSupplierUi.LEGACY_SUPPLIER_ID && summarySelection.modelId) {
-    nextSettings.meetingAnalysisModel = summarySelection.modelId;
   }
   appSettings = await window.mimoInput.saveSettings({
     ...nextSettings
   });
   renderTextModelPicker("cleanup");
-  renderTextModelPicker("summary");
   syncWorkbenchProcessModeFromSettings({ silent: true });
   await refreshStatus();
   setStatus("ready", "设置已保存", "API、URL、快捷键和麦克风设置已更新。");
@@ -2781,7 +2795,9 @@ meetingAnalysisProviderSelect.addEventListener("change", () => {
     { providerFamily: meetingAnalysisProviderSelect.value }
   );
 });
-for (const slot of ["cleanup", "summary"]) {
+document.getElementById("textSupplierManage").addEventListener("click", () => setTextSupplierView("manager", { focus: true }));
+document.getElementById("textSupplierBack").addEventListener("click", () => setTextSupplierView("overview", { focus: true }));
+for (const slot of ["cleanup"]) {
   const elements = textPickerElements(slot);
   elements.supplier?.addEventListener("change", () => renderTextPickerModels(slot));
   elements.model?.addEventListener("change", () => {
@@ -2862,6 +2878,11 @@ meetingHotkeyInput.addEventListener("beforeinput", (event) => event.preventDefau
 
 window.addEventListener("keydown", (event) => {
   if (textSupplierManager?.isOpen()) return;
+  if (event.key === "Escape" && currentWindowMode === "settings" && activeSettingsTab === "cleaner" && activeTextSupplierView === "manager") {
+    event.preventDefault();
+    setTextSupplierView("overview", { focus: true });
+    return;
+  }
   if (activeHotkeyCapture) {
     handleHotkeyCaptureKeydown(event, activeHotkeyCapture.kind);
   } else if (event.key === "Escape") {

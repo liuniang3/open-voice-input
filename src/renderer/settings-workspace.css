@@ -18,6 +18,27 @@ body.settings-open .settings-tab-content { min-width: 0; padding: 0 6px 28px 24p
 .settings-workspace .provider-connection-group .section-title > strong { font-size: 13px; color: var(--ovi-muted); }
 #voiceConnectionSelection { padding-bottom: 16px; border: 0; }
 .settings-mode-notice { padding: 12px 0 4px; margin: 0; color: #526773; font-size: 12px; line-height: 1.7; }
+.text-supplier-overview-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; padding: 14px 16px; border: 1px solid var(--ovi-border); border-radius: 8px; background: rgba(255,255,255,.5); }
+.settings-workspace #expressionModelSettings { gap: 12px; padding-top: 14px; padding-bottom: 16px; }
+.settings-workspace #textSupplierOverview { gap: 12px; padding-top: 14px; padding-bottom: 0; border-bottom: 0; }
+#cleanupModelHint:empty { display: none; }
+.text-supplier-overview-copy { display: grid; gap: 6px; min-width: 0; }
+.text-supplier-overview-copy > strong { font-size: 14px; overflow-wrap: anywhere; }
+.text-supplier-overview-kicker, .text-supplier-overview-meta { color: var(--ovi-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+#textSupplierManage, .back-action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; height: auto; }
+#textSupplierManage { flex-shrink: 0; }
+.text-supplier-manager-view { min-width: 0; }
+.settings-subview-header { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; padding-top: 14px; }
+.settings-subview-header > div { display: grid; gap: 4px; }
+.settings-subview-header strong { font-size: 17px; }
+.back-action { padding: 7px 10px; }
+.supplier-back-icon { transform: rotate(180deg); }
+.model-capability-editor > summary { cursor: pointer; font-size: 13px; font-weight: 600; min-height: 28px; }
+.model-capability-editor[open] > summary { margin-bottom: 12px; }
+.model-capability-editor > .field, .model-capability-editor > .provider-grid { margin-bottom: 12px; }
+@media (min-width: 621px) {
+  .settings-workspace #expressionModelSettings .provider-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .microphone-picker-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; }
 .microphone-picker-row > button { margin-top: 22px; }
 .settings-workspace .text-supplier-layout[data-state="empty"] { grid-template-columns: minmax(0, 1fr); }
@@ -68,6 +89,8 @@ body.settings-open .settings-tab-content { min-width: 0; padding: 0 6px 28px 24p
   body.settings-open .settings-tab-content { padding-left: 12px; padding-right: 0; }
   .settings-workspace .provider-grid { grid-template-columns: minmax(0, 1fr); }
   .settings-workspace .mode-toggle { grid-template-columns: minmax(0, 1fr); }
+  .text-supplier-overview-card { flex-direction: column; align-items: stretch; gap: 12px; padding: 12px; }
+  #textSupplierManage { align-self: flex-start; }
   .voice-history-layout { grid-template-columns: minmax(0, 1fr); }
   .voice-history-list { max-height: 210px; }
   .voice-history-detail { border-left: 0; border-top: 1px solid var(--ovi-border); padding: 18px 0 0; }

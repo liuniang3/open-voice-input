@@ -395,7 +395,7 @@
     for (const id of editable) $(id).addEventListener("input", () => {
       dirty = true; if (id === "textSupplierId") idManuallyEdited = true; updateDraft();
     });
-    return { render, open, close, isOpen: () => dialog.open };
+    return { render, open, close, isOpen: () => dialog.open || deleteDialog.open };
   }
   if (typeof module === "object" && module.exports) module.exports = { createTextSupplierManager };
   root.TextSupplierManager = { createTextSupplierManager };

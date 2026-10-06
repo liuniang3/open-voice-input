@@ -3,7 +3,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { settingsTab, nextSettingsTab } = require("../src/renderer/settings-workspace");
+const { settingsTab, nextSettingsTab, setSupplierView } = require("../src/renderer/settings-workspace");
 const root = path.resolve(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "src/renderer/index.html"), "utf8");
 
@@ -19,10 +19,23 @@ function unitTests() {
   assert.deepEqual([...html.matchAll(/data-settings-tab="([^"]+)"/g)].map(match => match[1]), ["asr", "cleaner", "history", "updates"]);
   assert.deepEqual([...html.matchAll(/data-settings-panel="([^"]+)"/g)].map(match => match[1]), ["asr", "cleaner", "history", "updates"]);
   const asr = html.slice(html.indexOf('id="settingsAsrPanel"'), html.indexOf('id="settingsCleanerPanel"'));
-  const cleaner = html.slice(html.indexOf('id="settingsCleanerPanel"'), html.indexOf('id="legacyMeetingSettings"'));
+  const cleaner = html.slice(html.indexOf('id="settingsCleanerPanel"'), html.indexOf('id="legacySummarySettings"'));
   for (const id of ["stableModeBtn", "fastModeBtn", "hotkeyInput", "meetingHotkeyInput", "microphoneSelect", "asrProviderSelect", "mimoApiKeyInput", "aliyunApiKeyInput", "asrModelPresetSelect"]) assert.ok(asr.includes(`id="${id}"`), `${id} belongs to recognition settings`);
-  for (const id of ["textSupplierAdd", "textSupplierCards", "cleanupSupplierSelect", "cleanupModelSelect", "summarySupplierSelect"]) assert.ok(cleaner.includes(`id="${id}"`), `${id} belongs to expression settings`);
-  assert.ok(cleaner.indexOf('id="textSupplierAdd"') < cleaner.indexOf('id="cleanupSupplierSelect"'));
+  for (const id of ["textSupplierManage", "textSupplierBack", "textSupplierManagerView", "textSupplierCards", "cleanupSupplierSelect", "cleanupModelSelect"]) assert.ok(cleaner.includes(`id="${id}"`), `${id} belongs to expression settings`);
+  for (const id of ["summarySupplierSelect", "summaryModelSelect"]) assert.ok(!html.includes(`id="${id}"`), `${id} is removed; summaries use workspace pickers`);
+  for (const id of ["meetingAnalysisContextInput", "meetingAnalysisMaxOutputInput"]) assert.ok(!cleaner.includes(`id="${id}"`), `${id} is compatibility-only, not expression settings`);
+  const nodes = new Map();
+  const document = { getElementById(id) {
+    if (!nodes.has(id)) nodes.set(id, { hidden: false, setAttribute(name, value) { this[name] = value; } });
+    return nodes.get(id);
+  } };
+  assert.equal(setSupplierView(document, "manager"), "manager");
+  assert.equal(nodes.get("textSupplierManagerView").hidden, false);
+  for (const id of ["expressionModeNotice", "expressionModelSettings", "textSupplierOverview"]) assert.equal(nodes.get(id).hidden, true);
+  assert.equal(nodes.get("textSupplierManage")["aria-expanded"], "true");
+  assert.equal(setSupplierView(document, "unexpected"), "overview");
+  assert.equal(nodes.get("textSupplierManagerView").hidden, true);
+  assert.equal(nodes.get("expressionModelSettings").hidden, false);
   assert.equal((html.match(/id="asrProviderSelect"/g) || []).length, 1);
   assert.match(html, /aria-orientation="vertical"/);
   console.log("Settings navigation, migration aliases, keyboard navigation and same-page configuration contracts passed.");
@@ -61,10 +74,69 @@ async function verifyBrowser(page, output) {
   await page.locator("#fastModeBtn").click();
   await page.locator('[data-settings-tab="cleaner"]').click();
   assert.match(await page.locator("#expressionModeNotice").innerText(), /快速模式/);
-  assert.equal(await page.locator("#textSupplierAdd").isVisible(), true);
+  assert.equal(await page.locator("#textSupplierAdd").isVisible(), false);
+  assert.equal(await page.locator("#textSupplierManage").isVisible(), true);
   assert.equal(await page.locator("#textSupplierEditor").isVisible(), false, "new users shouldn't see disabled supplier details");
   assert.equal(await page.locator("#cleanupModelSelect").isVisible(), true);
   assert.equal(await page.locator('#cleanupSupplierSelect option[value="__legacy__"]').count(), 0, "new users see no legacy supplier route");
+  assert.equal(await page.locator("#summarySupplierSelect, #summaryModelSelect").count(), 0);
+  assert.equal(await page.locator("#meetingAnalysisContextInput").isVisible(), false);
+  await page.locator("#textSupplierManage").click();
+  assert.equal(await page.locator("#textSupplierManagerView").isVisible(), true);
+  assert.equal(await page.locator("#textSupplierAdd").isVisible(), true);
+  assert.equal(await page.locator("#cleanupModelSelect").isVisible(), false);
+  assert.equal(await page.locator("#saveSettingsBtn").isVisible(), false, "supplier actions save explicitly within the manager");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator("#textSupplierOverview").isVisible(), true);
+  assert.equal(await page.locator("#textSupplierManage").evaluate(el => el === document.activeElement), true);
+  await page.evaluate(async () => {
+    await window.mimoInput.saveSettings({
+      textSuppliers: [
+        { id: "express", name: "演示语言服务", baseUrl: "https://express.example/v1", apiKey: "fixture-expression", apiStyle: "chat-completions" },
+        { id: "summary", name: "摘要语言服务", baseUrl: "https://summary.example/v1", apiKey: "fixture-summary", apiStyle: "responses" }
+      ],
+      textSupplierCatalogs: { express: { models: ["expression-model"], capabilities: {} }, summary: { models: ["summary-model"] } },
+      textModelSelections: { cleanup: { supplierId: "express", modelId: "expression-model" }, summary: { supplierId: "summary", modelId: "summary-model" } },
+      meetingAnalysisContextWindow: 640000, meetingAnalysisMaxOutput: 32000,
+      meetingAnalysisReasoning: "high", meetingAnalysisTimeoutMs: 600000
+    });
+    await window.mockOpenSettings();
+  });
+  assert.equal(await page.locator("#textSupplierOverviewName").innerText(), "演示语言服务");
+  assert.match(await page.locator("#textSupplierOverviewMeta").innerText(), /2 个供应商 · 2 个模型/);
+  assert.doesNotMatch(await page.locator("#textSupplierOverview").innerText(), /fixture-expression|fixture-summary|https:/);
+  await page.locator("#textSupplierManage").click();
+  assert.equal(await page.locator("#textSupplierEditorMode").innerText(), "演示语言服务");
+  assert.equal(await page.locator("#textSupplierCapabilities").getAttribute("open"), null);
+  await page.locator("#textSupplierCapabilities summary").click();
+  await page.locator("#textSupplierCapabilityContext").fill("320000");
+  await page.locator("#textSupplierCapabilityMaxOutput").fill("16000");
+  await page.locator("#textSupplierCapabilitySave").click();
+  await page.waitForFunction(() => window.mockSettings().textSupplierCatalogs.express.capabilities["expression-model"]?.contextWindow === 320000);
+  await page.locator("#textSupplierBack").click();
+  assert.equal(await page.locator("#cleanupSupplierSelect").inputValue(), "express");
+  await page.locator("#saveSettingsBtn").click();
+  await page.waitForFunction(() => document.getElementById("settingsFeedback").textContent.includes("设置已保存"));
+  const preserved = await page.evaluate(() => window.mockSettings());
+  assert.deepEqual(preserved.textModelSelections.summary, { supplierId: "summary", modelId: "summary-model" });
+  assert.equal(preserved.meetingAnalysisContextWindow, 640000);
+  assert.equal(preserved.meetingAnalysisMaxOutput, 32000);
+  assert.equal(preserved.meetingAnalysisReasoning, "high");
+  assert.equal(preserved.meetingAnalysisTimeoutMs, 600000);
+  assert.equal(preserved.textSuppliers[0].apiKey, "fixture-expression");
+  assert.equal(preserved.textSuppliers[1].apiKey, "fixture-summary");
+  assert.equal(preserved.textSupplierCatalogs.express.capabilities["expression-model"].maxOutput, 16000);
+  await page.locator("#cleanupSupplierSelect").selectOption("summary");
+  await page.locator("#textSupplierManage").click();
+  assert.equal(await page.locator("#textSupplierEditorMode").innerText(), "摘要语言服务", "management follows the current unsaved choice");
+  await page.locator("#textSupplierBack").click();
+  assert.equal(await page.locator("#cleanupSupplierSelect").inputValue(), "summary", "navigation preserves a draft model choice");
+  await page.locator("#cleanupSupplierSelect").selectOption("");
+  assert.equal(await page.locator("#textSupplierOverviewName").innerText(), "尚未选择供应商");
+  await page.locator("#textSupplierManage").click();
+  await page.locator("#textSupplierBack").click();
+  assert.equal(await page.locator("#cleanupSupplierSelect").inputValue(), "", "clearing a draft doesn't revive the saved supplier");
+  await page.locator("#cleanupSupplierSelect").selectOption("express");
   await page.locator('[data-settings-tab="history"]').click();
   await page.waitForFunction(() => document.getElementById("voiceHistoryRaw").textContent.includes("看看"));
   assert.equal(await page.locator("#voiceHistoryResult").innerText(), "请你看看这个窗口。");
@@ -101,6 +173,14 @@ async function verifyBrowser(page, output) {
       await page.mouse.move(4, 4);
       await page.waitForTimeout(160);
       await page.screenshot({ path: filename }); screenshots.push(filename);
+      if (tab === "cleaner") {
+        const overviewHeight = await page.locator("#settingsCleanerPanel").evaluate(el => el.getBoundingClientRect().height);
+        assert(overviewHeight < size.height - 130, "expression overview should leave visible space below its settings");
+        await page.locator("#textSupplierManage").click();
+        assert.equal(await page.locator("#textSupplierManagerView").evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);
+        await page.screenshot({ path: path.join(output, `settings-suppliers-${size.width}.png`) });
+        await page.locator("#textSupplierBack").click();
+      }
     }
     const nav = await page.locator('[data-settings-tab]').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().left));
     assert.equal(new Set(nav).size, 1, "tabs always remain a vertical left-hand list");
@@ -129,6 +209,14 @@ async function verifyNativeSettings() {
     assert.equal(await page.locator('[data-settings-tab]').count(), 4);
     assert.equal(await page.locator("#settingsAsrPanel").isVisible(), true);
     assert.equal(await page.locator("#mimoApiKeyInput").inputValue(), "", "native fixture must not inherit real keys");
+    await page.locator('[data-settings-tab="cleaner"]').click();
+    assert.equal(await page.locator("#textSupplierManage").isVisible(), true);
+    assert.equal(await page.locator("#textSupplierAdd").isVisible(), false);
+    await page.locator("#textSupplierManage").click();
+    assert.equal(await page.locator("#textSupplierManagerView").isVisible(), true);
+    assert.equal(await page.locator("#saveSettingsBtn").isVisible(), false);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#cleanupModelSelect").isVisible(), true);
     await page.evaluate(async id => {
       await window.completeRawTranscript("这是隔离测试中的语音原文。", { transcriptionMode: "fast", history: { requestId: id, durationMs: 2200 },
         settingsSnapshot: { asrModel: "asr-fixture" } });

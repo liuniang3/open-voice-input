@@ -88,7 +88,8 @@ async function verifyResponsiveWindows() {
       await page.setViewportSize({ width: item.width, height: item.height });
       await item.open();
       if (item.mode === "settings") {
-        await page.locator('[data-settings-tab="connections"]').click();
+        await page.locator('[data-settings-tab="cleaner"]').click();
+        await page.locator("#textSupplierManage").click();
         await page.locator("#textSupplierAdd").click();
         await page.locator("#textSupplierName").fill("Resize vendor");
         await page.locator("#supplierAdvancedDetails summary").click();
@@ -96,15 +97,17 @@ async function verifyResponsiveWindows() {
         await page.locator("#textSupplierBaseUrl").fill("https://example.invalid/v1");
         await page.locator("#textSupplierApiKey").fill("test-only-resize");
         await page.locator("#textSupplierSave").click();
-        await page.waitForFunction(() => document.getElementById("textSupplierStatus").textContent.includes("已保存"));
+        await page.waitForFunction(() => !document.getElementById("textSupplierDialog").open
+          && window.mockSettings().textSuppliers?.some(supplier => supplier.id === "resize-vendor"));
         await page.locator("#textSupplierRefresh").click();
         await page.waitForFunction(() => window.mockSettings().textSupplierCatalogs?.["resize-vendor"]?.models?.length);
-        await page.locator('[data-settings-tab="cleaner"]').click();
+        await page.evaluate(async () => {
+          await window.mimoInput.saveSettings({ textModelSelections: { cleanup: null, summary: { supplierId: "resize-vendor", modelId: "custom-text-model" } } });
+          await window.refreshStatus();
+        });
+        await page.locator("#textSupplierBack").click();
         await page.locator("#cleanupSupplierSelect").selectOption("resize-vendor");
         await page.locator("#cleanupModelSelect").selectOption("custom-text-model");
-        await page.locator("#summarySupplierSelect").selectOption("resize-vendor");
-        await page.locator("#summaryModelSelect").selectOption("custom-text-model");
-        await page.locator('[data-settings-tab="cleaner"]').click();
         await page.locator("#saveSettingsBtn").click();
         await page.waitForFunction(() => window.mockCalls.some(call => call.name === "saveSettings" && call.payload?.textModelSelections?.cleanup?.supplierId === "resize-vendor"));
         const pairs = await page.evaluate(() => window.mockSettings().textModelSelections);

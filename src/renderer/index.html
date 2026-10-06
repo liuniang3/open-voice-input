@@ -291,10 +291,18 @@
 
           <div id="settingsCleanerPanel" class="settings-tab-panel" role="tabpanel" aria-labelledby="settingsTabCleaner" data-settings-panel="cleaner" hidden>
             <p id="expressionModeNotice" class="settings-mode-notice" role="status"></p>
+            <section id="textSupplierManagerView" class="text-supplier-manager-view" hidden aria-labelledby="textSupplierManagerTitle">
+              <div class="settings-subview-header">
+                <button id="textSupplierBack" type="button" class="back-action"><span class="ui-icon icon-arrow supplier-back-icon" aria-hidden="true"></span>返回表达整理</button>
+                <div>
+                  <span class="text-supplier-overview-kicker">表达整理设置</span>
+                  <strong id="textSupplierManagerTitle">语言处理供应商</strong>
+                </div>
+              </div>
             <section class="settings-group text-supplier-group" aria-labelledby="textSupplierTitle">
               <div class="text-supplier-toolbar">
                 <div>
-                  <strong id="textSupplierTitle">语言处理供应商</strong>
+                  <strong id="textSupplierTitle">已配置供应商</strong>
                   <span id="textSupplierCount" class="text-supplier-count">0 个供应商</span>
                 </div>
                 <button id="textSupplierAdd" type="button" class="primary"><span class="ui-icon icon-plus" aria-hidden="true"></span>添加供应商</button>
@@ -321,11 +329,8 @@
                     <div><strong>模型目录</strong><span id="textSupplierCatalogMeta">尚未同步</span></div>
                     <div id="textSupplierModelPreview" class="text-supplier-model-preview"></div>
                   </div>
-                  <div class="model-capability-editor" aria-labelledby="textSupplierCapabilityTitle">
-                    <div class="section-title">
-                      <strong id="textSupplierCapabilityTitle">模型能力参数</strong>
-                      <span>自动获取或预设的值可以按模型单独修改。</span>
-                    </div>
+                  <details id="textSupplierCapabilities" class="model-capability-editor">
+                    <summary id="textSupplierCapabilityTitle">模型能力参数</summary>
                     <label class="field">
                       <span>模型</span>
                       <select id="textSupplierCapabilityModel" disabled></select>
@@ -344,7 +349,7 @@
                       <button id="textSupplierCapabilitySave" type="button" disabled>保存模型参数</button>
                       <span id="textSupplierCapabilityStatus" class="model-catalog-status" role="status" aria-live="polite"></span>
                     </div>
-                  </div>
+                  </details>
                   <label class="field"><span>测试模型</span><select id="textSupplierTestModel" disabled></select></label>
                   <div class="settings-actions text-supplier-actions"><button id="textSupplierRefresh" type="button" disabled><span class="ui-icon icon-refresh" aria-hidden="true"></span>同步模型</button><button id="textSupplierTest" type="button" disabled><span class="ui-icon icon-link" aria-hidden="true"></span>测试连接</button></div>
                   <div class="supplier-manual-model"><input id="textSupplierManualModel" type="text" maxlength="256" placeholder="模型 ID" autocomplete="off" aria-label="手动添加模型 ID" /><button id="textSupplierModelAdd" type="button" disabled>添加模型</button></div>
@@ -352,10 +357,10 @@
                 </div>
               </div>
             </section>
-            <section class="settings-group">
+            </section>
+            <section id="expressionModelSettings" class="settings-group">
               <div class="section-title">
-                <strong>语音输入 · 表达整理模型</strong>
-                <span>理解本次转写语境，保留原意并整理成清晰、连贯、可直接使用的段落。</span>
+                <strong>表达整理模型</strong>
               </div>
               <div class="provider-grid text-model-picker">
                 <label class="field"><span>供应商</span><select id="cleanupSupplierSelect"></select></label>
@@ -402,17 +407,21 @@
                 </div>
               </div>
             </section>
-            <section class="settings-group">
+            <section id="textSupplierOverview" class="settings-group text-supplier-overview-group" aria-labelledby="textSupplierOverviewTitle">
               <div class="section-title">
-                <strong>会议与文件摘要</strong>
-                <span>生成摘要时使用此模型；实时会议与文件转写共用选择。</span>
+                <strong id="textSupplierOverviewTitle">语言处理供应商</strong>
               </div>
-              <div class="provider-grid text-model-picker">
-                <label class="field"><span>供应商</span><select id="summarySupplierSelect"></select></label>
-                <label class="field"><span>模型</span><select id="summaryModelSelect"></select></label>
+              <div class="text-supplier-overview-card">
+                <div class="text-supplier-overview-copy">
+                  <strong id="textSupplierOverviewName">尚未选择供应商</strong>
+                  <span id="textSupplierOverviewMeta" class="text-supplier-overview-meta">0 个供应商 · 0 个模型</span>
+                </div>
+                <button id="textSupplierManage" type="button" aria-controls="textSupplierManagerView" aria-expanded="false"><span class="ui-icon icon-settings" aria-hidden="true"></span>管理供应商<span class="ui-icon icon-arrow" aria-hidden="true"></span></button>
               </div>
-              <label id="summaryCustomModelField" class="field" hidden><span>自定义模型 ID</span><input id="summaryCustomModelInput" type="text" maxlength="256" autocomplete="off" /></label>
-              <small id="summaryModelHint" class="model-catalog-status" role="status"></small>
+            </section>
+          </div>
+          <div id="legacySummarySettings" class="legacy-text-config" hidden inert>
+            <section class="settings-group">
               <div class="field legacy-text-config" hidden>
                 <label for="meetingAnalysisModelPresetSelect">分析模型</label>
                 <div class="model-select-control">

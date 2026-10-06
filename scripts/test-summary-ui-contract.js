@@ -37,6 +37,16 @@ function allText(node) {
 }
 
 async function main() {
+  await test("summary model selection belongs to file and meeting workspaces, never expression settings", () => {
+    const cleaner = html.slice(html.indexOf('id="settingsCleanerPanel"'), html.indexOf('id="legacySummarySettings"'));
+    assert.doesNotMatch(cleaner, /summarySupplierSelect|summaryModelSelect|meetingAnalysisContextInput|meetingAnalysisMaxOutputInput/);
+    assert.match(html, /id="fileSummaryModelSelect"/);
+    assert.match(html, /id="liveCleanerModel"/);
+    const renderer = fs.readFileSync(path.join(root, "src/renderer/renderer.js"), "utf8");
+    const save = renderer.slice(renderer.indexOf("async function saveAllSettings()"), renderer.indexOf("async function runMeetingEnhancedTest"));
+    assert.doesNotMatch(save, /selectedTextModel\("summary"|meetingAnalysisContextInput|meetingAnalysisMaxOutputInput/);
+    assert.match(save, /\.\.\.appSettings\.textModelSelections/);
+  });
   await test("supplier picker rejects IDs the settings service cannot persist", () => {
     for (const id of ["__proto__", "prototype", "constructor"]) assert.equal(supplierUi.supplierIdOf(id), "");
     assert.equal(supplierUi.supplierIdOf("my-provider"), "my-provider");
