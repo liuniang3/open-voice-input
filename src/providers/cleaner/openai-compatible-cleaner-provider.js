@@ -5,7 +5,7 @@ function createOpenAiCompatibleCleanerProvider({ client }) {
     const response = await client.requestChat(buildTextCleanupMessages(rawText, shortContext));
     return {
       provider: "openai-compatible",
-      text: parseAndValidateCleanupResponse(response.content, rawText),
+      text: parseAndValidateCleanupResponse(response.content, rawText, { finishReason: response.finishReason, status: response.body?.status }),
       raw: response
     };
   }

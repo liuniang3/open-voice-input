@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN" data-platform="win32">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:" />
+    <title>Open Voice Input</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./app-shell.css" />
+  </head>
+  <body class="recording-mode recording-active">
+    <main class="shell">
+      <canvas id="recordingSpectrum" class="recording-spectrum" aria-hidden="true" hidden></canvas>
+      <div class="recording-chrome">
+        <span>Enter 输入 · Esc 取消</span>
+        <button id="recordingCancelBtn" class="recording-cancel" title="取消录音" aria-label="取消录音"><span class="ui-icon icon-close" aria-hidden="true"></span></button>
+      </div>
+      <section id="statusPanel" class="status-panel" data-kind="recording" data-preview="false" aria-live="polite">
+        <span id="pulse" class="pulse" data-kind="recording" aria-hidden="true"></span>
+        <div class="status-content"><strong id="statusTitle">正在录音</strong><p id="statusDetail"></p></div>
+      </section>
+    </main>
+    <script src="./recording-spectrum.js"></script>
+    <script src="./dictation-preview.js"></script>
+  </body>
+</html>

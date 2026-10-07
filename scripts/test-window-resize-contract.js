@@ -28,8 +28,9 @@ assert.match(css, /\.topbar,\s*body\.recording-active \.recording-chrome,\s*\.li
 assert.match(css, /html\[data-platform="darwin"\] \.topbar::before[\s\S]*-webkit-app-region:\s*drag/);
 assert.match(css, /html\[data-platform="darwin"\] :is\(button, input, textarea, select, a, \[contenteditable="true"\]\)[\s\S]*-webkit-app-region:\s*no-drag/);
 assert.match(css, /@media \(max-width: 760px\)[\s\S]*body\.settings-open \.settings-tabs/);
-assert.doesNotMatch(renderer, /statusPanel\.scrollHeight \+ chromeHeight/);
-assert.match(renderer, /const panelHeight = Math\.max\(76, titleHeight \+ detailHeight \+ meterHeight\)/);
+assert.match(main, /recording: \{ width: 340, height: 116 \}/);
+assert.doesNotMatch(main + renderer, /recordingMax|resizeRecordingWindow|window:recording-resize/);
+assert.match(renderer, /function scheduleRecordingScroll\(\)/);
 assert.match(liveCss, /\.live-floating \.live-transcript \{[^}]*flex:\s*1 1 0;[^}]*max-height:\s*none;/s);
 assert.match(liveCss, /\.live-floating \.live-preview:not\(\[hidden\]\)[^}]*flex:\s*0 1 var\(--draft-share, 35%\);/s);
 // Floating mode must hide the actual setup collapsible from index.html; a mismatched
@@ -136,23 +137,23 @@ async function verifyResponsiveWindows() {
       await page.screenshot({ path: path.join(directory, `${item.mode}-${item.width}x${item.height}.png`) });
     }
 
-    await page.setViewportSize({ width: 520, height: 420 });
+    await page.setViewportSize({ width: 340, height: 116 });
     const recordingSizes = await page.evaluate(async () => {
       window.applyWindowMode("recording");
       const before = window.mockCalls.length;
-      window.setStatus("recording", "实时结果", "这是一段用于验证窗口自适应的实时转写内容。".repeat(30));
-      window.resizeRecordingWindowToContent();
-      const expanded = window.mockCalls.slice(before).filter(call => call.name === "resizeRecordingWindow").at(-1)?.payload;
+      window.setRecordingPreview("这是一段用于验证固定窗口内滚动的实时转写内容。".repeat(30));
+      await new Promise(requestAnimationFrame);
+      const preview = { width: innerWidth, height: innerHeight, scrollable: statusDetail.scrollHeight > statusDetail.clientHeight,
+        atEnd: statusDetail.scrollHeight - statusDetail.clientHeight - statusDetail.scrollTop <= 1,
+        titleHidden: getComputedStyle(statusTitle).display === "none" };
       window.setStatus("transcribing", "正在清理文本", "正在整理完整转写结果。");
-      window.resizeRecordingWindowToContent();
-      const compact = window.mockCalls.slice(before).filter(call => call.name === "resizeRecordingWindow").at(-1)?.payload;
-      return { expanded, compact };
+      await new Promise(requestAnimationFrame);
+      return { preview, processing: { width: innerWidth, height: innerHeight },
+        resizeCalls: window.mockCalls.slice(before).filter(call => call.name === "resizeRecordingWindow").length };
     });
-    assert(recordingSizes.expanded.height > recordingSizes.compact.height,
-      "the cleanup state must shrink after a long realtime transcript");
-    assert.equal(recordingSizes.compact.width, 320);
-    assert(recordingSizes.compact.height >= 132 && recordingSizes.compact.height <= 145,
-      `cleanup state should return to its natural compact height (${recordingSizes.compact.height})`);
+    assert.deepEqual(recordingSizes.preview, { width: 340, height: 116, scrollable: true, atEnd: true, titleHidden: true });
+    assert.deepEqual(recordingSizes.processing, { width: 340, height: 116 }, "cleanup keeps the same fixed geometry");
+    assert.equal(recordingSizes.resizeCalls, 0, "preview changes must never resize the native window");
 
     await page.evaluate(async () => {
       window.applyWindowMode("meeting");

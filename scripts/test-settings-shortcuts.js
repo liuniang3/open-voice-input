@@ -395,6 +395,7 @@ function mainHarness(platform = "darwin") {
     "./settings/connection-profiles": { ensureConnectionProfiles },
     "./settings/text-suppliers": require("../src/settings/text-suppliers"),
     "./settings/meeting-window": require("../src/settings/meeting-window"),
+    "./window-motion": require("../src/window-motion"),
     "./hotkeys/validate-hotkey": { validateHotkey, normalizeAccelerator },
     "./meeting": { createMeetingCaptureService: () => capture,
       createMeetingSessionAnalyzer: () => { throw new Error("live must not construct legacy analyzer"); },
@@ -411,7 +412,7 @@ function mainHarness(platform = "darwin") {
   }, __dirname: path.join(root, "src"), process: { platform, resourcesPath: root, env: {}, argv: [], on: () => {} },
   Buffer, URL, structuredClone, console, setTimeout: () => 0, clearTimeout: () => {}, testWindow: win });
   vm.runInContext(source, context);
-  vm.runInContext("mainWindow = testWindow; configurePermissions();", context);
+  vm.runInContext("mainWindow = testWindow; windowMotion = createWindowMotion({ window: mainWindow, platform: process.platform }); configurePermissions();", context);
   const event = { sender: webContents, senderFrame: { url: localUrl } };
   return { controls, events, appEvents, context, webContents,
     run: (code) => vm.runInContext(code, context),

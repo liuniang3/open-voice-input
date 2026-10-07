@@ -8,7 +8,7 @@ function createMimoCleanerProvider({ client, getModel = () => "mimo-v2.5" }) {
     );
     return {
       provider: "mimo",
-      text: parseAndValidateCleanupResponse(response.content, rawText),
+      text: parseAndValidateCleanupResponse(response.content, rawText, { finishReason: response.finishReason }),
       raw: response
     };
   }

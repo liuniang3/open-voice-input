@@ -140,7 +140,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {}, on
         const response = await chat(buildTextCleanupMessages(rawText, shortContext));
         return {
           provider: "text-supplier",
-          text: parseAndValidateCleanupResponse(response.content, rawText),
+          text: parseAndValidateCleanupResponse(response.content, rawText, { finishReason: response.finishReason, status: response.body?.status }),
           raw: response
         };
       }

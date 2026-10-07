@@ -4,6 +4,39 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## v0.4.17 - 2026-10-08
+
+### Changed
+
+- Dictation uses a compact fixed 340-by-116 floating window throughout recording and processing, with tighter padding, 12-pixel preview text, 18-pixel surface corners and a borderless 80%-opacity white tint for stronger text readability. Only the background tint changes; text stays fully opaque and corner cutouts stay clear. Windows uses an isolated per-pixel transparent display with native background materials disabled, preserving underlying details and fully transparent corner cutouts even when inactive; this is translucency, not native desktop blur. The workspace's native resize hit-testing remains unchanged, and recording, ASR, cleanup and paste stay in the existing trusted renderer. macOS keeps recording-only, active vibrancy and restores the normal workspace material on exit. Realtime previews omit the redundant title and scroll inside their pane without a visible scrollbar, following the newest text unless the user scrolls up to read earlier content. Returning to the bottom resumes follow mode; Qwen streaming and MiMo polling share this presentation without truncating the stored or pasted transcript.
+
+### Fixed
+
+- Mirrored dictation spectrum samples use an independent 32-millisecond timer instead of relying on animation frames from the hidden recording page. Frequency changes and silence continue reaching the visible popup even if the recorder's compositor stops issuing frames. A 240-millisecond stale-frame reset prevents disconnected delivery from leaving frozen bars; late frames cannot revive the spectrum during text processing. Stop, cancel and Reduce Motion clear visual timers without changing PCM capture or ASR uploads.
+- Dictation's Windows display no longer uses the experimental native accent/Acrylic backdrop, which could obscure underlying content and paint square corner remnants outside the CSS radius. Only the rounded surface has a translucent white fill; all four corner cutouts stay clear. The display has no surface border, inset white highlight, white text shadow or white indicator halo. Preview panes use complete line heights so automatic tail scrolling does not leave clipped fragments of the preceding line above the text.
+- The isolated dictation display is created only when needed, exposes no settings or credential API, forwards Enter/Escape/cancel to the existing recorder, and falls back to the existing recording window if its renderer fails. Showing dictation no longer launches a native background-effect helper or waits for a PowerShell material operation.
+- Dictation's recording indicator centers on the first text line using that state's line height, including title-free realtime previews and processing/status titles. Its pulse animation no longer relies on a fixed top offset for alignment.
+- Dictation cleanup rejects provider-truncated responses and newly introduced trailing ellipses instead of pasting incomplete text. Failed validation retains the complete ASR transcript; model output budgets and the disabled regex duplicate-removal policy are unchanged.
+- Dictation cleanup prompts now use a positive completeness instruction: process the transcript from the first sentence through the final sentence, explicitly preserve the ending, and verify full coverage before returning JSON. Defensive validation and complete-ASR fallback remain in place.
+- File-transcription paragraphs and file/live-meeting summary prose now use their reading pane's available width instead of inheriting the global 360-pixel hint-text limit. Preserve original line breaks and wrap long words without changing transcript content, timestamp layout or short status hints.
+
+### Added
+
+- Dictation recording uses a subdued, microphone-driven frequency spectrum in the floating window background instead of the old level progress bar. The cancel action uses a quiet icon button and the keyboard hint reads Enter Input / Esc Cancel. Visual processing is isolated from PCM recording and ASR uploads, stops on completion/cancellation and honors Reduce Motion.
+- Subtle shared desktop motion: native window fade-in/fade-out, short dictation entrance, workspace transitions and settings-content fades. Title-bar drag regions, resize geometry and recording start are not delayed by page animations.
+- Follow the system Reduce Motion preference, including live preference changes. Window fade cancellation prevents a delayed hide from closing a reopened window, and stale focus retries cannot reactivate a dismissed window.
+- Dictation paste waits for fade-out and the existing focus-settling delay concurrently; animation does not add a separate paste delay.
+
+### Verification
+
+- Shared regression suite: `64/64` scripts passed locally, including isolated dictation-display security and lifecycle, fixed dictation-window geometry and scrolling, dictation-completeness validation, microphone-spectrum lifecycle, scoped reading-width contracts, Windows/macOS motion-controller and background-summary navigation tests.
+- Spectrum browser checks cover actual Web Audio frequency response, canvas pixels and Windows/macOS layouts at 320/340/420 pixels. Hidden-producer regressions cover timer-only sampling, frequency changes, silent decay, stale-frame reset, repeated visibility/resize events and disposal. Actual Windows app tests deliberately suspend the recorder's animation frames, change a synthetic microphone's frequency, mute it and restore it, confirming the popup continues to update. Synthetic-microphone integration also covers batch/realtime Fast/Stable recording, complete Enter paste-interface payloads and Escape resource cleanup without accessing real microphones or APIs.
+- Cleanup completeness tests cover generated trailing ellipses, provider output-limit metadata, Chat/Responses protocols and full-text fallback. Existing source ellipses, normal repeated words and user-configured output budgets remain supported.
+- Fixed-window browser tests cover Windows/macOS styles, borderless surfaces without white glyph shadows, first-line indicator alignment, long/revised/empty previews, exact text retention, manual scroll and resumed tail following, plus Qwen and MiMo preview paths. Native Windows desktop-composition checks now verify all four corner cutouts against the actual underlying pixels, retained contrast and small underlying details in focused, genuinely unfocused, reopened and fading states. These checks would reject the old rectangular accent material, even if its center passed a color-transmission check. The actual application also records synthetic microphone PCM and forwards its spectrum while its main window is hidden; Stable-mode Enter retains the full paste payload, Escape cancels without paste, and returning Home restores the ordinary resizable window. Diagnostic crops contain only the synthetic fixture; macOS native compositing still requires hardware verification.
+- Reading-width browser checks passed at 720/1040/1440 pixels with Windows and macOS styles, preserving raw text and explicit paragraphs while wrapping long identifiers and using the complete transcript/summary pane width.
+- Browser motion, homepage, settings and responsive-window tests passed. Native Windows Electron checks cover interrupted fades, focus, opacity restoration and system Reduce Motion preferences; macOS native appearance still needs a build and hardware check.
+
+
 ## v0.4.16 - 2026-10-07
 
 ### Changed

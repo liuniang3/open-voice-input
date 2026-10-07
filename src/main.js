@@ -54,6 +54,8 @@ const { createOnboardingState } = require("./onboarding-state");
 const { openConsole: openAsrProviderConsole } = require("./asr-provider-info");
 const { normalizePresentation, minimalBounds, visibleBounds, createMeetingWindowStore } = require("./settings/meeting-window");
 const { createTransparentPreview } = require("./meeting/transparent-preview");
+const { createWindowMotion } = require("./window-motion");
+const { createDictationPreview } = require("./dictation-preview");
 
 let meetingImportJobs = null;
 function getMeetingImportJobs() {
@@ -168,8 +170,7 @@ const FALLBACK_TRAY_ICON_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 const WINDOW_SIZES = {
   home: { width: 960, height: 760 },
-  recording: { width: 320, height: 132 },
-  recordingMax: { width: 520, height: 420 },
+  recording: { width: 340, height: 116 },
   compact: { width: 220, height: 74 },
   result: { width: 500, height: 420 },
   settings: { width: 840, height: 700 },
@@ -286,6 +287,9 @@ const DEFAULT_SETTINGS = {
 app.setPath("userData", path.join(app.getPath("appData"), STABLE_USER_DATA_DIR));
 
 let mainWindow;
+let windowMotion;
+let dictationPreview;
+let windowFocusRevision = 0;
 let tray;
 let settings = { ...DEFAULT_SETTINGS };
 let registeredHotkeys = [];
@@ -936,16 +940,25 @@ function createWindow() {
     // transparent frameless HWND. Acrylic keeps the visual treatment while
     // preserving the native Windows resize frame and cursor.
     transparent: !isWindows,
+    ...(os.platform() === "darwin" ? { visualEffectState: "active" } : {}),
     backgroundColor: isWindows ? "#eef4f1" : "#00000000",
     ...(isWindows ? { backgroundMaterial: "acrylic" } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: false
     }
   });
 
+  windowMotion = createWindowMotion({ window: mainWindow });
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+  dictationPreview = createDictationPreview({ BrowserWindow, ipcMain, mainWindow,
+    authorized: event => isAppSender(event.sender, event.senderFrame?.url),
+    onCommand: command => {
+      if (windowMode === "recording" && mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send("recording-command", command);
+    } });
   liveTransparentPreview = createTransparentPreview({ BrowserWindow, ipcMain, screen, mainWindow,
     onPresentation: setLiveWindow, onBounds: bounds => {
       if (!mainWindow || mainWindow.isDestroyed() || !liveWindowFlags.floating) return;
@@ -963,10 +976,14 @@ function createWindow() {
   mainWindow.on("close", (event) => {
     if (!meetingQuitCleanupStarted) {
       event.preventDefault();
-      mainWindow.hide();
+      void hideWindow(mainWindow, { resetMode: false });
     }
   });
-  mainWindow.on("closed", () => { liveTransparentPreview?.dispose(); liveTransparentPreview = null; mainWindow = null; });
+  mainWindow.on("closed", () => {
+    windowMotion?.dispose(); windowMotion = null;
+    dictationPreview?.dispose(); dictationPreview = null;
+    liveTransparentPreview?.dispose(); liveTransparentPreview = null; mainWindow = null;
+  });
 }
 
 function isAppLocalUrl(value) {
@@ -1017,12 +1034,13 @@ function showAndStart() {
   if (captureOwner !== "short") targetWindowHandle = getForegroundWindowHandle();
   captureOwner = "short";
   shortStartPending = true;
-  void requireCapturePermissions("microphone").then(() => {
+  void requireCapturePermissions("microphone").then(async () => {
     if (meetingQuitCleanupStarted) throw liveError("app_quitting");
     logEvent("hotkey: showAndStart");
     setWindowMode("recording");
     prepareWindowForDisplay(mainWindow, "recording");
-    mainWindow.show();
+    if (!dictationPreview || !await dictationPreview.show()) windowMotion.show();
+    if (meetingQuitCleanupStarted) throw liveError("app_quitting");
     enforceWindowGeometry(mainWindow, "recording");
     focusMainWindow();
     registerRecordingKeyFallbacks();
@@ -1037,8 +1055,8 @@ function showWindowOnly() {
   if (!mainWindow) return;
   if (liveTransparentPreview?.reveal()) return;
   if (captureOwner || realtimeMeeting?.status().recording) {
-    mainWindow.show();
-    mainWindow.focus();
+    if (dictationPreview?.isVisible()) focusMainWindow();
+    else { windowMotion.show(); mainWindow.focus(); }
     return;
   }
   showHome();
@@ -1047,13 +1065,14 @@ function showWindowOnly() {
 function showHome() {
   if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
   if (captureOwner === "short" || windowMode === "recording") {
-    mainWindow.show(); focusMainWindow();
+    if (!dictationPreview?.isVisible()) windowMotion.show();
+    focusMainWindow();
     return { ok: false, error: { message: "请先结束当前语音输入。" } };
   }
   targetWindowHandle = "";
   setWindowMode("home");
   prepareWindowForDisplay(mainWindow, "home");
-  mainWindow.show();
+  windowMotion.show();
   focusWindow(mainWindow, "home", { topmost: false });
   sendWhenLoaded(mainWindow, "open-home");
   return { ok: true };
@@ -1065,7 +1084,7 @@ function showSettings(tabName = "") {
   logEvent("settings: show in main window");
   setWindowMode("settings");
   prepareWindowForDisplay(mainWindow, "settings");
-  mainWindow.show();
+  windowMotion.show();
   enforceWindowGeometry(mainWindow, "settings");
   focusWindow(mainWindow, "settings", { topmost: false });
   sendWhenLoaded(mainWindow, "open-settings", typeof tabName === "string" ? tabName : "");
@@ -1081,7 +1100,7 @@ function showResultWindow() {
   logEvent("result-window: show");
   setWindowMode("result");
   prepareWindowForDisplay(mainWindow, "result");
-  mainWindow.show();
+  windowMotion.show();
   enforceWindowGeometry(mainWindow, "result");
   focusMainWindow();
 }
@@ -1095,7 +1114,7 @@ function showMeetingWorkspace() {
   // non-meeting transitions via setWindowMode, but meeting entry uses open-meeting only.
   windowMode = "meeting";
   prepareWindowForDisplay(mainWindow, "meeting");
-  mainWindow.show();
+  windowMotion.show();
   enforceWindowGeometry(mainWindow, "meeting");
   focusWindow(mainWindow, "meeting", { topmost: liveWindowFlags.alwaysOnTop });
   sendWhenLoaded(mainWindow, "open-meeting");
@@ -1107,7 +1126,7 @@ function showFileTranscriptionWorkspace() {
   logEvent("file: show workspace");
   setWindowMode("file");
   prepareWindowForDisplay(mainWindow, "file");
-  mainWindow.show();
+  windowMotion.show();
   enforceWindowGeometry(mainWindow, "file");
   focusWindow(mainWindow, "file", { topmost: false });
   sendWhenLoaded(mainWindow, "open-file");
@@ -1117,6 +1136,7 @@ function setWindowMode(mode) {
   const previousMode = windowMode;
   if (mode !== "meeting") restoreLiveWindow();
   windowMode = mode;
+  if (mode !== "recording") void dictationPreview?.hide();
   if (!mainWindow) return;
   logEvent("window: mode", mode);
   enforceWindowGeometry(mainWindow, mode, previousMode !== mode);
@@ -1235,11 +1255,16 @@ function setLiveWindow(payload = {}) {
 
 function enforceWindowGeometry(win, mode = windowMode, resetSize = false) {
   if (!win || win.isDestroyed()) return;
+  // Let the native backdrop show through the dictation surface, not the text.
+  if (os.platform() === "darwin") {
+    try { win.setVibrancy?.(mode === "recording" ? "under-window" : null); } catch {}
+  }
   if (win === mainWindow && mode === "meeting" && liveWindowRestore) {
     win.setResizable(true);
     setWindowAlwaysOnTop(win, liveWindowFlags.alwaysOnTop);
     return;
   }
+  win.setBackgroundColor?.(mode === "recording" || os.platform() !== "win32" ? "#00000000" : "#eef4f1");
   const size = WINDOW_SIZES[mode] || WINDOW_SIZES.compact;
   const isSettings = mode === "settings";
   const isResult = mode === "result";
@@ -1268,18 +1293,6 @@ function enforceWindowGeometry(win, mode = windowMode, resetSize = false) {
   logEvent("window: geometry", `${mode} ${JSON.stringify(win.getBounds())}`);
 }
 
-function resizeRecordingWindow({ width, height } = {}) {
-  if (!mainWindow || mainWindow.isDestroyed() || windowMode !== "recording") return;
-  const min = WINDOW_SIZES.recording;
-  const max = WINDOW_SIZES.recordingMax;
-  const nextWidth = clamp(Number(width) || min.width, min.width, max.width);
-  const nextHeight = clamp(Number(height) || min.height, min.height, max.height);
-  mainWindow.setContentSize(nextWidth, nextHeight, false);
-  mainWindow.setBounds({ ...mainWindow.getBounds(), width: nextWidth, height: nextHeight }, false);
-  raiseWindowToFront(mainWindow, "recording-resize", { focus: false, native: false });
-  logEvent("window: recording resize", `${nextWidth}x${nextHeight}`);
-}
-
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Math.round(value)));
 }
@@ -1296,13 +1309,23 @@ function prepareWindowForDisplay(win = mainWindow, mode = windowMode) {
   win.moveTop();
 }
 
-function hideWindow(win = mainWindow) {
-  if (!win || win.isDestroyed()) return;
+function hideWindow(win = mainWindow, { resetMode = true } = {}) {
+  if (!win || win.isDestroyed()) return Promise.resolve(false);
   if (win === mainWindow) {
-    setWindowMode("compact");
+    windowFocusRevision++;
     unregisterRecordingKeyFallbacks();
+    if (dictationPreview?.isVisible()) {
+      const hideRevision = windowFocusRevision, hideMode = windowMode;
+      return dictationPreview.hide(() => {
+        if (hideRevision !== windowFocusRevision || windowMode !== hideMode) return;
+        mainWindow?.hide();
+        if (resetMode) setWindowMode("compact");
+      });
+    }
+    return windowMotion.hide(resetMode ? () => setWindowMode("compact") : undefined);
   }
   win.hide();
+  return Promise.resolve(true);
 }
 
 function sendWhenLoaded(win, channel, ...args) {
@@ -1396,19 +1419,22 @@ function hotkeyCandidates() {
 
 function focusMainWindow() {
   if (!mainWindow) return;
-  focusWindow(mainWindow, "main");
+  focusWindow(dictationPreview?.isVisible() ? dictationPreview.getWindow() : mainWindow, "main");
 }
 
 function focusWindow(win, label, { topmost = true } = {}) {
   if (!win || win.isDestroyed()) return;
   logEvent("window: focus requested", label);
-  win.show();
+  if (win === mainWindow) windowMotion.show();
+  else win.show();
   raiseWindowToFront(win, label, { focus: true, native: topmost, topmost });
   const focusMode = windowMode;
   const focusFlags = liveWindowFlags;
+  const focusRevision = ++windowFocusRevision;
   for (const delay of [80, 180, 360, 720]) {
     setTimeout(() => {
       if (!win || win.isDestroyed() || !win.isVisible()) return;
+      if (focusRevision !== windowFocusRevision) return;
       if (win === mainWindow && (windowMode !== focusMode || liveWindowFlags !== focusFlags)) return;
       raiseWindowToFront(win, label, { focus: true, native: topmost && delay >= 180, topmost });
       logEvent("window: focus retry", `${label} delay=${delay} focused=${win.isFocused()} visible=${win.isVisible()}`);
@@ -1496,7 +1522,7 @@ function registerRecordingKeyFallbacks() {
   for (const [accelerator, command] of bindings) {
     try {
       const ok = globalShortcut.register(accelerator, () => {
-        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && windowMode === "recording") {
+        if (mainWindow && !mainWindow.isDestroyed() && (mainWindow.isVisible() || dictationPreview?.isVisible()) && windowMode === "recording") {
           logEvent("recording-key-fallback", `${accelerator}:${command}`);
           mainWindow.webContents.send("recording-command", command);
         }
@@ -1952,8 +1978,8 @@ if ($handle) {
 
 async function injectText(text) {
   clipboard.writeText(text);
-  hideWindow();
-  await new Promise((resolve) => setTimeout(resolve, 260));
+  // Fade and focus-settling run together, never adding animation time to paste.
+  await Promise.all([hideWindow(), new Promise((resolve) => setTimeout(resolve, 260))]);
   try {
     const mac = getMacUtilities();
     if (mac) {
@@ -2069,7 +2095,6 @@ ipcMain.handle("onboarding:microphone-probe", async (event, active) => {
   ipcMain.handle("window:result", async () => showResultWindow());
   ipcMain.handle("window:meeting", async () => showMeetingWorkspace());
   ipcMain.handle("window:file", async () => showFileTranscriptionWorkspace());
-  ipcMain.handle("window:recording-resize", async (_event, size) => resizeRecordingWindow(size));
 ipcMain.handle("app:status", async () => ({
   hasApiKey: Boolean(resolveApiKey()),
   hasSavedApiKey: Boolean(settings.asrApiKey),
@@ -2086,6 +2111,12 @@ ipcMain.handle("app:status", async () => ({
   settings
 }));
 ipcMain.handle("window:hide", async (event) => hideWindow(BrowserWindow.fromWebContents(event.sender) || mainWindow));
+ipcMain.handle("window:motion-preference", (event, reducedMotion) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url) || typeof reducedMotion !== "boolean") return { ok: false };
+  windowMotion?.setReducedMotion(reducedMotion);
+  dictationPreview?.setReducedMotion(reducedMotion);
+  return { ok: true };
+});
 ipcMain.handle("app:log", async (_event, message, detail) => logEvent(`renderer: ${message}`, detail || ""));
 ipcMain.handle("voice:transcribe", async (_event, payload) => voicePipeline.transcribe(payload));
 ipcMain.handle("mimo:transcribe", async (_event, payload) => voicePipeline.transcribe(payload));

@@ -545,6 +545,7 @@ async function prepareBrowser(page) {
       "/settings-workspace.css": ["src/renderer/settings-workspace.css", "text/css"],
       "/settings-workspace.js": ["src/renderer/settings-workspace.js", "text/javascript"],
       "/voice-history-ui.js": ["src/renderer/voice-history-ui.js", "text/javascript"],
+      "/recording-spectrum.js": ["src/renderer/recording-spectrum.js", "text/javascript"],
       "/voice-settings-snapshot.js": ["src/renderer/voice-settings-snapshot.js", "text/javascript"],
       "/reading-layout.js": ["src/renderer/reading-layout.js", "text/javascript"],
       "/home-ui.js": ["src/renderer/home-ui.js", "text/javascript"],

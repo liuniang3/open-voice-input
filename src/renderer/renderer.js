@@ -3,8 +3,11 @@ const statusPanel = document.getElementById("statusPanel");
 const statusTitle = document.getElementById("statusTitle");
 const statusDetail = document.getElementById("statusDetail");
 const pulse = document.getElementById("pulse");
-const levelMeter = document.getElementById("levelMeter");
-const levelFill = document.getElementById("levelFill");
+const recordingSpectrum = window.RecordingSpectrum.createRecordingSpectrum(window, {
+  onFrame: levels => {
+    if (currentWindowMode === "recording") window.mimoInput.publishDictationSpectrum?.(levels);
+  }
+});
 const contextInput = document.getElementById("contextInput");
 const resultText = document.getElementById("resultText");
 const recordBtn = document.getElementById("recordBtn");
@@ -440,6 +443,7 @@ function savedTextProviderFamily(model, profile) {
 
 let audioContext;
 let sourceNode;
+let spectrumAnalyser;
 let processorNode;
 let mediaStream;
 let recordingChunks = [];
@@ -470,7 +474,8 @@ let recordingAsrMode = "batch";
 let lastVoiceRequest = null;
 let voiceUsageRequestId = "";
 let lastVoiceUsageRequestId = "";
-let resizeTimer = 0;
+let recordingScrollFrame = 0;
+let recordingFollowTail = true;
 let mimoPreviewTimer = 0;
 let mimoPreviewInFlight = false;
 let mimoPreviewLastSampleCount = 0;
@@ -1328,8 +1333,10 @@ function logRenderer(message, detail = "") {
   window.mimoInput?.log?.(message, detail).catch(() => {});
 }
 
-function setStatus(kind, title, detail) {
+function setStatus(kind, title, detail, { preview = false } = {}) {
+  if (!preview || statusPanel.dataset.preview !== "true") recordingFollowTail = true;
   statusPanel.dataset.kind = kind;
+  statusPanel.dataset.preview = String(preview);
   pulse.dataset.kind = kind;
   statusTitle.textContent = title;
   statusDetail.textContent = detail;
@@ -1339,12 +1346,21 @@ function setStatus(kind, title, detail) {
     feedback.dataset.kind = kind;
     feedback.hidden = kind === "ready" && title === "就绪";
   }
-  scheduleRecordingResize();
+  scheduleRecordingScroll();
+  if (currentWindowMode === "recording") {
+    window.mimoInput.publishDictationPreview?.({ kind, title, detail, preview });
+  }
 }
 
-function setLevel(value) {
-  const normalized = Math.max(0, Math.min(1, value));
-  levelFill.style.width = `${Math.round(normalized * 100)}%`;
+function setRecordingPreview(text) {
+  resultText.value = text || "";
+  setStatus("recording", text ? "" : "正在录音", text || "", { preview: Boolean(text) });
+}
+
+function stopRecordingSpectrum() {
+  recordingSpectrum.stop();
+  try { spectrumAnalyser?.disconnect(); } catch {}
+  spectrumAnalyser = null;
 }
 
 function setButtons(state) {
@@ -1355,32 +1371,13 @@ function setButtons(state) {
   sendBtn.disabled = !hasResult || state === "recording" || state === "transcribing";
 }
 
-function scheduleRecordingResize() {
-  if (currentWindowMode !== "recording") return;
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(resizeRecordingWindowToContent, 30);
-}
-
-function resizeRecordingWindowToContent() {
-  if (currentWindowMode !== "recording") return;
-  const textLength = statusDetail.textContent.length;
-  const contentWidth = textLength > 48 ? 520 : textLength > 22 ? 420 : 320;
-  const chrome = document.getElementById("recordingChrome");
-  const chromeHeight = chrome?.offsetHeight || 0;
-  const titleHeight = statusTitle.offsetHeight || 0;
-  const detailHeight = statusDetail.textContent ? statusDetail.scrollHeight + 7 : 0;
-  const meterHeight = levelMeter.hidden ? 0 : levelMeter.offsetHeight + 8;
-  // The panel fills the current viewport, so its scrollHeight cannot shrink
-  // after a long preview. Measure only its intrinsic children instead.
-  const panelHeight = Math.max(76, titleHeight + detailHeight + meterHeight);
-  const contentHeight = Math.min(420, Math.max(132, Math.ceil(panelHeight + chromeHeight + 30)));
-  window.mimoInput.resizeRecordingWindow?.({
-    width: contentWidth,
-    height: contentHeight
-  }).catch(() => {});
-  if (statusDetail.scrollHeight > statusDetail.clientHeight) {
-    statusDetail.scrollTop = statusDetail.scrollHeight;
-  }
+function scheduleRecordingScroll() {
+  if (currentWindowMode !== "recording" || !recordingFollowTail || recordingScrollFrame) return;
+  // Coalesce updates without changing native geometry or dropping transcript text.
+  recordingScrollFrame = requestAnimationFrame(() => {
+    recordingScrollFrame = 0;
+    if (currentWindowMode === "recording" && recordingFollowTail) statusDetail.scrollTop = statusDetail.scrollHeight;
+  });
 }
 
 async function refreshStatus() {
@@ -1424,8 +1421,7 @@ async function startRecording({ autoSend = true } = {}) {
   voiceUsageRequestId = window.crypto.randomUUID();
   setButtons("recording");
   setStatus("recording", "正在录音", "");
-  levelMeter.hidden = false;
-  setLevel(0);
+  stopRecordingSpectrum();
   recordingPeak = 0;
   recordingRmsSum = 0;
   recordingSampleCount = 0;
@@ -1443,7 +1439,7 @@ async function startRecording({ autoSend = true } = {}) {
     isRecording = false;
     recordingSegmentState = null;
     logRenderer("recording: microphone failed", error.message || String(error));
-    levelMeter.hidden = true;
+    stopRecordingSpectrum();
     setButtons("ready");
     throw error;
   }
@@ -1472,6 +1468,17 @@ async function startRecording({ autoSend = true } = {}) {
   }
   recordingSampleRate = audioContext.sampleRate;
   sourceNode = audioContext.createMediaStreamSource(mediaStream);
+  // The analyser is a read-only branch; PCM capture and ASR uploads stay unchanged.
+  try {
+    spectrumAnalyser = audioContext.createAnalyser();
+    spectrumAnalyser.fftSize = 1024;
+    spectrumAnalyser.minDecibels = -80;
+    spectrumAnalyser.maxDecibels = -20;
+    spectrumAnalyser.smoothingTimeConstant = 0.7;
+    sourceNode.connect(spectrumAnalyser);
+  } catch {
+    stopRecordingSpectrum();
+  }
   processorNode = audioContext.createScriptProcessor(2048, 1, 1);
   silenceGainNode = audioContext.createGain();
   silenceGainNode.gain.value = 0;
@@ -1500,6 +1507,7 @@ async function startRecording({ autoSend = true } = {}) {
   sourceNode.connect(processorNode);
   processorNode.connect(silenceGainNode);
   silenceGainNode.connect(audioContext.destination);
+  recordingSpectrum.start(spectrumAnalyser);
 
   if (appSettings.microphoneDeviceId && actualDeviceId && appSettings.microphoneDeviceId !== actualDeviceId) {
     if (recordingAsrMode !== "realtime") {
@@ -1515,6 +1523,7 @@ async function stopRecording() {
   if (!isRecording) return;
   logRenderer("recording: stop requested");
   isRecording = false;
+  stopRecordingSpectrum();
   isTranscribing = true;
   await window.mimoInput.clearRecordingKeys();
   setButtons("transcribing");
@@ -1529,7 +1538,6 @@ async function stopRecording() {
   sourceNode?.disconnect();
   mediaStream?.getTracks().forEach((track) => track.stop());
   await audioContext?.close();
-  levelMeter.hidden = true;
 
   const durationMs = performance.now() - recordingStartedAt;
   const rms = recordingSampleCount ? Math.sqrt(recordingRmsSum / recordingSampleCount) : 0;
@@ -1685,7 +1693,7 @@ function enqueueSegmentTranscription(state, payload, index) {
     state.results[index] = text || "";
     state.errors[index] = null;
     logRenderer("asr segment: cached", `${index + 1} chars=${String(text || "").length}`);
-    if (isRecording && state === recordingSegmentState) {
+    if (isRecording && state === recordingSegmentState && statusPanel.dataset.preview !== "true") {
       setStatus("recording", "正在录音", `已缓存 ${index + 1} 段，继续说话。`);
     }
   });
@@ -1883,9 +1891,7 @@ async function runMimoPreviewTick(runId) {
     if (transcript) {
       const cachedText = audioTools.joinTranscriptSegments(recordingSegmentState?.results || []);
       const visibleText = audioTools.joinTranscriptSegments([cachedText, transcript]);
-      resultText.value = visibleText;
-      setStatus("recording", "MiMo 实时预览", visibleText);
-      scheduleRecordingResize();
+      setRecordingPreview(visibleText);
     }
   } finally {
     if (runId === mimoPreviewRunId) {
@@ -1925,6 +1931,7 @@ async function cleanupRealtimePreview({ finish = false, shortContext = "", trans
 
 async function cancelRecording() {
   await window.mimoInput.clearRecordingKeys();
+  stopRecordingSpectrum();
   if (!isRecording) {
     await window.mimoInput.hide();
     return;
@@ -1943,8 +1950,6 @@ async function cancelRecording() {
   await cleanupRealtimePreview();
   recordingChunks = [];
   recordingSegmentState = null;
-  levelMeter.hidden = true;
-  setLevel(0);
   setButtons("ready");
   setStatus("ready", "已取消", "");
   await window.mimoInput.hide();
@@ -1997,7 +2002,6 @@ function updateAudioStats(input) {
   recordingRmsSum += sum;
   recordingSampleCount += input.length;
   const blockRms = Math.sqrt(sum / input.length);
-  setLevel(Math.min(1, blockRms * 18));
   return blockRms;
 }
 
@@ -2457,6 +2461,10 @@ async function setTranscriptionMode(mode, { silent = false } = {}) {
 }
 
 function applyWindowMode(mode) {
+  cancelAnimationFrame(recordingScrollFrame);
+  recordingScrollFrame = 0;
+  recordingFollowTail = true;
+  if (mode !== "recording") recordingSpectrum.stop();
   if (mode !== "settings") voiceHistoryUi?.close();
   currentWindowMode = mode;
   document.body.classList.toggle("recording-mode", mode === "recording" || mode === "compact");
@@ -2488,7 +2496,7 @@ function applyWindowMode(mode) {
   if (mode !== "file") {
     window.FileTranscriptionUi?.stopPolling?.();
   }
-  scheduleRecordingResize();
+  scheduleRecordingScroll();
 }
 
 function renderWindowMaximizeButton(maximized) {
@@ -2743,7 +2751,7 @@ async function testConnection() {
 recordBtn.addEventListener("click", () => startRecording({ autoSend: false }).catch((error) => {
   setStatus("error", "麦克风打开失败", error.message || String(error));
   setButtons("ready");
-  levelMeter.hidden = true;
+  stopRecordingSpectrum();
 }));
 stopBtn.addEventListener("click", stopRecording);
 recordingCancelBtn.addEventListener("click", cancelRecording);
@@ -2883,6 +2891,11 @@ saveSettingsBtn.addEventListener("click", () => {
 });
 testConnectionBtn?.addEventListener("click", testConnection);
 resultText.addEventListener("input", () => setButtons("ready"));
+statusDetail.addEventListener("scroll", () => {
+  // Text relayout may scroll before the pending tail update; that is not a manual pause.
+  if (recordingScrollFrame || currentWindowMode !== "recording" || statusPanel.dataset.preview !== "true") return;
+  recordingFollowTail = statusDetail.scrollHeight - statusDetail.clientHeight - statusDetail.scrollTop <= 24;
+});
 hotkeyInput.addEventListener("focus", () => beginHotkeyCapture("short", hotkeyInput, hotkeyHint, hotkeyStatus));
 hotkeyInput.addEventListener("click", () => beginHotkeyCapture("short", hotkeyInput, hotkeyHint, hotkeyStatus));
 hotkeyInput.addEventListener("blur", () => endHotkeyCapture());
@@ -2942,11 +2955,7 @@ window.mimoInput.onRetryLastVoiceRequest(() => {
 
 window.mimoInput.onPartialTranscript((text) => {
   if (!isRecording) return;
-  resultText.value = text || "";
-  if (text) {
-    setStatus("recording", "实时结果", text);
-  }
-  scheduleRecordingResize();
+  setRecordingPreview(text);
   setButtons(isRecording ? "recording" : "transcribing");
 });
 
@@ -4541,6 +4550,18 @@ window.mimoInput.isWindowMaximized?.().then((result) => renderWindowMaximizeButt
 }
 
 bindMeetingUi();
+
+const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+function syncMotionPreference() {
+  window.mimoInput.setReducedMotion?.(motionPreference.matches)?.catch(() => {});
+}
+motionPreference.addEventListener("change", syncMotionPreference);
+window.addEventListener("beforeunload", () => {
+  cancelAnimationFrame(recordingScrollFrame);
+  motionPreference.removeEventListener("change", syncMotionPreference);
+  recordingSpectrum.dispose();
+});
+syncMotionPreference();
 
 applyWindowMode("home");
 refreshStatus().then(() => refreshMicrophones()).catch(() => {});

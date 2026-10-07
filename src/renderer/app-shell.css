@@ -193,4 +193,31 @@ body.meeting-mode .live-transport, body.file-mode .file-process { background: rg
   .guide-action-row { flex-wrap: wrap; }
 }
 
-@media (prefers-reduced-motion: reduce) { button, .guide-meter > div { transition: none; } }
+/* Only content moves; native drag regions and resize boundaries stay put. */
+:is(#homePanel, #settingsPanel, #meetingPanel, #filePanel, #onboardingPanel):not([hidden]) {
+  animation: workspace-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.settings-tab-panel:not([hidden]), #textSupplierManagerView:not([hidden]) {
+  animation: settings-content-enter 150ms ease-out;
+}
+body.recording-active .status-panel {
+  animation: recording-enter 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes workspace-enter {
+  from { opacity: 0.35; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes settings-content-enter {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}
+@keyframes recording-enter {
+  from { opacity: 0.35; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  button, .guide-meter > div { transition: none; }
+  :is(#homePanel, #settingsPanel, #meetingPanel, #filePanel, #onboardingPanel):not([hidden]),
+  .settings-tab-panel:not([hidden]), #textSupplierManagerView:not([hidden]),
+  body.recording-active .status-panel, .pulse { animation: none; }
+}

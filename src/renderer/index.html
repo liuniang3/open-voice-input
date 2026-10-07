@@ -13,6 +13,7 @@
   </head>
   <body>
     <main class="shell">
+      <canvas id="recordingSpectrum" class="recording-spectrum" aria-hidden="true" hidden></canvas>
       <header class="topbar">
         <div class="app-brand">
           <img class="brand-mark" src="./brand/app.svg" alt="" />
@@ -107,18 +108,15 @@
       </section>
 
       <div id="recordingChrome" class="recording-chrome" aria-label="录音控制">
-        <span>Enter 停止 · Esc 取消</span>
-        <button id="recordingCancelBtn" class="recording-cancel" title="取消转写，快捷键 Esc" aria-label="取消转写">×</button>
+        <span>Enter 输入 · Esc 取消</span>
+        <button id="recordingCancelBtn" class="recording-cancel" type="button" title="取消本次输入（Esc）" aria-label="取消本次输入"><span class="ui-icon icon-close" aria-hidden="true"></span></button>
       </div>
 
       <section class="status-panel" id="statusPanel">
         <div id="pulse" class="pulse"></div>
-        <div>
+        <div class="status-content">
           <strong id="statusTitle">就绪</strong>
-          <span id="statusDetail">按已设置的全局快捷键开始录音。</span>
-          <div id="levelMeter" class="level-meter" hidden>
-            <div id="levelFill"></div>
-          </div>
+          <span id="statusDetail" tabindex="0" aria-label="状态与转写内容">按已设置的全局快捷键开始录音。</span>
         </div>
       </section>
 
@@ -1112,7 +1110,7 @@
       </div>
 
       <footer>
-        <span>Enter 停止录音</span>
+        <span>Enter 输入</span>
         <span>Ctrl+Enter 发送</span>
         <span>Esc 隐藏</span>
       </footer>
@@ -1166,6 +1164,7 @@
     <script src="./onboarding-ui.js"></script>
     <script src="./settings-workspace.js"></script>
     <script src="./voice-history-ui.js"></script>
+    <script src="./recording-spectrum.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

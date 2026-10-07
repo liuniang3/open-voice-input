@@ -11,7 +11,7 @@ function createOpenCodeGoCleanerProvider({ client }) {
     );
     return {
       provider: "opencode-go",
-      text: parseAndValidateCleanupResponse(response.content, rawText),
+      text: parseAndValidateCleanupResponse(response.content, rawText, { finishReason: response.finishReason }),
       raw: response
     };
   }

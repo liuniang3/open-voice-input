@@ -14,12 +14,14 @@ function buildTextCleanupMessages(rawText, shortContext = "", options = {}) {
     "Delete only spans that are unquestionably filler noise, a stutter, an abandoned false start, or an accidental duplicate.",
     "Reject any deletion that changes meaning, emphasis, negation, grammatical reduplication, quoted speech, a connective, a technical term, a number, or an identifier.",
     "Reconstruct the result only by deleting approved spans and adjusting punctuation.",
+    "Process the raw transcript from its first sentence through its final sentence and return a complete cleaned version. Preserve the final sentence, its requirements and negations. Before returning JSON, verify that the result covers the entire source; represent all content explicitly rather than with ellipses, placeholders or 'etc'.",
     "Never paraphrase, reorder, replace, summarize, answer, explain, infer, or add content.",
     "If evidence is insufficient, delete nothing."
   ].join("\n") : [
     "你是语音输入法的表达整理器，不是聊天助手。",
     "请把本次原始转写整理成一段可直接发送或粘贴的、逻辑清晰、连贯自然的话。",
     "这不是逐字复刻，也不是摘要：必须保留原文的全部主要意图、事实、条件、立场和操作要求。",
+    "请从原始转写的第一句开始，连续整理到最后一句，并输出覆盖全篇的完整结果；保留原文最后一句、末尾的要求和否定。返回 JSON 前，请确认整理结果已经明确写出原文的全部主要内容，不用省略号、‘后略’、‘其余省略’或占位符代替任何部分；原文没有省略号时，整理结果也保持没有省略号。",
     "可以删除无语义口头词、结巴、意外重复和已被后文纠正的假启动；可以调整标点、语序和句式，并用少量连接词改善逻辑。",
     "允许在不改变含义的前提下把口语改成自然书面表达，但不得新增原文没有的事实、理由、结论、承诺或行动。",
     "保留否定、程度、犹豫和不确定性，保留数字、专有名词、模型名、代码式词汇、英文缩写，以及具有正常语义的叠词或重复。",
@@ -47,11 +49,16 @@ function buildTextCleanupMessages(rawText, shortContext = "", options = {}) {
 }
 
 function parseAndValidateCleanupResponse(value, rawText, options = {}) {
+  // Transport truncation can still carry valid JSON. It must never be pasted.
+  if (["length", "max_tokens", "max_output_tokens", "incomplete", "content_filter", "error", "failed"].includes(options.finishReason)
+    || options.status === "incomplete" || options.status === "failed") return "";
   const parsed = extractCleanupObject(value);
   if (!parsed || Array.isArray(parsed) || typeof parsed.text !== "string") return "";
   if (/(?:^|\n)\s*(?:[-*•]|\d+[.)、])\s+/u.test(parsed.text)) return "";
 
   const cleanedText = ensureTerminalPunctuation(normalizeParagraph(parsed.text));
+  const ellipsis = /(?:\.{3,}|…+|⋯+|\.\s*\.\s*\.)[\s。.!！?？,，;；:：'"”’）)\]]*$/u;
+  if (ellipsis.test(cleanedText) && !ellipsis.test(String(rawText || "").trim())) return "";
   const valid = options?.policy === "conservative"
     ? isConservativeCleanup(rawText, cleanedText)
     : isSafeCleanup(rawText, cleanedText);
