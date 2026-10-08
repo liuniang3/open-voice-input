@@ -90,6 +90,23 @@ function parseParts(accelerator) {
   return String(accelerator || "").split("+").map((part) => part.trim()).filter(Boolean);
 }
 
+function matchesShortcutInput(accelerator, input, platform = process.platform) {
+  if (!input || input.type !== "keyDown" || input.isAutoRepeat) return false;
+  let key = input.key;
+  if (/^Key[A-Z]$/.test(input.code || "")) key = input.code.slice(3);
+  else if (/^Digit[0-9]$/.test(input.code || "")) key = input.code.slice(5);
+  else if (/^Numpad[0-9]$/.test(input.code || "")) key = `num${input.code.slice(6)}`;
+  key = ({ " ": "Space", ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right", "+": "Plus" })[key] || key;
+  if (typeof key !== "string" || !key || MODIFIER_TOKENS.has(key.toLowerCase())) return false;
+  const parts = [];
+  if (input.control) parts.push("Control");
+  if (input.meta) parts.push(platform === "darwin" ? "Command" : "Super");
+  if (input.alt) parts.push("Alt");
+  if (input.shift) parts.push("Shift");
+  const expected = normalizeAccelerator(accelerator, platform);
+  return Boolean(expected) && expected === normalizeAccelerator([...parts, key].join("+"), platform);
+}
+
 function isValidFormat(accelerator) {
   const parts = parseParts(accelerator);
   if (parts.length < 2) return false;
@@ -166,6 +183,7 @@ module.exports = {
   RESERVED_WINDOWS,
   RESERVED_MAC,
   normalizeAccelerator,
+  matchesShortcutInput,
   isValidFormat,
   isReservedWindows,
   validateHotkey

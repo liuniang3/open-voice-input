@@ -242,10 +242,15 @@ async function verifyHomeBrowser(page, directory) {
   await page.locator("#guideNext").click();
   await page.waitForFunction(() => document.getElementById("onboardingProgress").textContent === "2 / 3");
   await page.locator("#guideCleanupEnabled").check();
+  await checkLayout("guide-add-supplier", sizes);
+  await page.setViewportSize({ width: 960, height: 760 });
   await page.locator("#guideCleanerName").fill("Test supplier");
   await page.locator("#guideCleanerUrl").fill("https://example.invalid/v1");
   await page.locator("#guideCleanerKey").fill("test-only-guide-cleaner");
   await page.locator("#guideCleanerStyle").selectOption("responses");
+  await page.locator("#guideCleanerSave").click();
+  await page.waitForFunction(() => document.getElementById("guideCleanerSaveStatus").textContent === "供应商已保存");
+  assert.equal(await page.locator("#guideCleanerPresetField").isVisible(), false);
   await page.locator("#guideCleanerFetch").click();
   await page.waitForFunction(() => document.getElementById("guideCleanerModel").value === "custom-text-model");
   await checkLayout("guide-cleaner", sizes);
@@ -317,9 +322,29 @@ async function verifyNativeApp() {
     });
     assert.equal(state.path.startsWith(sandbox), true, "the real app must use isolated test configuration");
     assert.equal(state.resizable, true); assert.equal(state.topmost, false); assert.deepEqual(state.minimum, [640, 520]);
+    assert.equal(await page.locator("#guideAsrMode").inputValue(), "realtime");
+    await page.locator("#guideAsrKey").fill("test-only-onboarding-asr");
+    await page.locator("#guideNext").click();
+    await page.waitForFunction(() => document.getElementById("onboardingProgress").textContent === "2 / 3");
+    await page.locator("#guideCleanupEnabled").check();
+    await page.locator("#guideCleanerPreset").selectOption("opencode-go");
+    assert.equal(await page.locator("#guideCleanerUrl").inputValue(), "https://opencode.ai/zen/go/v1");
+    await page.locator("#guideCleanerKey").fill("test-only-onboarding-text");
+    await page.locator("#guideCleanerSave").click();
+    await page.waitForFunction(() => document.getElementById("guideCleanerSaveStatus").textContent === "供应商已保存");
+    await page.locator("#guideCleanerModel").fill("test-fast-model");
+    await page.locator("#guideNext").click();
+    await page.waitForFunction(() => document.getElementById("onboardingProgress").textContent === "3 / 3");
+    const configured = await page.evaluate(async () => {
+      const s = await window.mimoInput.getSettings(), pair = s.textModelSelections.cleanup;
+      return { mode: s.asrMode, profileMode: s.asrProfiles[s.asrModel].mode,
+        suppliers: s.textSuppliers.length, model: pair.modelId,
+        catalogued: s.textSupplierCatalogs[pair.supplierId].models.includes(pair.modelId) };
+    });
+    assert.deepEqual(configured, { mode: "realtime", profileMode: "realtime", suppliers: 1, model: "test-fast-model", catalogued: true });
     await page.locator("#guideSkip").click();
     await page.waitForFunction(() => document.getElementById("homePanel").hidden === false && document.getElementById("homeTodayCount").textContent === "0");
-    assert.equal(await page.locator("#homeSetupNotice").isVisible(), true);
+    await page.waitForFunction(() => document.getElementById("homeSetupNotice").hidden);
     await application.evaluate(({ dialog }) => {
       globalThis.oviTestFilePickerCalls = 0;
       dialog.showOpenDialog = async () => { globalThis.oviTestFilePickerCalls++; return { canceled: true, filePaths: [] }; };
@@ -347,7 +372,7 @@ async function verifyNativeApp() {
     await page.waitForFunction(() => document.getElementById("settingsHistoryPanel").hidden === false
       && document.getElementById("voiceHistoryRaw").textContent === "呃，这是隔离主页测试记录。");
     assert.equal(await page.locator("#voiceHistoryResult").innerText(), "这是隔离主页测试记录。");
-    console.log("Native Electron homepage, first-run onboarding and IPC navigation passed with isolated configuration and no API calls.");
+    console.log("Native Electron homepage, actual supplier persistence, realtime defaults, manual model catalog and IPC navigation passed with isolated configuration and no API calls.");
   } finally { await application.close(); }
 }
 

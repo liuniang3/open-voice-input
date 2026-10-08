@@ -2,8 +2,8 @@
 
 (function installOnboardingUi(root) {
   const ASR = {
-    mimo: { family: "mimo", model: "mimo-v2.5-asr", url: "https://api.xiaomimimo.com/v1" },
-    "qwen3-asr": { family: "aliyun", model: "qwen3-asr-flash", url: "https://dashscope.aliyuncs.com" }
+    mimo: { family: "mimo", model: "mimo-v2.5-asr", realtimeModel: "mimo-v2.5-asr", url: "https://api.xiaomimimo.com/v1" },
+    "qwen3-asr": { family: "aliyun", model: "qwen3-asr-flash", realtimeModel: "qwen-audio-3.0-asr-flash-streaming", url: "https://dashscope.aliyuncs.com" }
   };
   function validateUrl(value) {
     let url;
@@ -47,7 +47,11 @@
       $("guideBack").hidden = step === 0;
       $("guideNext").firstChild.textContent = step === 2 ? "完成设置" : "下一步";
       for (const button of $("onboardingPanel").querySelectorAll("button")) {
-        button.disabled = busy || probePending || (button.id === "guideCleanerFetch" && $("guideCleanerSupplier").value === "__legacy__");
+        button.disabled = busy || probePending || (["guideCleanerFetch", "guideCleanerSave"].includes(button.id) && $("guideCleanerSupplier").value === "__legacy__");
+      }
+      for (const field of $("onboardingPanel").querySelectorAll("input, select")) {
+        field.disabled = busy || probePending || ($("guideCleanerSupplier").value === "__legacy__"
+          && ["guideCleanerName", "guideCleanerUrl", "guideCleanerKey", "guideCleanerStyle", "guideCleanerAuthStyle", "guideCleanerModel"].includes(field.id));
       }
       $("guideCleanerFields").hidden = !$("guideCleanupEnabled").checked;
       $("guideCleanerNote").hidden = $("guideCleanupEnabled").checked;
@@ -76,6 +80,7 @@
       $("guideAsrUrl").value = connection?.baseUrl || profile.baseUrl || preset.url;
       $("guideAsrKey").value = settings.asrConnections ? connection?.apiKey || "" : connection?.apiKey || profile.apiKey || "";
       $("guideAsrModel").value = model;
+      $("guideAsrMode").value = profile.mode || (model === settings.asrModel ? settings.asrMode : "") || "realtime";
       options($("guideAsrPresets"), [...new Set([preset.model, ...Object.keys(settings.asrProfiles || {}).filter(id => win.AsrProviderInfo.supplierId(settings.asrProfiles[id].provider) === provider)])].map(id => [id, id]));
       const info = win.AsrProviderInfo.consoleInfo(provider);
       $("guideAsrConsoleLabel").textContent = info.label;
@@ -97,11 +102,25 @@
       $("guideCleanerUrl").value = entry?.baseUrl || "";
       $("guideCleanerKey").value = entry?.apiKey || "";
       $("guideCleanerStyle").value = entry?.apiStyle || "chat-completions";
+      $("guideCleanerAuthStyle").value = entry?.authStyle || "bearer";
+      $("guideCleanerPresetField").hidden = id !== "__new__";
+      $("guideCleanerSaveLabel").textContent = id === "__new__" ? "添加供应商" : "保存连接";
+      $("guideCleanerSaveStatus").textContent = "";
       const model = settings.textModelSelections?.cleanup?.supplierId === id ? settings.textModelSelections.cleanup.modelId
         : id === "__legacy__" ? settings.cleanerModel : picker.catalogModels(settings, id)[0] || "";
       $("guideCleanerModel").value = model;
       options($("guideCleanerModels"), picker.catalogModels(settings, id).map(value => [value, value]));
-      for (const field of ["guideCleanerName", "guideCleanerUrl", "guideCleanerKey", "guideCleanerStyle", "guideCleanerModel", "guideCleanerFetch"]) $(field).disabled = id === "__legacy__";
+      for (const field of ["guideCleanerName", "guideCleanerUrl", "guideCleanerKey", "guideCleanerStyle", "guideCleanerAuthStyle", "guideCleanerModel", "guideCleanerFetch", "guideCleanerSave"]) $(field).disabled = id === "__legacy__";
+      if (id === "__new__") applyCleanerPreset();
+    }
+    function applyCleanerPreset() {
+      const preset = picker.SUPPLIER_PRESETS.find(item => item.id === $("guideCleanerPreset").value) || picker.SUPPLIER_PRESETS[0];
+      $("guideCleanerName").value = picker.uniqueSupplierName(preset.id === "custom" ? "我的文本供应商" : preset.name, settings);
+      $("guideCleanerUrl").value = preset.baseUrl;
+      $("guideCleanerKey").value = "";
+      $("guideCleanerStyle").value = preset.apiStyle;
+      $("guideCleanerAuthStyle").value = preset.authStyle || "bearer";
+      $("guideCleanerSaveStatus").textContent = "";
     }
     function fillSupplierList(selected) {
       const entries = picker.listSuppliers(settings).map(item => [item.id, item.name]);
@@ -116,15 +135,17 @@
       const family = ASR[supplier].family;
       const baseUrl = validateUrl($("guideAsrUrl").value.trim());
       const apiKey = $("guideAsrKey").value.trim();
-      const model = picker.modelIdOf($("guideAsrModel").value);
+      const requestedModel = picker.modelIdOf($("guideAsrModel").value);
+      const streamingModel = supplier !== "mimo" && /(?:realtime|streaming)/i.test(requestedModel);
+      const model = streamingModel ? ASR[supplier].model : requestedModel;
       const provider = win.AsrProviderInfo.transportProvider(supplier, model);
       if (!apiKey || !model) throw new Error("请填写 API Key 和语音识别模型。");
-      const realtime = /(?:realtime|streaming)/i.test(model) && provider !== "mimo";
+      const mode = $("guideAsrMode").value === "batch" ? "batch" : "realtime";
+      const realtimeModel = streamingModel ? requestedModel : settings.asrProfiles?.[model]?.realtimeModel || ASR[supplier].realtimeModel;
       const saved = await api.saveSettings({
         asrConnections: { ...settings.asrConnections, [family]: { ...settings.asrConnections?.[family], baseUrl, apiKey } },
-        asrProvider: provider, asrModel: model, asrMode: realtime ? "realtime" : "batch",
-        ...(realtime ? { asrRealtimeModel: model } : {}),
-        asrProfiles: { ...settings.asrProfiles, [model]: { ...settings.asrProfiles?.[model], provider, baseUrl, apiKey } }
+        asrProvider: provider, asrModel: model, asrMode: mode, asrRealtimeModel: realtimeModel,
+        asrProfiles: { ...settings.asrProfiles, [model]: { ...settings.asrProfiles?.[model], provider, baseUrl, apiKey, mode, realtimeModel } }
       });
       ensureActive(token); settings = saved;
     }
@@ -132,27 +153,33 @@
       const token = epoch;
       let id = $("guideCleanerSupplier").value;
       if (id === "__legacy__") return id;
-      const baseUrl = validateUrl($("guideCleanerUrl").value.trim());
-      const apiKey = $("guideCleanerKey").value.trim();
-      if (!apiKey) throw new Error("请填写文本供应商 API Key。");
-      if (id === "__new__") id = `provider-${win.crypto.randomUUID().slice(0, 8)}`;
-      const previous = settings.textSuppliers?.find(item => item.id === id);
-      const entry = { ...previous, id, name: $("guideCleanerName").value.trim() || id,
-        baseUrl, apiKey, apiStyle: $("guideCleanerStyle").value };
+      const existingId = id === "__new__" ? "" : id;
+      const entry = picker.supplierDraft(settings, {
+        name: $("guideCleanerName").value, baseUrl: $("guideCleanerUrl").value,
+        apiKey: $("guideCleanerKey").value, apiStyle: $("guideCleanerStyle").value,
+        authStyle: $("guideCleanerAuthStyle").value
+      }, existingId);
+      if (!entry.apiKey) throw new Error("请填写文本供应商 API Key。");
+      id = entry.id;
       const modelDraft = $("guideCleanerModel").value;
       const saved = await api.saveSettings({ textSuppliers: [...(settings.textSuppliers || []).filter(item => item.id !== id), entry] });
       ensureActive(token); settings = saved;
       fillSupplierList(id); $("guideCleanerModel").value = modelDraft;
+      $("guideCleanerSaveStatus").textContent = "供应商已保存";
       return id;
     }
     async function saveCleaner() {
       if (!$("guideCleanupEnabled").checked) { settings = await api.saveSettings({ transcriptionMode: "fast" }); return; }
-      const id = await saveCleanerConnection();
       const modelId = picker.modelIdOf($("guideCleanerModel").value);
       if (!modelId) throw new Error("请选择或填写表达整理模型。");
-      settings = await api.saveSettings({ transcriptionMode: "stable", textModelSelections: {
-        ...settings.textModelSelections, cleanup: id === "__legacy__" ? null : { supplierId: id, modelId }
-      } });
+      const id = await saveCleanerConnection();
+      const selected = picker.applySelection(settings, "cleanup", { supplierId: id, modelId });
+      const catalog = settings.textSupplierCatalogs?.[id] || {};
+      settings = await api.saveSettings({ transcriptionMode: "stable", cleanerModel: selected.cleanerModel,
+        textModelSelections: selected.textModelSelections,
+        ...(id !== "__legacy__" ? { textSupplierCatalogs: { ...settings.textSupplierCatalogs,
+          [id]: { ...catalog, models: [...new Set([...picker.catalogModels(settings, id), modelId])] } } } : {})
+      });
     }
     async function stopProbe() {
       const current = probe;
@@ -262,6 +289,7 @@
       if (token !== epoch) return;
       settings = loaded;
       opened = true; step = 0; error();
+      options($("guideCleanerPreset"), picker.SUPPLIER_PRESETS.map(item => [item.id, item.name]), "custom");
       $("guideAsrProvider").value = win.AsrProviderInfo.supplierId(settings.asrProvider) || "mimo"; fillAsr();
       const selected = settings.textModelSelections?.cleanup?.supplierId || (legacyCleaner().apiKey ? "__legacy__" : "__new__");
       $("guideCleanupEnabled").checked = settings.transcriptionMode === "stable" && selected !== "__new__";
@@ -329,6 +357,8 @@
     }); });
     $("guideCleanupEnabled").addEventListener("change", render);
     $("guideCleanerSupplier").addEventListener("change", fillCleaner);
+    $("guideCleanerPreset").addEventListener("change", applyCleanerPreset);
+    $("guideCleanerSave").addEventListener("click", () => { void action(() => saveCleanerConnection()); });
     $("guideAsrTest").addEventListener("click", () => { void action(async (token) => {
       $("guideAsrTestStatus").textContent = "正在测试…"; await saveAsr();
       const result = await api.testOnboardingAsr();

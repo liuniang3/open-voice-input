@@ -47,7 +47,7 @@ const { buildHelperReadyErrorResponse } = require("./meeting/processing/session-
 const { resolveMeetingAnalysisCredentials } = require("./meeting/analysis/credentials");
 const { ensureConnectionProfiles } = require("./settings/connection-profiles");
 const { mergeAsrConnections, resolveProviderConnection } = require("./settings/provider-connections");
-const { validateHotkey, normalizeAccelerator } = require("./hotkeys/validate-hotkey");
+const { validateHotkey, normalizeAccelerator, matchesShortcutInput } = require("./hotkeys/validate-hotkey");
 const { createUsageStats } = require("./usage-stats");
 const { createVoiceHistory } = require("./voice-history");
 const { createOnboardingState } = require("./onboarding-state");
@@ -187,9 +187,9 @@ const DEFAULT_SETTINGS = {
   apiKey: "",
   baseUrl: "",
   asrProvider: "mimo",
-  asrMode: "batch",
+  asrMode: "realtime",
   asrModel: "mimo-v2.5-asr",
-  asrRealtimeModel: "qwen-audio-3.0-asr-flash-streaming",
+  asrRealtimeModel: "mimo-v2.5-asr",
   asrApiKey: "",
   asrBaseUrl: "",
   asrLanguage: "",
@@ -952,6 +952,7 @@ function createWindow() {
   });
 
   windowMotion = createWindowMotion({ window: mainWindow });
+  mainWindow.webContents.on("before-input-event", handleFocusedHotkey);
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
   dictationPreview = createDictationPreview({ BrowserWindow, ipcMain, mainWindow,
     authorized: event => isAppSender(event.sender, event.senderFrame?.url),
@@ -1624,6 +1625,7 @@ async function registerHotkey() {
 }
 
 function runHotkeyAction(action) {
+  if (shortcutCaptureSuspended || meetingQuitCleanupStarted) return;
   if (action === "meeting") {
     showAndStartLiveMeeting();
     return;
@@ -1632,7 +1634,17 @@ function runHotkeyAction(action) {
     logEvent("hotkey: ignored while editing settings", action || "short");
     return;
   }
+  // The global registration and focused-window fallback may receive one press.
+  if (shortStartPending || captureOwner === "short") return;
   showAndStart();
+}
+
+function handleFocusedHotkey(event, input) {
+  if (shortcutCaptureSuspended || windowMode === "settings" || meetingQuitCleanupStarted) return;
+  const candidate = hotkeyCandidates().find(item => matchesShortcutInput(item.accelerator, input, os.platform()));
+  if (!candidate) return;
+  event.preventDefault();
+  runHotkeyAction(candidate.action);
 }
 
 function parseWindowsHotkey(accelerator) {

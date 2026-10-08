@@ -118,14 +118,30 @@ async function verifyNative() {
     });
     await application.evaluate(async ({ ipcMain }) => {
       globalThis.fixtureInjected = [];
+      globalThis.fixtureHotkeyEvents = [];
+      globalThis.fixtureApp.main().webContents.on("before-input-event", (_event, input) => {
+        globalThis.fixtureHotkeyEvents.push({ type: input.type, key: input.key, code: input.code,
+          control: input.control, alt: input.alt, meta: input.meta, isAutoRepeat: input.isAutoRepeat });
+      });
       for (const name of ["voice:segment:transcribe", "voice:clean-text", "input:inject"]) ipcMain.removeHandler(name);
       ipcMain.handle("voice:segment:transcribe", () => "这是完整保留的测试转写文本。".repeat(40) + "最后一句也必须保留。");
       ipcMain.handle("voice:clean-text", (_e, value) => value.rawText);
       ipcMain.handle("input:inject", (_e, value) => { globalThis.fixtureInjected.push(value); return { ok: true }; });
-      await globalThis.fixtureApp.settingsSave({ transcriptionMode: "stable", asrMode: "batch" });
-      globalThis.fixtureApp.showAndStart();
+      await globalThis.fixtureApp.settingsSave({ transcriptionMode: "stable", asrMode: "batch",
+        asrProfiles: { "mimo-v2.5-asr": { provider: "mimo", mode: "batch" } } });
+      globalThis.fixtureApp.showHome();
     });
-    await page.waitForFunction(() => isRecording && recordingSampleCount >= 12000);
+    await application.evaluate(() => {
+      const wc = globalThis.fixtureApp.main().webContents;
+      wc.sendInputEvent({ type: "keyDown", keyCode: "M", modifiers: ["control", "alt"] });
+      wc.sendInputEvent({ type: "keyUp", keyCode: "M", modifiers: ["control", "alt"] });
+    });
+    try { await page.waitForFunction(() => isRecording && recordingSampleCount >= 12000, undefined, { timeout: 8000 }); }
+    catch {
+      throw new Error("Focused dictation did not start: " + JSON.stringify(await application.evaluate(() => ({
+        state: globalThis.fixtureApp.state(), inputs: globalThis.fixtureHotkeyEvents
+      }))));
+    }
     const popup = application.windows().find(w => w.url().endsWith("dictation-preview.html"));
     assert.ok(popup, "the actual application uses the isolated transparent display");
     await popup.waitForFunction(() => document.getElementById("recordingSpectrum").hidden === false);
@@ -203,7 +219,7 @@ if (process.versions.electron && process.argv.includes("--electron-app-fixture")
   app.setPath("appData", sandbox); app.setPath("documents", path.join(sandbox, "documents"));
   const filename = path.join(root, "src/main.js"), mod = new Module(filename, module);
   mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename));
-  mod._compile(fs.readFileSync(filename, "utf8") + "\nglobalThis.fixtureApp = { showAndStart, focusMainWindow, showHome, settingsSave: saveSettings, main: () => mainWindow, preview: () => dictationPreview };", filename);
+  mod._compile(fs.readFileSync(filename, "utf8") + "\nglobalThis.fixtureApp = { showAndStart, focusMainWindow, showHome, settingsSave: saveSettings, main: () => mainWindow, preview: () => dictationPreview, state: () => ({ windowMode, shortStartPending, captureOwner, shortcutCaptureSuspended }) };", filename);
 } else if (require.main === module) (async () => {
   await unitTests();
   if (process.argv.includes("--electron")) await verifyNative();

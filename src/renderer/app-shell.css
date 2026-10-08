@@ -114,6 +114,7 @@ body.home-mode .status-panel, body.home-mode .advanced-field, body.home-mode .ac
 #asrConsoleStatus { color: #a7463b; }
 
 .onboarding-panel { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; overflow: hidden; max-width: 780px; width: 100%; align-self: center; padding-top: 20px; gap: 20px; }
+.onboarding-panel > .inline-error { flex: 0 0 auto; max-height: 72px; overflow-y: auto; overflow-wrap: anywhere; margin: 0; }
 .onboarding-heading { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; }
 .onboarding-heading h2 { font-size: 25px; font-weight: 650; margin: 0; }
 .onboarding-heading span { font-size: 13px; color: var(--ovi-muted); }
@@ -131,6 +132,7 @@ body.home-mode .status-panel, body.home-mode .advanced-field, body.home-mode .ac
 .onboarding-body input, .onboarding-body select { width: 100%; min-height: 39px; }
 .onboarding-body .secret-control input { min-width: 0; }
 #guideCleanerFields { display: flex; flex-direction: column; gap: 14px; }
+#guideCleanerSaveStatus:empty { display: none; }
 .guide-toggle { display: flex; align-items: center; gap: 10px; font-size: 14px; }
 .guide-toggle input { width: 16px; min-height: 16px; accent-color: #107e78; }
 .guide-action-row, .guide-model-control { display: flex; align-items: center; gap: 10px; }

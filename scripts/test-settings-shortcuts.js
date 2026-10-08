@@ -12,7 +12,7 @@ const {
   MEETING_QWEN_PRESETS
 } = require("../src/settings/connection-profiles");
 const { isSupportedAliMeetingModel, profileFor } = require("../src/meeting/realtime/providers");
-const { validateHotkey, normalizeAccelerator } = require("../src/hotkeys/validate-hotkey");
+const { validateHotkey, normalizeAccelerator, matchesShortcutInput } = require("../src/hotkeys/validate-hotkey");
 
 const root = path.join(__dirname, "..");
 
@@ -396,7 +396,7 @@ function mainHarness(platform = "darwin") {
     "./settings/text-suppliers": require("../src/settings/text-suppliers"),
     "./settings/meeting-window": require("../src/settings/meeting-window"),
     "./window-motion": require("../src/window-motion"),
-    "./hotkeys/validate-hotkey": { validateHotkey, normalizeAccelerator },
+    "./hotkeys/validate-hotkey": require("../src/hotkeys/validate-hotkey"),
     "./meeting": { createMeetingCaptureService: () => capture,
       createMeetingSessionAnalyzer: () => { throw new Error("live must not construct legacy analyzer"); },
       sanitizeIpcError: (error) => ({ ok: false, error: { code: error.code || "error", message: "safe" } }),
@@ -420,6 +420,38 @@ function mainHarness(platform = "darwin") {
 }
 
 async function integrationTests() {
+  for (const platform of ["win32", "darwin"]) {
+    const focused = mainHarness(platform);
+    const defaults = focused.run("DEFAULT_SETTINGS");
+    const fresh = ensureConnectionProfiles(structuredClone(defaults));
+    assert.equal(fresh.asrMode, "realtime");
+    assert.equal(fresh.asrProfiles[fresh.asrModel].mode, "realtime");
+    const savedBatch = ensureConnectionProfiles({ ...structuredClone(defaults), asrMode: "batch" });
+    assert.equal(savedBatch.asrMode, "batch", "explicit batch settings are not migrated to realtime");
+    focused.run("globalThis.focusedStarts = 0; showAndStart = () => { focusedStarts++; shortStartPending = true; }; windowMode = 'home';");
+    let prevented = 0;
+    const event = { preventDefault() { prevented++; } };
+    const input = { type: "keyDown", code: "KeyM", key: "m", alt: true, [platform === "darwin" ? "meta" : "control"]: true };
+    focused.run("handleFocusedHotkey")(event, input);
+    focused.run("runHotkeyAction('short')");
+    assert.equal(focused.run("focusedStarts"), 1, "focused fallback and global dispatch start only once");
+    assert.equal(prevented, 1);
+    for (const flags of ["windowMode = 'settings'", "windowMode = 'home'; shortcutCaptureSuspended = true", "shortcutCaptureSuspended = false; captureOwner = 'short'"]) {
+      focused.run(`shortStartPending = false; ${flags};`);
+      focused.run("handleFocusedHotkey")(event, input);
+      assert.equal(focused.run("focusedStarts"), 1, "capture and settings guards block duplicate starts");
+    }
+  }
+  for (const platform of ["win32", "darwin"]) {
+    const input = { type: "keyDown", key: "m", code: "KeyM", alt: true, [platform === "darwin" ? "meta" : "control"]: true };
+    assert.equal(matchesShortcutInput("CommandOrControl+Alt+M", input, platform), true);
+    assert.equal(matchesShortcutInput("CommandOrControl+Alt+V", input, platform), false);
+    for (const extra of [{ shift: true }, { isAutoRepeat: true }, { type: "keyUp" }]) {
+      assert.equal(matchesShortcutInput("CommandOrControl+Alt+M", { ...input, ...extra }, platform), false);
+    }
+    assert.equal(matchesShortcutInput("Control+M", { type: "keyDown", control: true, key: "m", code: "KeyM" }, platform), true);
+  }
+  console.log("ok - Windows/macOS focused shortcut fallback, duplicate guards and realtime defaults preserve batch choices");
   const h = mainHarness();
   const { controls: c } = h;
   await h.invoke("meeting:live:recover", { sessionId: "previous" });

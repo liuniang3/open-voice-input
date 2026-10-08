@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Fixed
+
+- First-run onboarding now offers the existing language supplier presets, an explicit add/save action and authentication selection. It reuses the settings editor's supplier validation, keeps saved credentials isolated, and adds manually entered cleanup models to that supplier's catalog. Errors remain visible above the navigation controls instead of falling below the form's scroll area.
+- Focused workspace windows handle their configured shortcuts through a shared Windows/macOS key-matching fallback. Shortcut capture, active recording and startup guards prevent stale shortcuts and duplicate recording starts; leaving shortcut settings ends the keyboard capture session.
+- Fresh installations default to realtime dictation previews. Onboarding saves the chosen mode in both the active settings and model profile, keeps MiMo polling available, and selects the Qwen streaming companion without using a streaming model as the batch fallback. Existing explicitly saved batch preferences remain unchanged.
+
 ## v0.4.17 - 2026-10-08
 
 ### Changed

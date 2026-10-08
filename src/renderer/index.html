@@ -81,16 +81,20 @@
             <label class="field"><span>API 地址</span><input id="guideAsrUrl" type="url" autocomplete="off" placeholder="https://example.com/v1" /></label>
             <label class="field"><span>API Key</span><div class="secret-control"><input id="guideAsrKey" type="password" autocomplete="off" /><button type="button" data-secret-toggle="guideAsrKey" class="secret-action" title="显示或隐藏 API Key">显示</button><button type="button" data-secret-copy="guideAsrKey" class="secret-action" title="复制 API Key">复制</button></div></label>
             <label class="field"><span>模型</span><input id="guideAsrModel" type="text" list="guideAsrPresets" autocomplete="off" /><datalist id="guideAsrPresets"></datalist></label>
+            <label class="field"><span>识别方式</span><select id="guideAsrMode"><option value="realtime">实时预览（推荐）</option><option value="batch">录音结束后识别</option></select></label>
             <div class="guide-action-row"><button id="guideAsrTest" type="button"><span class="ui-icon icon-link" aria-hidden="true"></span>测试连接</button><span id="guideAsrTestStatus" role="status" class="home-muted">尚未测试</span></div>
           </section>
           <section data-guide-panel="1" hidden><h3>表达整理</h3>
             <label class="guide-toggle"><input id="guideCleanupEnabled" type="checkbox" /><span>启用转写后的表达整理</span></label>
             <div id="guideCleanerFields" hidden>
-              <label class="field"><span>文本供应商</span><select id="guideCleanerSupplier"></select></label>
+              <label class="field"><span>文本供应商</span><div class="guide-model-control"><select id="guideCleanerSupplier"></select><button id="guideCleanerSave" type="button"><span class="ui-icon icon-plus" aria-hidden="true"></span><span id="guideCleanerSaveLabel">添加供应商</span></button></div></label>
+              <span id="guideCleanerSaveStatus" class="home-muted" role="status"></span>
+              <label id="guideCleanerPresetField" class="field"><span>服务预设</span><select id="guideCleanerPreset"></select></label>
               <label class="field"><span>显示名称</span><input id="guideCleanerName" type="text" autocomplete="off" /></label>
               <label class="field"><span>API 地址</span><input id="guideCleanerUrl" type="url" autocomplete="off" placeholder="https://example.com/v1" /></label>
               <label class="field"><span>API Key</span><div class="secret-control"><input id="guideCleanerKey" type="password" autocomplete="off" /><button type="button" data-secret-toggle="guideCleanerKey" class="secret-action" title="显示或隐藏 API Key">显示</button><button type="button" data-secret-copy="guideCleanerKey" class="secret-action" title="复制 API Key">复制</button></div></label>
               <label class="field"><span>接口协议</span><select id="guideCleanerStyle"><option value="chat-completions">Chat Completions</option><option value="responses">Responses</option></select></label>
+              <label class="field"><span>认证方式</span><select id="guideCleanerAuthStyle"><option value="bearer">Bearer Token</option><option value="api-key">API Key 请求头</option></select></label>
               <label class="field"><span>模型</span><div class="guide-model-control"><input id="guideCleanerModel" list="guideCleanerModels" type="text" placeholder="选择或填写模型 ID" autocomplete="off" /><button id="guideCleanerFetch" type="button">获取模型</button></div><datalist id="guideCleanerModels"></datalist></label>
             </div><p id="guideCleanerNote" class="home-muted">未启用时使用快速模式，只进行语音识别。</p>
           </section>
@@ -102,8 +106,8 @@
             <label class="field"><span>实时会议快捷键</span><input id="guideMeetingHotkey" type="text" readonly placeholder="点击后按下快捷键组合" /></label>
             <span id="guideMeetingHotkeyStatus" class="home-muted" role="status"></span>
           </section>
-          <p id="guideError" class="inline-error" role="alert" hidden></p>
         </div>
+        <p id="guideError" class="inline-error" role="alert" hidden></p>
         <div class="onboarding-nav"><button id="guideSkip" type="button">跳过，稍后配置</button><div><button id="guideBack" type="button">上一步</button><button id="guideNext" type="button" class="primary">下一步<span class="ui-icon icon-arrow" aria-hidden="true"></span></button></div></div>
       </section>
 
