@@ -1410,8 +1410,8 @@ function configureUpdateSchedule() {
 }
 
 function hotkeyCandidates() {
-  const shortHotkey = normalizeAccelerator(settings.hotkey?.trim() || DEFAULT_SETTINGS.hotkey) || DEFAULT_SETTINGS.hotkey;
-  const meetingHotkey = normalizeAccelerator(settings.meetingHotkey?.trim() || DEFAULT_SETTINGS.meetingHotkey) || DEFAULT_SETTINGS.meetingHotkey;
+  const shortHotkey = normalizeAccelerator(settings.hotkey?.trim() || DEFAULT_SETTINGS.hotkey, os.platform()) || DEFAULT_SETTINGS.hotkey;
+  const meetingHotkey = normalizeAccelerator(settings.meetingHotkey?.trim() || DEFAULT_SETTINGS.meetingHotkey, os.platform()) || DEFAULT_SETTINGS.meetingHotkey;
   const list = [];
   if (shortHotkey) list.push({ accelerator: shortHotkey, action: "short" });
   if (meetingHotkey && meetingHotkey !== shortHotkey) list.push({ accelerator: meetingHotkey, action: "meeting" });
