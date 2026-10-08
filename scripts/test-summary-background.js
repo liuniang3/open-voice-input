@@ -32,14 +32,21 @@ function element(tag = "div") {
     replaceChildren(...children) { this.children = children; },
     removeChild(child) { this.children.splice(this.children.indexOf(child), 1); },
     addEventListener(name, fn) { if (!listeners.has(name)) listeners.set(name, []); listeners.get(name).push(fn); },
-    click() { if (!this.disabled) for (const fn of listeners.get("click") || []) fn(); }
+    dispatch(name) { for (const fn of listeners.get(name) || []) fn(); },
+    click() { if (!this.disabled) this.dispatch("click"); }
   };
 }
 
-function fixture() {
+function fixture(settingsPatch = {}) {
   const elements = new Map([...html.matchAll(/<(\w+)\b[^>]*\bid="([^"]+)"[^>]*>/g)]
     .map(match => [match[2], element(match[1])]));
   const $ = id => elements.get(id);
+  for (const id of ["fileAsrProviderSelect", "fileAsrModelSelect"]) {
+    const markup = html.match(new RegExp(`<select id="${id}"[^>]*>([\\s\\S]*?)</select>`))[1];
+    for (const match of markup.matchAll(/<option value="([^"]+)">([^<]*)<\/option>/g)) {
+      const option = element("option"); option.value = match[1]; option.textContent = match[2]; $(id).appendChild(option);
+    }
+  }
   const tabs = ["raw", "summary"].map(tab => {
     const button = element("button"); button.dataset.fileTab = tab; return button;
   });
@@ -52,9 +59,10 @@ function fixture() {
   const calls = [];
   const sessions = ["file-a", "file-b"].map(id => ({ id, title: id, source: "import", hasArchive: true,
     hasRaw: true, status: "stopped", processing: { stage: "completed" } }));
-  const settings = { meetingAnalysisModel: "analysis-a", meetingAnalysisProfiles: { "analysis-a": {} } };
+  const settings = { meetingAnalysisModel: "analysis-a", meetingAnalysisProfiles: { "analysis-a": {} }, ...settingsPatch };
   const handlers = {
     getSettings: () => settings,
+    saveSettings: patch => Object.assign(settings, require("../src/settings/connection-profiles").ensureConnectionProfiles({ ...settings, ...patch })),
     meetingListSessions: () => ({ ok: true, sessions }),
     meetingScanSession: id => ({ ok: true, session: { id, status: "stopped" } }),
     meetingProcessStatus: () => ({ ok: true, processing: { stage: "completed" } }),
@@ -80,7 +88,7 @@ function fixture() {
     for (const callback of modeCallbacks) callback(value);
   };
   setMode("file");
-  const win = { mimoInput: api, TextSupplierUi, applyWindowMode: setMode,
+  const win = { mimoInput: api, TextSupplierUi, AsrDefaults: require("../src/asr-defaults"), applyWindowMode: setMode,
     addEventListener: (name, callback) => events.set(name, callback),
     MeetingUi: { ...MeetingUi,
       appendTranscriptBlocks: (container, blocks) => { container.textContent = blocks.map(block => block.text).join("\n"); },
@@ -96,6 +104,7 @@ function fixture() {
     count: name => calls.filter(call => call.name === name).length,
     push(job) { jobs.set(job.sessionId, job); for (const callback of callbacks) callback(job); },
     async open() { await win.FileTranscriptionUi.openWorkspace({ fromModeEvent: true }); await tick(); },
+    async change(id, value) { $(id).value = value; $(id).dispatch("change"); await tick(); },
     async click(id) { $(id).click(); await tick(); }
   };
 }
@@ -104,6 +113,22 @@ const tests = [];
 const test = (name, run) => tests.push({ name, run });
 const finalJob = sessionId => ({ sessionId, status: "completed", summaryMarkdownPath: "C:/mock/article.md",
   summary: { schema: "meeting_summary_v2", markdown: "A complete coherent article.", sections: [] } });
+
+test("file ASR follows dictation, persists explicit choices and can return to following", async () => {
+  const f = fixture({ asrProvider: "qwen3-asr", asrModel: "qwen3-asr-flash", meetingFileAsrFollowDictation: true });
+  await f.open();
+  assert.equal(f.$("fileAsrModelSelect").value, "__dictation__");
+  assert.equal(f.$("fileAsrProviderSelect").value, "__dictation__");
+  assert.match(f.$("fileAsrConfigStatus").textContent, /qwen3-asr-flash/);
+  await f.change("fileAsrModelSelect", "mimo-v2.5-asr");
+  assert.equal(f.ui.state.settings.meetingFileAsrFollowDictation, false);
+  assert.equal(f.ui.state.settings.meetingFileAsrProvider, "mimo");
+  assert.match(f.$("fileAsrModelSelect").options.find(option => option.value === "__dictation__").textContent, /qwen3-asr-flash/);
+  await f.change("fileAsrProviderSelect", "__dictation__");
+  assert.equal(f.ui.state.settings.meetingFileAsrFollowDictation, true);
+  assert.equal(f.ui.state.settings.meetingFileAsrModel, "qwen3-asr-flash");
+  assert.equal(f.$("fileAsrModelSelect").value, "__dictation__");
+});
 
 test("file summary finishes while another page is visible; late start response cannot replace it", async () => {
   const f = fixture(); await f.open();

@@ -221,13 +221,15 @@ test("mac shortcuts distinguish Control from Command and reject platform reserva
   assert.equal(validateHotkey("Ctrl+M+V").code, "invalid_format");
 });
 
-test("live meeting defaults and destinations do not borrow active provider credentials", () => {
+test("workspace defaults follow dictation using isolated ASR connections and preserve destinations", () => {
   const saved = { _connectionProfilesMigrated: true, asrModel: "qwen3-asr-flash",
     asrProfiles: { "qwen3-asr-flash": { apiKey: "test-only-qwen", provider: "qwen3-asr" } } };
   const next = ensureConnectionProfiles(saved);
   assert.equal(next.meetingRealtimeModel, "qwen-audio-3.0-asr-flash-streaming");
   assert.equal(next.meetingRealtimeDestination, "");
-  assert.equal(next.meetingFileAsrProfiles["mimo-v2.5-asr"].apiKey, "");
+  assert.equal(next.meetingFileAsrModel, "qwen3-asr-flash");
+  assert.equal(next.meetingFileAsrProfiles["qwen3-asr-flash"].apiKey, "test-only-qwen");
+  assert.equal(next.meetingFileAsrProfiles["mimo-v2.5-asr"], undefined);
   const restored = ensureConnectionProfiles({ ...next, meetingRealtimeModel: "custom-model", meetingRealtimeDestination: "/chosen/session.md" });
   assert.equal(restored.meetingRealtimeModel, "qwen-audio-3.0-asr-flash-streaming");
   assert.equal(restored.meetingRealtimeDestination, "/chosen/session.md");
@@ -258,7 +260,7 @@ test("meeting model contract keeps streaming transports and the MiMo batch fallb
   }
   for (const model of rejected) {
     assert.equal(ensureConnectionProfiles({ _connectionProfilesMigrated: true, meetingRealtimeModel: model }).meetingRealtimeModel,
-      "qwen-audio-3.0-asr-flash-streaming");
+      "mimo-v2.5-asr");
   }
   const intervals = ensureConnectionProfiles({ _connectionProfilesMigrated: true,
     meetingTranscriptionIntervalSeconds: 15, meetingAutosaveIntervalSeconds: 120 });
@@ -395,6 +397,7 @@ function mainHarness(platform = "darwin") {
     "./settings/connection-profiles": { ensureConnectionProfiles },
     "./settings/text-suppliers": require("../src/settings/text-suppliers"),
     "./settings/meeting-window": require("../src/settings/meeting-window"),
+    "./asr-defaults": require("../src/asr-defaults"),
     "./window-motion": require("../src/window-motion"),
     "./hotkeys/validate-hotkey": require("../src/hotkeys/validate-hotkey"),
     "./meeting": { createMeetingCaptureService: () => capture,
@@ -468,13 +471,13 @@ async function integrationTests() {
   assert.equal((await start).recording, true);
   assert.equal((await duplicate).ok, true);
   assert.equal(c.startCount, 1);
-  assert.equal(c.startInput.modelId, "qwen-audio-3.0-asr-flash-streaming");
+  assert.equal(c.startInput.modelId, "mimo-v2.5-asr");
   assert.equal((await stop).status, "stopping");
   assert.equal(c.options.analyzer, undefined);
   assert.equal(c.options.defaultDirectory, path.join(root, "mock", "documents", "Open Voice Input", "Meetings"));
   const snapshot = c.options.getSettings();
   snapshot.meetingRealtimeModel = "mutated";
-  assert.equal(c.options.getSettings().meetingRealtimeModel, "qwen-audio-3.0-asr-flash-streaming");
+  assert.equal(c.options.getSettings().meetingRealtimeModel, "");
   assert.equal(c.writes.length, 0);
   const selected = h.run("settings.meetingAnalysisModel");
   assert.equal((await h.invoke("meeting:live:cleanup", { modelId: "independent" })).error.code, "live_busy");

@@ -119,6 +119,34 @@ test("view-only open is single-flight; navigation keeps updates and destruction 
   assert.equal(f.timers.size, 0);
 });
 
+test("follow-dictation live defaults refresh by supplier and stay followed across recordings", async () => {
+  const f = fixture();
+  f.setSettings({ asrProvider: "mimo", asrModel: "mimo-v2.5-asr",
+    meetingRealtimeFollowDictation: true });
+  f.handlers.meetingLiveStart = input => ({ ok: true, sessionId: "s1", status: "recording", recording: true, modelId: input.modelId });
+  await f.ui.open();
+  assert.equal(f.$("liveModel").value, "__dictation__");
+  assert.match(f.$("liveModel").children[0].textContent, /mimo-v2\.5-asr/);
+  await f.click("liveStart");
+  assert.equal(f.last("meetingLiveStart").args[0].modelId, "mimo-v2.5-asr");
+  assert.equal(f.last("saveSettings").args[0].meetingRealtimeFollowDictation, true);
+  f.push(completed({ modelId: "mimo-v2.5-asr" }));
+  assert.equal(f.$("liveModel").value, "__dictation__");
+  f.ui.close();
+  f.setSettings({ asrProvider: "qwen3-asr", asrModel: "qwen3-asr-flash",
+    asrRealtimeModel: "qwen-audio-3.0-asr-flash-streaming-2026-09-18" });
+  await f.ui.open();
+  await f.click("liveStart");
+  assert.equal(f.last("meetingLiveStart").args[0].modelId, "qwen-audio-3.0-asr-flash-streaming-2026-09-18");
+  f.push(completed());
+  f.$("liveModel").value = "mimo-v2.5-asr"; f.$("liveModel").dispatch("change"); await tick();
+  assert.equal(f.last("saveSettings").args[0].meetingRealtimeFollowDictation, false);
+  f.$("liveModel").value = "__dictation__"; f.$("liveModel").dispatch("change"); await tick();
+  assert.equal(f.last("saveSettings").args[0].meetingRealtimeFollowDictation, true);
+  assert.equal(f.last("saveSettings").args[0].meetingRealtimeModel, "qwen-audio-3.0-asr-flash-streaming-2026-09-18");
+  f.ui.destroy();
+});
+
 test("meeting summary finishes off-screen and reopens without restarting or cancelling", async () => {
   const f = fixture();
   f.setStatus(completed());
@@ -171,7 +199,7 @@ test("streaming transports and the MiMo batch fallback appear; invalid models st
   } });
   await f.ui.open();
   const ids = f.$("liveModel").children.map((o) => o.value);
-  assert.deepEqual(ids, ["qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "mimo-v2.5-asr", "__custom__"]);
+  assert.deepEqual(ids, ["__dictation__", "qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "mimo-v2.5-asr", "__custom__"]);
   f.$("liveModel").value = "__custom__";
   for (const model of ["qwen3-asr-flash", "custom-batch", "qwen-filetrans", "fun-asr-realtime-2026", "qwen-audio-3.0-asr-flash-streaming-2026", "fun-asr-realtime-2026-9-18"]) {
     f.$("liveCustomModel").value = model;
@@ -552,6 +580,7 @@ async function prepareBrowser(page) {
       "/onboarding-ui.js": ["src/renderer/onboarding-ui.js", "text/javascript"],
       "/audio-utils.js": ["src/audio-utils.js", "text/javascript"],
       "/asr-provider-info.js": ["src/asr-provider-info.js", "text/javascript"],
+      "/asr-defaults.js": ["src/asr-defaults.js", "text/javascript"],
       "/meeting-ui.js": ["src/renderer/meeting-ui.js", "text/javascript"],
       "/text-supplier-ui.js": ["src/renderer/text-supplier-ui.js", "text/javascript"],
       "/text-supplier-manager.js": ["src/renderer/text-supplier-manager.js", "text/javascript"],

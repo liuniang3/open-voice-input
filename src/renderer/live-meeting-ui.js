@@ -8,6 +8,7 @@
   const supportedModel = (model) => typeof model === "string" && model === model.trim()
     && (model === BATCH_MODEL || /^(?:qwen-audio-3\.0-asr-flash-streaming|fun-asr-realtime)(?:-\d{4}-\d{2}-\d{2})?$/.test(model));
   const batchModel = (model) => model === BATCH_MODEL;
+  const asrDefaults = typeof module === "object" && module.exports ? require("../asr-defaults") : root.AsrDefaults;
   const STATUS_LABELS = {
     idle: "就绪", starting: "正在启动", recording: "实时转录中", stopping: "停止收尾中",
     paused: "已暂停", completed: "已完成", needs_retry: "有待重试片段", interrupted: "会话已中断", failed: "会话失败"
@@ -27,6 +28,7 @@
     let opened = false;
     let loaded = false;
     let settingsReady = false;
+    let asrSettings = {};
     let generation = 0;
     let revision = 0;
     let pollFlight = null;
@@ -56,6 +58,7 @@
     const busy = new Set();
 
     function selectedModel() {
+      if ($("liveModel").value === asrDefaults.FOLLOW_DICTATION) return asrDefaults.dictationSelection(asrSettings, "live").modelId;
       return $("liveModel").value === "__custom__"
         ? $("liveCustomModel").value.trim() : $("liveModel").value;
     }
@@ -78,6 +81,13 @@
     }
 
     function loadSettings(settings) {
+      const selection = asrDefaults.workspaceSelection(settings, "live");
+      asrSettings = {
+        meetingRealtimeFollowDictation: selection.followsDictation,
+        meetingRealtimeModel: selection.modelId,
+        asrModel: settings.asrModel, asrProvider: settings.asrProvider,
+        asrRealtimeModel: settings.asrProfiles?.[settings.asrModel]?.realtimeModel || settings.asrRealtimeModel
+      };
       // Retain only model IDs and UI preferences, never connection profiles or credentials.
       const reviewers = new Set([REVIEW_MODEL]);
       for (const map of [settings.meetingFileAsrProfiles, settings.asrProfiles]) {
@@ -86,13 +96,18 @@
         }
       }
       // Credentials resolve in MAIN by exact model ID; only the explicit MiMo fallback may use batch transport here.
-      const chosen = supportedModel(settings.meetingRealtimeModel) ? settings.meetingRealtimeModel : DEFAULT_MODEL;
+      const chosen = selection.modelId;
       options($("liveModel"), [
+        [asrDefaults.FOLLOW_DICTATION, `跟随语音输入法 · ${asrDefaults.dictationSelection(settings, "live").modelId}`],
         ...modelIds.map((id) => [id, id === DEFAULT_MODEL ? "阿里云 Qwen 实时语音"
           : id === BATCH_MODEL ? "MiMo V2.5 ASR（非实时分段备用）" : "阿里云 Fun-ASR 实时语音"]),
         ["__custom__", "自定义实时模型 ID"]
       ], chosen);
       setModel(active(dto) ? dto.modelId || chosen : chosen);
+      if (!active(dto) && selection.followsDictation) {
+        $("liveModel").value = asrDefaults.FOLLOW_DICTATION;
+        $("liveCustomModelField").hidden = true;
+      }
       const picker = win.TextSupplierUi;
       const summaryOptions = picker.modelOptionGroups(settings, "summary");
       const selectedSummary = picker.formatPair(summaryOptions.selected.supplierId, summaryOptions.selected.modelId);
@@ -142,7 +157,13 @@
       if (Array.isArray(snapshot.recoverableSessions)) historyItems = snapshot.recoverableSessions;
       if (includeWindow && snapshot.window) acceptWindow(snapshot.window);
       loaded = true;
-      if (active(dto) && dto.modelId) setModel(dto.modelId);
+      if (active(dto) && dto.modelId) {
+        setModel(dto.modelId);
+        if (asrSettings.meetingRealtimeFollowDictation && dto.modelId === asrDefaults.dictationSelection(asrSettings, "live").modelId) {
+          $("liveModel").value = asrDefaults.FOLLOW_DICTATION;
+          $("liveCustomModelField").hidden = true;
+        }
+      }
       if (active(dto) && dto.captureMode) $("liveCaptureMode").value = dto.captureMode;
       if (opened) render();
     }
@@ -682,8 +703,10 @@
         const transcriptionIntervalSeconds = Number($("liveTranscriptionInterval").value) || 30;
         const saveIntervalSeconds = Number($("liveSaveInterval").value) || 30;
         await invoke("saveSettings", { meetingRealtimeModel: modelId,
+          meetingRealtimeFollowDictation: $("liveModel").value === asrDefaults.FOLLOW_DICTATION,
           meetingTranscriptionIntervalSeconds: transcriptionIntervalSeconds,
           meetingAutosaveIntervalSeconds: saveIntervalSeconds });
+        asrSettings.meetingRealtimeFollowDictation = $("liveModel").value === asrDefaults.FOLLOW_DICTATION;
         if (active(dto)) return;
         return invoke("meetingLiveStart", {
           title: $("liveTitle").value.trim(), modelId,
@@ -752,7 +775,12 @@
     function saveModel() {
       render();
       if (!supportedModel(selectedModel()) || active(dto)) return;
-      void action("model", () => invoke("saveSettings", { meetingRealtimeModel: selectedModel() }));
+      const modelId = selectedModel();
+      const followsDictation = $("liveModel").value === asrDefaults.FOLLOW_DICTATION;
+      void action("model", async () => {
+        await invoke("saveSettings", { meetingRealtimeModel: modelId, meetingRealtimeFollowDictation: followsDictation });
+        asrSettings.meetingRealtimeFollowDictation = followsDictation;
+      });
     }
     function saveIntervals() {
       if (!settingsReady || active(dto)) return;

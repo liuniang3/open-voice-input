@@ -18,7 +18,7 @@ test("streaming preset, meeting profiles and independent cleaner/reviewer IDs ca
     cleanerModel: "cleaner-special", cleanerProfiles: { "cleaner-special": { apiKey: "not-a-real-secret" }, "cleaner-second": {} }
   });
   await f.ui.open();
-  assert.equal(f.$("liveModel").value, model);
+  assert.equal(f.$("liveModel").value, "__dictation__");
   assert(!f.$("liveModel").children.some(o => o.value === "qwen-audio-3.0-asr-flash-streaming-test"));
   assert.equal(f.$("liveCleanerModel").value, "__legacy__::analysis-a");
   assert(!f.$("liveCleanerModel").children.some(o => o.value === "__legacy__::cleaner-second"), "dictation profiles do not become meeting models");
@@ -48,7 +48,7 @@ test("MiMo batch fallback stays selectable; meeting analysis takes priority over
   await f.ui.open();
   assert.equal(f.$("liveModel").value, "mimo-v2.5-asr");
   assert.deepEqual(f.$("liveModel").children.map(o => o.value),
-    ["qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "mimo-v2.5-asr", "__custom__"]);
+    ["__dictation__", "qwen-audio-3.0-asr-flash-streaming", "fun-asr-realtime", "mimo-v2.5-asr", "__custom__"]);
   assert.equal(f.$("liveTranscriptionIntervalField").hidden, false);
   assert.deepEqual(f.$("liveReviewModel").children.map(o => o.value), ["mimo-v2.5-asr", "mimo-file-asr", "mimo-custom-asr"]);
   assert.equal(f.$("liveCleanerModel").value, "__legacy__::meeting-analysis");

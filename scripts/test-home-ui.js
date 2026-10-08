@@ -226,7 +226,7 @@ async function verifyHomeBrowser(page, directory) {
   await page.waitForFunction(() => window.OnboardingUi.isOpen());
   await checkLayout("guide-asr", sizes);
   await page.setViewportSize({ width: 960, height: 760 });
-  assert.deepEqual(await page.locator("#guideAsrProvider option").evaluateAll(options => options.map(item => item.value)), ["mimo", "qwen3-asr"]);
+  assert.deepEqual(await page.locator("#guideAsrProvider option").evaluateAll(options => options.map(item => item.value)), ["qwen3-asr", "mimo"]);
   await page.locator("#guideAsrProvider").selectOption("qwen3-asr");
   assert.equal(await page.locator("#guideAsrConsoleLabel").innerText(), "Qwen API 控制台");
   await page.locator("#guideAsrConsole").click();
@@ -322,6 +322,9 @@ async function verifyNativeApp() {
     });
     assert.equal(state.path.startsWith(sandbox), true, "the real app must use isolated test configuration");
     assert.equal(state.resizable, true); assert.equal(state.topmost, false); assert.deepEqual(state.minimum, [640, 520]);
+    assert.equal(await page.locator("#guideAsrProvider").inputValue(), "qwen3-asr");
+    assert.equal(await page.locator("#guideAsrModel").inputValue(), "qwen3-asr-flash");
+    assert.equal(await page.locator("#guideAsrConsoleLabel").innerText(), "Qwen API 控制台");
     assert.equal(await page.locator("#guideAsrMode").inputValue(), "realtime");
     await page.locator("#guideAsrKey").fill("test-only-onboarding-asr");
     await page.locator("#guideNext").click();
@@ -337,11 +340,17 @@ async function verifyNativeApp() {
     await page.waitForFunction(() => document.getElementById("onboardingProgress").textContent === "3 / 3");
     const configured = await page.evaluate(async () => {
       const s = await window.mimoInput.getSettings(), pair = s.textModelSelections.cleanup;
-      return { mode: s.asrMode, profileMode: s.asrProfiles[s.asrModel].mode,
+      return { provider: s.asrProvider, asrModel: s.asrModel, realtimeModel: s.asrRealtimeModel,
+        fileModel: s.meetingFileAsrModel, liveModel: s.meetingRealtimeModel,
+        fileFollows: s.meetingFileAsrFollowDictation, liveFollows: s.meetingRealtimeFollowDictation,
+        mode: s.asrMode, profileMode: s.asrProfiles[s.asrModel].mode,
         suppliers: s.textSuppliers.length, model: pair.modelId,
         catalogued: s.textSupplierCatalogs[pair.supplierId].models.includes(pair.modelId) };
     });
-    assert.deepEqual(configured, { mode: "realtime", profileMode: "realtime", suppliers: 1, model: "test-fast-model", catalogued: true });
+    assert.deepEqual(configured, { provider: "qwen3-asr", asrModel: "qwen3-asr-flash",
+      fileModel: "qwen3-asr-flash", liveModel: "qwen-audio-3.0-asr-flash-streaming", fileFollows: true, liveFollows: true,
+      realtimeModel: "qwen-audio-3.0-asr-flash-streaming", mode: "realtime", profileMode: "realtime",
+      suppliers: 1, model: "test-fast-model", catalogued: true });
     await page.locator("#guideSkip").click();
     await page.waitForFunction(() => document.getElementById("homePanel").hidden === false && document.getElementById("homeTodayCount").textContent === "0");
     await page.waitForFunction(() => document.getElementById("homeSetupNotice").hidden);
@@ -353,6 +362,12 @@ async function verifyNativeApp() {
       const bounds = await page.locator(`#${id}`).boundingBox();
       await page.locator(`#${id}`).click({ position: { x: bounds.width - 12, y: bounds.height - 12 } });
       await page.waitForFunction(mode => document.body.classList.contains(`${mode}-mode`), mode);
+      if (mode === "file") {
+        assert.equal(await page.locator("#fileAsrProviderSelect").inputValue(), "__dictation__");
+        assert.equal(await page.locator("#fileAsrModelSelect").inputValue(), "__dictation__");
+        assert.match(await page.locator("#fileAsrConfigStatus").innerText(), /qwen3-asr-flash/);
+      }
+      if (mode === "meeting") assert.equal(await page.locator("#liveModel").inputValue(), "__dictation__");
       if (mode === "meeting") assert.equal((await page.evaluate(() => window.mimoInput.meetingLiveStatus())).recording, false);
       await page.locator("#homeBtn").click();
       await page.waitForFunction(() => document.body.classList.contains("home-mode"));

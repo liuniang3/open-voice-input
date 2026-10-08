@@ -52,6 +52,7 @@ const { createUsageStats } = require("./usage-stats");
 const { createVoiceHistory } = require("./voice-history");
 const { createOnboardingState } = require("./onboarding-state");
 const { openConsole: openAsrProviderConsole } = require("./asr-provider-info");
+const { workspaceSelection, savedFollowPreferences } = require("./asr-defaults");
 const { normalizePresentation, minimalBounds, visibleBounds, createMeetingWindowStore } = require("./settings/meeting-window");
 const { createTransparentPreview } = require("./meeting/transparent-preview");
 const { createWindowMotion } = require("./window-motion");
@@ -247,17 +248,19 @@ const DEFAULT_SETTINGS = {
   meetingSystemDeviceId: "",
   meetingCaptureMode: "dual",
   meetingRealtimeDestination: "",
-  meetingRealtimeModel: "qwen-audio-3.0-asr-flash-streaming",
+  meetingRealtimeFollowDictation: true,
+  meetingRealtimeModel: "",
   meetingTranscriptionIntervalSeconds: 30,
   meetingAutosaveIntervalSeconds: 30,
   meetingQwenApiKey: "",
   meetingQwenBaseUrl: "",
-  meetingQwenModel: "qwen-audio-3.0-asr-flash-streaming",
+  meetingQwenModel: "",
   meetingQwenProfiles: {},
-  meetingFileAsrProvider: "mimo",
+  meetingFileAsrFollowDictation: true,
+  meetingFileAsrProvider: "",
   meetingFileAsrApiKey: "",
   meetingFileAsrBaseUrl: "",
-  meetingFileAsrModel: "mimo-v2.5-asr",
+  meetingFileAsrModel: "",
   meetingFileAsrProfiles: {},
   // Stage 4C enhanced diarization (runtime-only secrets; empty defaults)
   meetingProcessMode: "basic",
@@ -679,7 +682,7 @@ function startLiveMeeting(payload = {}) {
       if (!Number.isInteger(input[field]) || input[field] < min || input[field] > max) throw liveError("invalid_payload");
     }
     input.captureMode ||= settings.meetingCaptureMode || "dual";
-    input.modelId ||= settings.meetingRealtimeModel || "qwen-audio-3.0-asr-flash-streaming";
+    input.modelId ||= workspaceSelection(settings, "live").modelId;
     if (!["dual", "microphone", "system"].includes(input.captureMode)) throw liveError("invalid_payload");
     if (!Object.hasOwn(input, "destinationPath") && settings.meetingRealtimeDestination) {
       input.destinationPath = settings.meetingRealtimeDestination;
@@ -833,7 +836,7 @@ async function loadSettings() {
     const raw = await fs.readFile(settingsPath(), "utf8");
     const saved = JSON.parse(raw);
     if (!saved.meetingQwenModel && saved.meetingQwenApiKey) saved.meetingQwenModel = "qwen3-asr-flash";
-    settings = ensureTextSuppliers(ensureConnectionProfiles({ ...DEFAULT_SETTINGS, ...saved }));
+    settings = ensureTextSuppliers(ensureConnectionProfiles({ ...DEFAULT_SETTINGS, ...saved, ...savedFollowPreferences(saved) }));
     settings.restoreClipboard = false;
   } catch {
     settings = ensureTextSuppliers(ensureConnectionProfiles({ ...DEFAULT_SETTINGS }));
@@ -2238,7 +2241,7 @@ registerLiveIpc("meeting:live:recover", async (payload) => liveDto(await recover
 registerLiveIpc("meeting:live:window", setLiveWindow);
 registerLiveIpc("meeting:live:test-connection", async (payload = {}) => {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw liveError("invalid_payload");
-  const requestedModel = payload.modelId ?? settings.meetingRealtimeModel ?? settings.meetingQwenModel;
+  const requestedModel = payload.modelId ?? workspaceSelection(settings, "live").modelId;
   if (typeof requestedModel !== "string" || requestedModel.length > 256) throw liveError("invalid_payload");
   const modelId = requestedModel.trim();
   if (!modelId) throw liveError("invalid_payload");

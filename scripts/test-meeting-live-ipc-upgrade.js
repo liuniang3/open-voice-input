@@ -52,7 +52,7 @@ const test = (name, run) => tests.push({ name, run });
 
 test("streaming defaults migrate legacy choices while preserving the MiMo batch fallback", () => {
   for (const old of [undefined, "qwen3-asr-flash", "qwen3-asr-flash-filetrans"]) {
-    const saved = { _connectionProfilesMigrated: true, meetingRealtimeModel: old,
+    const saved = { _connectionProfilesMigrated: true, asrModel: "qwen3-asr-flash", meetingRealtimeModel: old,
       meetingQwenModel: "qwen3-asr-flash", meetingQwenApiKey: "obsolete-active-key",
       asrProfiles: { [MEETING_LIVE_MODEL]: { apiKey: "preview-key", baseUrl: "https://preview.example/v1" } },
       meetingQwenProfiles: { "qwen3-asr-flash": { apiKey: "batch-key" } },
@@ -72,10 +72,10 @@ test("streaming defaults migrate legacy choices while preserving the MiMo batch 
   }
   const legacy = ensureConnectionProfiles({ meetingQwenApiKey: "old-batch-only" });
   assert.equal(legacy.meetingQwenModel, "qwen3-asr-flash");
-  assert.equal(legacy.meetingRealtimeModel, MEETING_LIVE_MODEL);
+  assert.equal(legacy.meetingRealtimeModel, "mimo-v2.5-asr");
   assert.equal(legacy.meetingQwenProfiles[MEETING_LIVE_MODEL], undefined);
   const fresh = ensureConnectionProfiles({});
-  assert.equal(fresh.meetingQwenModel, MEETING_LIVE_MODEL);
+  assert.equal(fresh.meetingQwenModel, "mimo-v2.5-asr");
   assert.equal(fresh.meetingQwenApiKey, "");
   assert.equal(ensureConnectionProfiles({ meetingRealtimeModel: "fun-asr-realtime" }).meetingRealtimeModel, "fun-asr-realtime");
   assert.equal(ensureConnectionProfiles({ meetingRealtimeModel: "mimo-v2.5-asr" }).meetingRealtimeModel, "mimo-v2.5-asr");
@@ -115,7 +115,7 @@ test("settings renderer prefers the shared provider map and only migrates legacy
 
 test("live connection test uses the selected realtime model and closes its probe", async () => {
   const h = mainHarness();
-  h.run(`settings.meetingRealtimeModel = 'fun-asr-realtime'; settings.meetingQwenModel = 'qwen3-asr-flash';`);
+  h.run(`settings.meetingRealtimeFollowDictation = false; settings.meetingRealtimeModel = 'fun-asr-realtime'; settings.meetingQwenModel = 'qwen3-asr-flash';`);
   const connected = await h.invoke("meeting:live:test-connection", {});
   assert.deepEqual(plain(connected), {
     ok: true, modelId: "fun-asr-realtime", scope: "meeting-preview", audioTested: false
@@ -196,7 +196,7 @@ for (const platform of ["win32", "darwin"]) {
     h.context.testState = h.controls.state;
     const started = await h.invoke("meeting:live:start", { captureMode: "system" });
     assert.equal(started.ok, true);
-    assert.equal(h.controls.startInput.modelId, MEETING_LIVE_MODEL);
+    assert.equal(h.controls.startInput.modelId, "mimo-v2.5-asr");
     assert.equal(h.controls.startInput.captureMode, "system");
     assert.equal(h.controls.screenRequested, platform === "darwin" ? true : undefined);
     assert.equal((await h.invoke("meeting:live:pause")).paused, true);

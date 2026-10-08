@@ -11,11 +11,11 @@ const {
   cleaner,
   previewProfileFor,
   meetingTransportFor,
-  DEFAULT_LIVE_MODEL,
   MIMO_BATCH_MODEL,
   languageModel
 } = require("./providers");
 const { RAW_TRANSCRIPT_REL } = require("../analysis/constants");
+const { workspaceSelection } = require("../../asr-defaults");
 
 function createRealtimeMeetingService({ captureService, getSettings = () => ({}), defaultDirectory,
   onUpdate = () => {}, transcribeImpl, cleanImpl, previewStreamImpl, reviewImpl, llmImpl, now = Date.now, pumpIntervalMs = 1000,
@@ -409,7 +409,8 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       await saveTail.catch(() => {});
       await persistTail;
       const settings = structuredClone(getSettings());
-      const modelId = options.modelId || (transcribeImpl ? settings.meetingRealtimeModel || MIMO_BATCH_MODEL : settings.meetingRealtimeModel || DEFAULT_LIVE_MODEL);
+      const modelId = options.modelId || (transcribeImpl && !settings.asrModel && !settings.meetingRealtimeModel
+        ? MIMO_BATCH_MODEL : workspaceSelection(settings, "live").modelId);
       const transport = previewStreamImpl ? "ali-streaming"
         : transcribeImpl ? "mimo-batch" : meetingTransportFor(modelId);
       if (!transport) throw Object.assign(new Error("所选模型不支持会议转写"), { code: "live_model_unsupported" });

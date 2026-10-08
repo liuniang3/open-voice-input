@@ -44,7 +44,7 @@ function fixture(patch = {}) {
 }
 
 async function cleanerStep(f) {
-  await f.ui.open(); f.$("guideAsrKey").value = "test-only-asr";
+  await f.ui.open(); f.change("guideAsrProvider", "mimo"); f.$("guideAsrKey").value = "test-only-asr";
   await f.click("guideNext");
   assert.equal(f.$("onboardingProgress").textContent, "2 / 3");
   f.$("guideCleanupEnabled").checked = true;
@@ -52,13 +52,42 @@ async function cleanerStep(f) {
 }
 
 (async () => {
-  const batch = fixture({ asrMode: "batch" });
+  const fresh = fixture();
+  await fresh.ui.open();
+  assert.equal(fresh.$("guideAsrProvider").value, "qwen3-asr");
+  assert.equal(fresh.$("guideAsrModel").value, "qwen3-asr-flash");
+  assert.equal(fresh.$("guideAsrMode").value, "realtime");
+  assert.equal(fresh.$("guideAsrUrl").value, "https://dashscope.aliyuncs.com");
+  assert.equal(fresh.$("guideAsrKey").value, "");
+  assert.equal(fresh.$("guideAsrConsoleLabel").textContent, "Qwen API 控制台");
+  assert.equal(fresh.settings().asrProvider, "mimo", "opening setup must not overwrite saved settings");
+
+  const textOnly = fixture({ asrConnections: {}, providerConnections: { mimo: { apiKey: "test-only-text-key" } } });
+  await textOnly.ui.open();
+  assert.equal(textOnly.$("guideAsrProvider").value, "qwen3-asr", "a language-model key is not an ASR configuration");
+  assert.equal(textOnly.$("guideAsrKey").value, "");
+
+  const batch = fixture({ asrMode: "batch", asrApiKey: "test-only-saved-mimo" });
   await batch.ui.open();
+  assert.equal(batch.$("guideAsrProvider").value, "mimo", "configured MiMo remains selected");
   assert.equal(batch.$("guideAsrMode").value, "batch");
   batch.$("guideAsrMode").value = "realtime"; batch.$("guideAsrKey").value = "test-only-mode-key";
   await batch.click("guideNext");
   assert.equal(batch.settings().asrMode, "realtime");
   assert.equal(batch.settings().asrProfiles["mimo-v2.5-asr"].mode, "realtime");
+
+  for (const provider of ["qwen3-asr", "fun-asr"]) {
+    const model = provider === "fun-asr" ? "fun-asr-realtime" : "qwen3-asr-flash-custom";
+    const saved = fixture({ asrProvider: provider, asrModel: model, asrMode: "batch",
+      asrApiKey: "test-only-saved-ali", asrBaseUrl: "https://example.invalid/custom" });
+    await saved.ui.open();
+    assert.equal(saved.$("guideAsrProvider").value, "qwen3-asr");
+    assert.equal(saved.$("guideAsrModel").value, model);
+    assert.equal(saved.$("guideAsrMode").value, "batch");
+    assert.equal(saved.$("guideAsrKey").value, "test-only-saved-ali");
+    assert.match(saved.$("guideAsrUrl").value, /^https:\/\/example\.invalid\/custom/);
+  }
+  console.log("PASS fresh onboarding defaults to Qwen without changing configured suppliers, custom models or credentials");
 
   for (const model of ["qwen3-asr-flash", "qwen-audio-3.0-asr-flash-streaming-2026-09-18"]) {
     const f = fixture(); await f.ui.open(); f.change("guideAsrProvider", "qwen3-asr");

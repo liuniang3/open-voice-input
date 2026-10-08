@@ -1,6 +1,7 @@
 "use strict";
 
 const { isSupportedAliMeetingModel } = require("../providers/asr/ali-meeting-stream");
+const { workspaceSelection } = require("../asr-defaults");
 const {
   API_STYLES,
   ASR_PROVIDER_FAMILIES,
@@ -57,6 +58,21 @@ function trimStr(value) {
 
 function cloneProfile(profile) {
   return profile && typeof profile === "object" ? { ...profile } : {};
+}
+
+function applyWorkspaceSelections(next) {
+  let live = workspaceSelection(next, "live");
+  if (!live.followsDictation && !isSupportedMeetingTranscriptionModel(next.meetingRealtimeModel || next.meetingQwenModel)) {
+    next.meetingRealtimeFollowDictation = true;
+    live = workspaceSelection(next, "live");
+  }
+  const file = workspaceSelection(next, "file");
+  next.meetingRealtimeFollowDictation = live.followsDictation;
+  next.meetingRealtimeModel = live.modelId;
+  if (!trimStr(next.meetingQwenModel)) next.meetingQwenModel = live.modelId;
+  next.meetingFileAsrFollowDictation = file.followsDictation;
+  next.meetingFileAsrModel = file.modelId;
+  next.meetingFileAsrProvider = file.provider;
 }
 
 function normalizeShortQwenRealtimeModel(model) {
@@ -293,6 +309,11 @@ function restOperation(_modelId, family) {
 
 function inferredProvider(group, modelId, profile, settings) {
   if (trimStr(profile?.provider)) return trimStr(profile.provider);
+  if (group.map !== "cleanerProfiles" && group.map !== "meetingAnalysisProfiles") {
+    const family = providerFamilyFor(modelId);
+    if (family === PROVIDER_FAMILIES.MIMO) return "mimo";
+    if (family === PROVIDER_FAMILIES.ALIYUN) return /fun-asr/i.test(modelId) ? "fun-asr" : "qwen3-asr";
+  }
   if (group.provider && trimStr(settings[group.provider])) return trimStr(settings[group.provider]);
   if (group.map === "meetingQwenProfiles" || group.map === "meetingRealtimeProfiles") return "aliyun-streaming";
   if (group.map === "meetingFunAsrProfiles") return "fun-asr";
@@ -515,6 +536,8 @@ function migrateConnectionProfiles(raw) {
   }
 
   // Unlabelled legacy credentials belonged to the old batch model, never streaming.
+  if (!trimStr(next.meetingQwenModel) && trimStr(next.meetingQwenApiKey)) next.meetingQwenModel = QWEN_ASR_MODEL;
+  applyWorkspaceSelections(next);
   const meetingQwenModel = trimStr(next.meetingQwenModel)
     || (trimStr(next.meetingQwenApiKey) ? QWEN_ASR_MODEL : MEETING_LIVE_MODEL);
   next.meetingQwenModel = meetingQwenModel;
@@ -632,10 +655,6 @@ function migrateConnectionProfiles(raw) {
 
 function applyActiveProfilesToTopLevel(settings) {
   const next = settings;
-  // Live meetings select a model independently; never copy an active provider's key.
-  const savedMeetingRealtimeModel = typeof next.meetingRealtimeModel === "string" ? next.meetingRealtimeModel : "";
-  next.meetingRealtimeModel = savedMeetingRealtimeModel || MEETING_LIVE_MODEL;
-  if (!isSupportedMeetingTranscriptionModel(next.meetingRealtimeModel)) next.meetingRealtimeModel = MEETING_LIVE_MODEL;
   next.meetingRealtimeDestination = trimStr(next.meetingRealtimeDestination);
   next.meetingTranscriptionIntervalSeconds = boundedInteger(next.meetingTranscriptionIntervalSeconds, 30, 5, 30);
   next.meetingAutosaveIntervalSeconds = boundedInteger(next.meetingAutosaveIntervalSeconds, 30, 5, 300);
@@ -652,6 +671,8 @@ function applyActiveProfilesToTopLevel(settings) {
   next.asrApiKey = trimStr(asr.apiKey) || "";
   next.asrLanguage = trimStr(asr.language) || "";
   next.asrEnableItn = Boolean(asr.enableItn);
+  // Follow model IDs only; credentials are resolved through the isolated ASR connections.
+  applyWorkspaceSelections(next);
 
   const cleanerModel = trimStr(next.cleanerModel) || "mimo-v2.5";
   const cleaner = next.cleanerProfiles?.[cleanerModel] || defaultCleanerProfile(cleanerModel);
@@ -709,6 +730,7 @@ function ensureConnectionProfiles(value) {
   next.cleanerModel = cleanerModel;
   if (!next.cleanerProfiles[cleanerModel]) next.cleanerProfiles[cleanerModel] = defaultCleanerProfile(cleanerModel);
 
+  applyWorkspaceSelections(next);
   const mq = trimStr(next.meetingQwenModel) || MEETING_LIVE_MODEL;
   next.meetingQwenModel = mq;
   if (!next.meetingQwenProfiles[mq]) next.meetingQwenProfiles[mq] = defaultMeetingQwenProfile(mq);

@@ -2,13 +2,24 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v0.4.18 - 2026-10-08
+
+### Changed
+
+- Unconfigured first-run onboarding selects Qwen / Qwen3-ASR Flash with realtime previews and the matching Aliyun API console. Existing configured MiMo/Qwen suppliers, custom model IDs, URLs, credentials and explicitly saved batch preferences remain unchanged; opening setup alone does not modify saved settings.
+- File transcription and live meetings default to a shared "Follow dictation" selection instead of unrelated hard-coded models. Changing dictation ASR updates the derived model; streaming and file endpoints use the appropriate companion within that supplier. Explicit workspace model selections remain independent, and users can switch back to following dictation. ASR credentials remain isolated from language suppliers.
 
 ### Fixed
 
 - First-run onboarding now offers the existing language supplier presets, an explicit add/save action and authentication selection. It reuses the settings editor's supplier validation, keeps saved credentials isolated, and adds manually entered cleanup models to that supplier's catalog. Errors remain visible above the navigation controls instead of falling below the form's scroll area.
 - Focused workspace windows handle their configured shortcuts through a shared Windows/macOS key-matching fallback. Shortcut capture, active recording and startup guards prevent stale shortcuts and duplicate recording starts; leaving shortcut settings ends the keyboard capture session.
 - Fresh installations default to realtime dictation previews. Onboarding saves the chosen mode in both the active settings and model profile, keeps MiMo polling available, and selects the Qwen streaming companion without using a streaming model as the batch fallback. Existing explicitly saved batch preferences remain unchanged.
+
+### Verification
+
+- Shared local regression suite passed: `66/66` scripts. Browser onboarding/live-workspace checks and isolated native Windows Electron checks cover supplier persistence, Qwen defaults, model following, dictation previews, complete paste payloads and responsive layouts.
+- Release workflows build and test Windows x64, macOS Intel x64 and Apple Silicon arm64. Native macOS recording, permissions, paste and appearance still require hardware validation.
+- Secret scan and diff checks passed. No user credentials, local settings, recordings, transcripts or diagnostic screenshots are included.
 
 ## v0.4.17 - 2026-10-08
 

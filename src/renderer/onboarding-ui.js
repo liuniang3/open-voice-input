@@ -70,6 +70,15 @@
       }
       if (selected !== undefined) select.value = selected;
     }
+    function initialAsrSupplier() {
+      const supplier = win.AsrProviderInfo.supplierId(settings.asrProvider);
+      const preset = ASR[supplier];
+      if (!preset) return "qwen3-asr";
+      const connection = (settings.asrConnections || settings.providerConnections)?.[preset.family];
+      const apiKey = settings.asrConnections ? connection?.apiKey
+        : connection?.apiKey || settings.asrProfiles?.[settings.asrModel]?.apiKey || settings.asrApiKey;
+      return String(apiKey || "").trim() ? supplier : "qwen3-asr";
+    }
     function fillAsr() {
       const provider = $("guideAsrProvider").value;
       const preset = ASR[provider];
@@ -290,7 +299,7 @@
       settings = loaded;
       opened = true; step = 0; error();
       options($("guideCleanerPreset"), picker.SUPPLIER_PRESETS.map(item => [item.id, item.name]), "custom");
-      $("guideAsrProvider").value = win.AsrProviderInfo.supplierId(settings.asrProvider) || "mimo"; fillAsr();
+      $("guideAsrProvider").value = initialAsrSupplier(); fillAsr();
       const selected = settings.textModelSelections?.cleanup?.supplierId || (legacyCleaner().apiKey ? "__legacy__" : "__new__");
       $("guideCleanupEnabled").checked = settings.transcriptionMode === "stable" && selected !== "__new__";
       fillSupplierList(selected);

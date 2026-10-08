@@ -1,6 +1,7 @@
 "use strict";
 
 const { resolveProviderConnection } = require("../../settings/provider-connections");
+const { workspaceSelection } = require("../../asr-defaults");
 
 const DEFAULT_MIMO_BASE_URL = "https://api.xiaomimimo.com/v1";
 const DEFAULT_QWEN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -66,15 +67,18 @@ function normalizeQwenBaseUrl(value) {
 }
 
 /**
- * Resolve only the independent file-import ASR profile. It intentionally does
- * not fall back to meeting Qwen, short-voice ASR, cleaner, or OSS credentials.
+ * Resolve the selected file model or the dictation-derived default. Connection
+ * keys remain in the isolated ASR scope, never cleaner or OSS credentials.
  */
 function resolveMeetingFileAsrCredentials({ env = process.env, settings = {} } = {}) {
   const s = settings && typeof settings === "object" ? settings : {};
-  const modelId = firstNonEmpty(s.meetingFileAsrModel, env.OVI_MEETING_FILE_ASR_MODEL, DEFAULT_MODEL);
+  const selection = workspaceSelection(s, "file");
+  const modelId = selection.followsDictation && !s.asrModel && env.OVI_MEETING_FILE_ASR_MODEL
+    ? trimStr(env.OVI_MEETING_FILE_ASR_MODEL) : selection.modelId;
   const profile = s.meetingFileAsrProfiles?.[modelId] || {};
   const provider = normalizeProvider(
-    firstNonEmpty(profile.provider, s.meetingFileAsrProvider, env.OVI_MEETING_FILE_ASR_PROVIDER),
+    firstNonEmpty(selection.followsDictation ? selection.provider : profile.provider,
+      s.meetingFileAsrProvider, env.OVI_MEETING_FILE_ASR_PROVIDER),
     modelId
   );
   const operation = provider === "qwen3-asr" ? "compatible" : provider === "fun-asr" ? "rest" : "default";

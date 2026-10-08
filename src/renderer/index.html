@@ -77,7 +77,7 @@
         <ol class="onboarding-steps"><li data-guide-step="0">语音识别</li><li data-guide-step="1">表达整理<span>可选</span></li><li data-guide-step="2">麦克风与快捷键</li></ol>
         <div class="onboarding-body">
           <section data-guide-panel="0"><h3>连接语音识别</h3>
-            <div class="asr-supplier-picker"><label class="field"><span>供应商</span><select id="guideAsrProvider"><option value="mimo">MiMo</option><option value="qwen3-asr">Qwen · 阿里云</option></select></label><button id="guideAsrConsole" type="button" class="asr-console-action" title="打开 MiMo API 控制台，获取 API Key"><span class="ui-icon icon-link" aria-hidden="true"></span><span id="guideAsrConsoleLabel">MiMo API 控制台</span></button></div>
+            <div class="asr-supplier-picker"><label class="field"><span>供应商</span><select id="guideAsrProvider"><option value="qwen3-asr">Qwen · 阿里云</option><option value="mimo">MiMo</option></select></label><button id="guideAsrConsole" type="button" class="asr-console-action" title="打开 Qwen API 控制台，获取 API Key"><span class="ui-icon icon-link" aria-hidden="true"></span><span id="guideAsrConsoleLabel">Qwen API 控制台</span></button></div>
             <label class="field"><span>API 地址</span><input id="guideAsrUrl" type="url" autocomplete="off" placeholder="https://example.com/v1" /></label>
             <label class="field"><span>API Key</span><div class="secret-control"><input id="guideAsrKey" type="password" autocomplete="off" /><button type="button" data-secret-toggle="guideAsrKey" class="secret-action" title="显示或隐藏 API Key">显示</button><button type="button" data-secret-copy="guideAsrKey" class="secret-action" title="复制 API Key">复制</button></div></label>
             <label class="field"><span>模型</span><input id="guideAsrModel" type="text" list="guideAsrPresets" autocomplete="off" /><datalist id="guideAsrPresets"></datalist></label>
@@ -733,6 +733,7 @@
               <label class="field inline">
                 <span>文件 ASR</span>
                 <select id="fileAsrProviderSelect" title="选择文件转写供应商">
+                  <option value="__dictation__">跟随语音输入法</option>
                   <option value="mimo">MiMo V2.5 ASR</option>
                   <option value="qwen3-asr">Qwen3-ASR</option>
                 </select>
@@ -740,6 +741,7 @@
               <label class="field inline grow">
                 <span>模型</span>
                 <select id="fileAsrModelSelect" title="选择文件转写模型">
+                  <option value="__dictation__">跟随语音输入法</option>
                   <option value="mimo-v2.5-asr">mimo-v2.5-asr</option>
                   <option value="qwen3-asr-flash">qwen3-asr-flash</option>
                   <option value="qwen3-asr-flash-filetrans">qwen3-asr-flash-filetrans</option>
@@ -1157,6 +1159,7 @@
     </dialog>
     <script src="../audio-utils.js"></script>
     <script src="../asr-provider-info.js"></script>
+    <script src="../asr-defaults.js"></script>
     <script src="./meeting-ui.js"></script>
     <script src="./text-supplier-ui.js"></script>
     <script src="./text-supplier-manager.js"></script>

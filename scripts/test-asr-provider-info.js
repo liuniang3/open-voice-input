@@ -36,7 +36,8 @@ async function run() {
   const html = fs.readFileSync(path.join(root, "src/renderer/index.html"), "utf8");
   for (const id of ["asrProviderSelect", "guideAsrProvider"]) {
     const select = html.match(new RegExp(`<select id="${id}">([\\s\\S]*?)</select>`))[1];
-    assert.deepEqual([...select.matchAll(/value="([^"]+)"/g)].map(match => match[1]), ["mimo", "qwen3-asr"]);
+    assert.deepEqual([...select.matchAll(/value="([^"]+)"/g)].map(match => match[1]),
+      id === "guideAsrProvider" ? ["qwen3-asr", "mimo"] : ["mimo", "qwen3-asr"]);
   }
   assert.match(html, /src="\.\.\/asr-provider-info\.js"/);
   const main = fs.readFileSync(path.join(root, "src/main.js"), "utf8");

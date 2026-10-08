@@ -7,6 +7,7 @@
   if (!panel) return;
 
   const ui = window.MeetingUi || {};
+  const asrDefaults = window.AsrDefaults;
   const $ = (id) => document.getElementById(id);
   const channels = {
     list: ui.createRequestToken?.() || { next: () => 1, isCurrent: () => true },
@@ -82,14 +83,16 @@
 
   function currentFileAsrModel() {
     const e = els();
+    if (e.modelSelect?.value === asrDefaults.FOLLOW_DICTATION) return asrDefaults.dictationSelection(state.settings, "file").modelId;
     return e.modelSelect?.value === "__custom__"
       ? String(e.customModel?.value || "").trim()
-      : String(e.modelSelect?.value || state.settings.meetingFileAsrModel || "mimo-v2.5-asr").trim();
+      : String(e.modelSelect?.value || asrDefaults.workspaceSelection(state.settings, "file").modelId).trim();
   }
 
   function currentFileAsrProvider(model = currentFileAsrModel()) {
     const e = els();
-    const selected = String(e.providerSelect?.value || state.settings.meetingFileAsrProvider || "mimo").trim();
+    if (e.providerSelect?.value === asrDefaults.FOLLOW_DICTATION) return asrDefaults.dictationSelection(state.settings, "file").provider;
+    const selected = String(e.providerSelect?.value || asrDefaults.workspaceSelection(state.settings, "file").provider).trim();
     if (selected) return selected;
     return FILE_ASR_MODELS.find((item) => item.value === model)?.provider || "mimo";
   }
@@ -97,10 +100,14 @@
   function renderFileAsrSelector() {
     const e = els();
     if (!e.providerSelect || !e.modelSelect) return;
-    const provider = String(state.settings.meetingFileAsrProvider || "mimo");
-    const model = String(state.settings.meetingFileAsrModel || "mimo-v2.5-asr");
-    e.providerSelect.value = provider === "qwen3-asr" ? "qwen3-asr" : "mimo";
-    const preset = FILE_ASR_MODELS.some((item) => item.value === model) ? model : "__custom__";
+    const { provider, modelId: model, followsDictation } = asrDefaults.workspaceSelection(state.settings, "file");
+    const dictation = asrDefaults.dictationSelection(state.settings, "file");
+    for (const select of [e.providerSelect, e.modelSelect]) {
+      const option = [...select.options].find(item => item.value === asrDefaults.FOLLOW_DICTATION);
+      if (option) option.textContent = `跟随语音输入法 · ${select === e.providerSelect ? dictation.provider : dictation.modelId}`;
+    }
+    e.providerSelect.value = followsDictation ? asrDefaults.FOLLOW_DICTATION : provider === "mimo" ? "mimo" : "qwen3-asr";
+    const preset = followsDictation ? asrDefaults.FOLLOW_DICTATION : FILE_ASR_MODELS.some((item) => item.value === model) ? model : "__custom__";
     e.modelSelect.value = preset;
     if (e.customModel) {
       e.customModel.hidden = preset !== "__custom__";
@@ -113,10 +120,12 @@
     const model = currentFileAsrModel();
     if (!model) throw new Error("请填写文件 ASR 模型 ID。");
     const provider = currentFileAsrProvider(model);
+    const followsDictation = els().modelSelect?.value === asrDefaults.FOLLOW_DICTATION;
     state.settings = (await window.mimoInput.saveSettings({
+      meetingFileAsrFollowDictation: followsDictation,
       meetingFileAsrProvider: provider,
       meetingFileAsrModel: model
-    })) || { ...state.settings, meetingFileAsrProvider: provider, meetingFileAsrModel: model };
+    })) || { ...state.settings, meetingFileAsrFollowDictation: followsDictation, meetingFileAsrProvider: provider, meetingFileAsrModel: model };
     renderFileAsrSelector();
     renderSelected();
     setHint(`文件 ASR 已切换为 ${provider} / ${model}。`);
@@ -286,7 +295,7 @@
     const e = els();
     if (!e.setupSummaryMeta) return;
     const row = currentRow();
-    const model = state.settings.meetingFileAsrModel || "mimo-v2.5-asr";
+    const model = asrDefaults.workspaceSelection(state.settings, "file").modelId;
     e.setupSummaryMeta.textContent = row ? `${row.title || row.id} · ${model}` : `未选择文件 · ${model}`;
   }
 
@@ -306,8 +315,7 @@
       const status = row.status === "importing" ? "正在导入" : row.status === "stopped" ? "已导入" : row.status || "待处理";
       e.meta.textContent = `${fileName} · ${kind} · ${status}`;
     }
-    const provider = state.settings.meetingFileAsrProvider || "mimo";
-    const model = state.settings.meetingFileAsrModel || "mimo-v2.5-asr";
+    const { provider, modelId: model } = asrDefaults.workspaceSelection(state.settings, "file");
     if (e.model) e.model.textContent = `当前 ASR：${provider} / ${model}`;
     renderFileAsrSelector();
     renderList();
@@ -828,6 +836,11 @@
     });
     $("fileAsrProviderSelect")?.addEventListener("change", () => {
       const provider = els().providerSelect.value;
+      if (provider === asrDefaults.FOLLOW_DICTATION) {
+        els().modelSelect.value = asrDefaults.FOLLOW_DICTATION;
+        saveFileAsrSelection().catch((error) => setHint(error.message));
+        return;
+      }
       const current = currentFileAsrModel();
       const compatible = FILE_ASR_MODELS.find((item) => item.provider === provider && (provider === "mimo" || item.value === current));
       if (els().modelSelect) els().modelSelect.value = compatible?.value || (provider === "qwen3-asr" ? "qwen3-asr-flash" : "mimo-v2.5-asr");
@@ -836,6 +849,10 @@
     });
     $("fileAsrModelSelect")?.addEventListener("change", () => {
       const custom = els().modelSelect.value === "__custom__";
+      if (els().modelSelect.value === asrDefaults.FOLLOW_DICTATION) els().providerSelect.value = asrDefaults.FOLLOW_DICTATION;
+      else if (els().providerSelect.value === asrDefaults.FOLLOW_DICTATION) {
+        els().providerSelect.value = asrDefaults.dictationSelection(state.settings, "file").provider === "mimo" ? "mimo" : "qwen3-asr";
+      }
       const preset = FILE_ASR_MODELS.find((item) => item.value === els().modelSelect.value);
       if (preset && els().providerSelect) els().providerSelect.value = preset.provider;
       if (els().customModel) els().customModel.hidden = !custom;
