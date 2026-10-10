@@ -335,7 +335,10 @@ function mainHarness(platform = "darwin") {
   const state = { status: "idle", recording: false, audioPaths: [] };
   const controls = { permissions: { microphone: "granted", screen: "granted", accessibility: "granted" },
     picker: { canceled: true }, state, startGate: null, stopGate: null, shutdownGate: null,
-    stopError: null, startCount: 0, writes: [], opened: [], sent: [], macLoaded: 0 };
+    stopError: null, startCount: 0, writes: [], opened: [], sent: [], macLoaded: 0,
+    contextQueries: 0, inputContext: { target: "123", coordinateSpace: "dip", source: "caret",
+      rect: { x: 300, y: 250, width: 1, height: 20 } }, contextGate: null,
+    bounds: { x: 80, y: 90, width: 500, height: 500 } };
   const live = {
     status: () => state,
     start: async (input) => {
@@ -368,13 +371,18 @@ function mainHarness(platform = "darwin") {
   const webContents = { getURL: () => localUrl, isLoading: () => false,
     send: (...args) => controls.sent.push(args), once: () => {} };
   const win = new Proxy({ webContents, isDestroyed: () => false, isMinimized: () => false,
-    isMaximized: () => false, isVisible: () => true, getBounds: () => ({ width: 500, height: 500 }) }, {
+    isMaximized: () => false, isVisible: () => true, getBounds: () => controls.bounds,
+    setBounds: bounds => { controls.bounds = bounds; events.push("set-bounds"); },
+    focus: () => events.push("focus") }, {
     get: (target, key) => key in target ? target[key] : () => {}
   });
   const app = { isPackaged: false, setPath: () => {}, getPath: (key) => path.join(root, "mock", key),
     requestSingleInstanceLock: () => true, whenReady: () => ({ then: (fn) => { controls.ready = fn; } }),
     on: (event, fn) => appEvents.set(event, fn), exit: () => events.push("exit") };
+  const display = { workArea: { x: 0, y: 0, width: 1920, height: 1040 } };
   const electron = { app, BrowserWindow: function () { return win; },
+    screen: { getDisplayMatching: () => display, getDisplayNearestPoint: () => display,
+      getCursorScreenPoint: () => ({ x: 100, y: 100 }) },
     clipboard: { writeText: () => {} }, dialog: { showSaveDialog: async () => controls.picker,
       showMessageBox: async () => ({ response: 1 }) },
     globalShortcut: { register: () => true, unregister: () => {}, unregisterAll: () => {} },
@@ -399,11 +407,18 @@ function mainHarness(platform = "darwin") {
     "./settings/meeting-window": require("../src/settings/meeting-window"),
     "./asr-defaults": require("../src/asr-defaults"),
     "./window-motion": require("../src/window-motion"),
+    "./dictation-placement": { ...require("../src/dictation-placement"),
+      readInputContext: async () => {
+        controls.contextQueries++;
+        await controls.contextGate?.promise;
+        events.push("input-context");
+        return controls.inputContext;
+      } },
     "./hotkeys/validate-hotkey": require("../src/hotkeys/validate-hotkey"),
     "./meeting": { createMeetingCaptureService: () => capture,
       createMeetingSessionAnalyzer: () => { throw new Error("live must not construct legacy analyzer"); },
       sanitizeIpcError: (error) => ({ ok: false, error: { code: error.code || "error", message: "safe" } }),
-      mediaToken: { SCHEME: "meeting-media" } },
+      mediaToken: { SCHEME: "meeting-media" }, paths: require("../src/meeting/paths") },
     "./meeting/realtime": { createRealtimeMeetingService: (options) => { controls.options = options; return live; } },
     "./platform/macos": mac
   };
@@ -423,6 +438,27 @@ function mainHarness(platform = "darwin") {
 }
 
 async function integrationTests() {
+  for (const platform of ["win32", "darwin"]) {
+    const placed = mainHarness(platform);
+    placed.controls.contextGate = deferred();
+    placed.run("showAndStart(); showAndStart()");
+    assert.equal(placed.controls.contextQueries, 1);
+    assert.equal(placed.events.includes("focus"), false, "never steal focus before native context capture");
+    placed.controls.contextGate.resolve();
+    await new Promise(setImmediate);
+    assert.equal(placed.run("targetWindowHandle"), "123");
+    assert.deepEqual(placed.controls.bounds, { x: 290, y: 280, width: 340, height: 116 });
+    assert.ok(placed.events.indexOf("input-context") < placed.events.indexOf("focus"));
+    const moved = { x: 400, y: 500, width: 340, height: 116 };
+    placed.controls.bounds = moved;
+    placed.controls.inputContext = { ...placed.controls.inputContext, target: "999" };
+    placed.run("showAndStart()");
+    await new Promise(setImmediate);
+    assert.equal(placed.controls.contextQueries, 1, "active capture never queries the popup as a new target");
+    assert.equal(placed.run("targetWindowHandle"), "123");
+    assert.deepEqual(placed.controls.bounds, moved, "manual popup placement survives repeated invocation");
+  }
+  console.log("ok - native input context precedes focus, anchored fixed geometry and paste target survives reentry");
   for (const platform of ["win32", "darwin"]) {
     const focused = mainHarness(platform);
     const defaults = focused.run("DEFAULT_SETTINGS");

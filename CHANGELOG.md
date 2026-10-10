@@ -4,6 +4,10 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Added
+
+- Anchor the short-dictation popup near the insertion caret or focused text field when invoked. Windows uses native caret/UI Automation geometry with mixed-DPI conversion; macOS uses Accessibility geometry without prompting for permission just to position the popup. Bound native queries, clamp to the display work area and keep a centered fallback, the original paste target and manually moved position during an active recording. No input-field text is read or logged.
+
 ## v0.4.20 - 2026-10-11
 
 ### Fixed

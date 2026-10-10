@@ -180,6 +180,10 @@ struct Main {
     @MainActor static func main() {
         signal(SIGPIPE, SIG_IGN)
         let args = CommandLine.arguments
+        if args.count == 2, args[1] == "--input-context" {
+            printInputContext()
+            return
+        }
         if args.count == 3, args[1] == "--self-test-system-pause" {
             do {
                 Wire.result("system-pause-test", try systemPauseArchiveSelfTest(directory: canonicalDirectory(args[2])))

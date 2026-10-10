@@ -8,6 +8,7 @@
 
 mod capture;
 mod dual_sync;
+mod input_context;
 mod job;
 mod persist;
 mod protocol;
@@ -35,6 +36,10 @@ struct AppState {
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--input-context") {
+        input_context::print_context();
+        return;
+    }
     if let Err(err) = capture::init_com() {
         eprintln!("audio-capture-helper: COM init failed: {err}");
         std::process::exit(2);

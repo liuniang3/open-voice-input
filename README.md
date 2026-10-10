@@ -196,6 +196,8 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`, builds Windows and macO
 
 Default short-dictation hotkey: `Ctrl+Alt+M`. Default long-form transcription hotkey: `Ctrl+Alt+Shift+M`; it opens and focuses the meeting workspace. The settings UI rejects app-level duplicates, reserved Windows combinations, malformed accelerators, and combinations already occupied by another application.
 
+The short-dictation popup opens near the insertion caret, falling back to the focused input field or a centered position when geometry is unavailable. It prefers below the caret, moves above when needed and stays inside the display work area. Windows uses native caret/UI Automation geometry; precise macOS positioning requires existing Accessibility access and does not prompt just to place the popup. No input-field text is read. Invoking it again during recording retains the original paste target and any manually adjusted position. Native macOS positioning still requires hardware validation.
+
 ## Live Meeting Workflow
 
 1. Configure the selected Alibaba streaming model, or configure `mimo-v2.5-asr` as a fallback, then open the meeting workspace and choose the audio source, Markdown destination, transcription interval and autosave interval.

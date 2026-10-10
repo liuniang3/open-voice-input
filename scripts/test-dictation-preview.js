@@ -39,6 +39,11 @@ async function unitTests() {
   assert.equal(await preview.show(), true);
   const win = windows[0];
   assert.equal(mainWindow.hidden && preview.isVisible(), true);
+  win.bounds = { x: 500, y: 450, width: 340, height: 116 };
+  await preview.show();
+  assert.equal(win.bounds.x, 500, "repeated invocation retains a manually moved visible popup");
+  await preview.show({ reposition: true });
+  assert.deepEqual(win.bounds, mainWindow.getBounds(), "a fresh capture reanchors even during the previous fade-out");
   assert.equal(win.options.transparent, true); assert.equal(win.options.thickFrame, false);
   assert.equal(win.options.hasShadow, false); assert.equal(win.options.backgroundMaterial, "none");
   assert.equal(win.options.roundedCorners, false, "only the 18px per-pixel CSS radius owns the corners");

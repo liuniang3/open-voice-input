@@ -58,14 +58,14 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
   ipcMain.handle("dictation:preview:ready", event => sender(event) ? state : null);
 
   return {
-    async show() {
+    async show({ reposition = false } = {}) {
       if (disposed || failed) return false;
       if (!alive()) create();
       const current = ++revision;
       if (!enabled) state = { kind: "recording", title: "正在录音", detail: "", preview: false };
       enabled = true;
       if (!await ready || !alive() || failed || !enabled || revision !== current) return false;
-      if (!win.isVisible()) win.setBounds(mainWindow.getBounds(), false);
+      if (reposition || !win.isVisible()) win.setBounds(mainWindow.getBounds(), false);
       publish(); motion.show(); mainWindow.hide(); return true;
     },
     hide(onHidden) {

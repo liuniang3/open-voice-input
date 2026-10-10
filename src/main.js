@@ -57,6 +57,7 @@ const { normalizePresentation, minimalBounds, visibleBounds, createMeetingWindow
 const { createTransparentPreview } = require("./meeting/transparent-preview");
 const { createWindowMotion } = require("./window-motion");
 const { createDictationPreview } = require("./dictation-preview");
+const { readInputContext, dictationBounds } = require("./dictation-placement");
 
 let meetingImportJobs = null;
 function getMeetingImportJobs() {
@@ -1027,6 +1028,15 @@ function configurePermissions() {
   });
 }
 
+function getDictationInputContext() {
+  try {
+    return readInputContext({ helperPath: meetingPaths.resolveHelperPath({
+      platform: process.platform, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath,
+      appRoot: path.join(__dirname, "..")
+    }) });
+  } catch { return Promise.resolve(null); }
+}
+
 function showAndStart() {
   if (!mainWindow || mainWindow.isDestroyed() || shortStartPending) return;
   try {
@@ -1035,15 +1045,24 @@ function showAndStart() {
     void showCaptureError(error).catch(() => {});
     return;
   }
-  if (captureOwner !== "short") targetWindowHandle = getForegroundWindowHandle();
+  const freshCapture = captureOwner !== "short";
+  const invokedAt = Date.now();
+  const inputContext = freshCapture ? getDictationInputContext() : Promise.resolve(null);
   captureOwner = "short";
   shortStartPending = true;
-  void requireCapturePermissions("microphone").then(async () => {
+  void Promise.all([inputContext, requireCapturePermissions("microphone")]).then(async ([context]) => {
     if (meetingQuitCleanupStarted) throw liveError("app_quitting");
+    if (freshCapture) targetWindowHandle = context?.target || getForegroundWindowHandle();
     logEvent("hotkey: showAndStart");
     setWindowMode("recording");
     prepareWindowForDisplay(mainWindow, "recording");
-    if (!dictationPreview || !await dictationPreview.show()) windowMotion.show();
+    if (freshCapture) {
+      try {
+        const recent = Date.now() - invokedAt < 2000 ? context : null;
+        mainWindow.setBounds(dictationBounds(recent, WINDOW_SIZES.recording, screen), false);
+      } catch { /* Keep the normal centered popup if display geometry is unavailable. */ }
+    }
+    if (!dictationPreview || !await dictationPreview.show({ reposition: freshCapture })) windowMotion.show();
     if (meetingQuitCleanupStarted) throw liveError("app_quitting");
     enforceWindowGeometry(mainWindow, "recording");
     focusMainWindow();
