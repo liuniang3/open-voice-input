@@ -31,6 +31,7 @@ async function setup(overrides = {}) {
     await fs.writeFile(path.join(dir, "manifest.json"), JSON.stringify({ actualL0Format: format }));
     const data = Buffer.alloc(frames * 2);
     for (let i = 0; i < frames; i++) data.writeInt16LE(1234, i * 2);
+    for (const [from, to] of options.pauses || []) data.fill(0, from * 2, to * 2);
     const file = `${String(seq).padStart(6, "0")}.l0.pcm`;
     await fs.writeFile(path.join(dir, file), data);
     if (!options.noIndex) await fs.appendFile(path.join(dir, "index.jsonl"), JSON.stringify({ seq, file, format, frameStart: options.start || 0 }) + "\n");
@@ -410,6 +411,154 @@ async function main() {
       assert.deepEqual(await fs.readFile(original.audioPaths[0]), audio);
     } finally { delayed?.(); await x.api.shutdown(); }
   });
+  await test("batch cuts prefer a pause before the interval, preserving complete audio and exact tail", async () => {
+    const calls = [];
+    const x = await setup({ segmentSeconds: 8, transcribeImpl: async input => {
+      const wav = Buffer.from(input.audioDataUrl.split(",")[1], "base64");
+      calls.push(wav.subarray(44)); return { text: "faithful text" };
+    } });
+    try {
+      await x.api.start({ captureMode: "microphone" });
+      const native = await x.add("microphone", RATE * 17 + 37, 1, { pauses: [[RATE * 7, RATE * 7.5]] });
+      const source = await fs.readFile(path.join(native, "000001.l0.pcm"));
+      await x.api.flush(); await x.api.waitForIdle();
+      const file = path.join(x.store.sessionsRoot, x.api.status().sessionId, "realtime", "state.json");
+      let checkpoint = JSON.parse(await fs.readFile(file));
+      const cut = checkpoint.segments[0].endFrame;
+      assert.ok(cut > RATE * 7 && cut < RATE * 7.5);
+      assert.ok(checkpoint.segments.every(s => s.endFrame - s.startFrame <= RATE * 8));
+      await x.api.stop(); await x.api.waitForIdle();
+      checkpoint = JSON.parse(await fs.readFile(file));
+      assert.equal(checkpoint.segments.at(-1).endFrame, RATE * 17 + 37);
+      assert.ok(checkpoint.segments.every((s, i) => s.startFrame === (i ? checkpoint.segments[i - 1].endFrame : 0)));
+      assert.deepEqual(Buffer.concat(calls), source);
+      assert.deepEqual((await fs.readFile(x.api.status().audioPaths[0])).subarray(HEADER_BYTES), source);
+      assert.deepEqual(await fs.readFile(path.join(native, "000001.l0.pcm")), source);
+    } finally { await x.api.shutdown(); }
+  });
+
+  await test("truncation persists contiguous children, orders text by time and reuses successful checkpoints after restart", async () => {
+    const calls = [], updates = [];
+    let second;
+    const x = await setup({ segmentSeconds: 8, maxAttempts: 1, onUpdate: value => updates.push(value.rawText),
+      transcribeImpl: async input => {
+        calls.push(input.segmentIndex);
+        if (input.segmentIndex === 1) return { text: "DISCARD_PARTIAL", raw: { finishReason: "length" } };
+        const file = path.join(x.store.sessionsRoot, x.api.status().sessionId, "realtime", "state.json");
+        const saved = JSON.parse(await fs.readFile(file));
+        if (input.segmentIndex >= 3) {
+          assert.deepEqual(saved.segments.map(s => s.index), [0, 3, 4, 2], "child plan must be durable before requests");
+          assert.equal(saved.segments.find(s => s.index === input.segmentIndex).status, "running");
+        }
+        if (input.segmentIndex === 4) throw new Error("private transport body");
+        return { text: `text ${input.segmentIndex}`, finishReason: "stop" };
+      } });
+    try {
+      await x.api.start({ captureMode: "microphone" });
+      await x.add("microphone", RATE * 17);
+      await x.api.stop(); await x.api.waitForIdle();
+      const dto = x.api.status(), archive = await fs.readFile(dto.audioPaths[0]);
+      const file = path.join(x.store.sessionsRoot, dto.sessionId, "realtime", "state.json");
+      const checkpoint = JSON.parse(await fs.readFile(file));
+      assert.deepEqual(calls, [0, 1, 3, 4, 2]);
+      assert.equal(dto.status, "needs_retry");
+      assert.equal(checkpoint.segments[1].parentIndex, 1);
+      assert.equal(checkpoint.segments[1].startFrame, RATE * 8);
+      assert.equal(checkpoint.segments[1].endFrame, checkpoint.segments[2].startFrame);
+      assert.equal(checkpoint.segments[2].endFrame, RATE * 16);
+      assert.ok(updates.every(text => !text.includes("DISCARD_PARTIAL")));
+      assert(!JSON.stringify(checkpoint).includes("private transport"));
+      const rawFile = path.join(x.store.sessionsRoot, dto.sessionId, RAW_TRANSCRIPT_REL);
+      assert.deepEqual(JSON.parse(await fs.readFile(rawFile)).items.map(s => s.id), ["live:0", "live:3", "live:2"]);
+      await x.api.shutdown();
+      second = createRealtimeMeetingService({ captureService: x.capture, defaultDirectory: path.join(x.root, "notes"),
+        transcribeImpl: async input => { calls.push(input.segmentIndex); return { text: `text ${input.segmentIndex}` }; } });
+      await second.recover({ sessionId: dto.sessionId });
+      assert.deepEqual(calls, [0, 1, 3, 4, 2], "recovery is offline");
+      await second.retry(); await second.waitForIdle();
+      assert.deepEqual(calls, [0, 1, 3, 4, 2, 4]);
+      assert.equal(second.status().rawText, "text 0\n\ntext 3\n\ntext 4\n\ntext 2");
+      assert.equal(second.status().status, "completed");
+      assert.deepEqual(await fs.readFile(dto.audioPaths[0]), archive);
+      assert.deepEqual(JSON.parse(await fs.readFile(rawFile)).items.map(s => s.id), ["live:0", "live:3", "live:4", "live:2"]);
+    } finally { await (second || x.api).shutdown(); }
+  });
+
+  await test("nested truncation recovery is bounded and never publishes unfinished or filtered output", async () => {
+    for (const reason of ["length", "content_filter", "missing"]) {
+      const calls = [];
+      const x = await setup({ segmentSeconds: 4, maxAttempts: 1, transcribeImpl: async input => {
+        calls.push(input.segmentIndex);
+        return { text: "UNFINISHED", finishReason: reason === "missing" ? null : reason, completed: false };
+      } });
+      try {
+        await x.api.start({ captureMode: "microphone" }); await x.add("microphone", RATE * 4);
+        await x.api.stop(); await x.api.waitForIdle();
+        assert.equal(x.api.status().rawText, "");
+        assert.equal(x.api.status().status, "needs_retry");
+        assert.equal(calls.length, reason === "length" ? 7 : 1);
+        assert.equal(x.api.status().failedSegments, reason === "length" ? 4 : 1);
+        if (reason === "length") {
+          const file = path.join(x.store.sessionsRoot, x.api.status().sessionId, "realtime", "state.json");
+          const checkpoint = JSON.parse(await fs.readFile(file));
+          assert.equal(new Set(checkpoint.segments.map(s => s.index)).size, 4);
+          assert.ok(checkpoint.segments.every(s => s.endFrame - s.startFrame === RATE));
+          await x.api.retry(); await x.api.waitForIdle();
+          assert.equal(calls.length, 11, "minimum-size failures retry without splitting forever");
+        }
+      } finally { await x.api.shutdown(); }
+    }
+  });
+
+  await test("shutdown during a child request preserves the split plan and completed siblings", async () => {
+    const calls = [];
+    let begun;
+    const running = new Promise(resolve => { begun = resolve; });
+    let second;
+    const x = await setup({ segmentSeconds: 4, transcribeImpl: async input => {
+      calls.push(input.segmentIndex);
+      if (input.segmentIndex === 0) throw Object.assign(new Error("truncated"), { code: "asr_output_truncated" });
+      if (input.segmentIndex === 1) return { text: "saved sibling" };
+      begun();
+      return new Promise((_, reject) => input.signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true }));
+    } });
+    try {
+      await x.api.start({ captureMode: "microphone" }); await x.add("microphone", RATE * 4);
+      await x.api.stop(); await running; await x.api.shutdown();
+      assert.deepEqual(calls, [0, 1, 2]);
+      const file = path.join(x.store.sessionsRoot, x.api.status().sessionId, "realtime", "state.json");
+      const checkpoint = JSON.parse(await fs.readFile(file));
+      assert.deepEqual(checkpoint.segments.map(s => s.status), ["completed", "pending"]);
+      second = createRealtimeMeetingService({ captureService: x.capture, defaultDirectory: path.join(x.root, "notes"),
+        transcribeImpl: async input => { calls.push(input.segmentIndex); return { text: "recovered tail" }; } });
+      await second.recover(); await second.retry(); await second.waitForIdle();
+      assert.deepEqual(calls, [0, 1, 2, 2]);
+      assert.equal(second.status().rawText, "saved sibling\n\nrecovered tail");
+    } finally { await (second || x.api).shutdown(); }
+  });
+
+  await test("late audio invalidates a truncated response before splitting or publishing stale PCM", async () => {
+    let begun, release;
+    const running = new Promise(resolve => { begun = resolve; });
+    const held = new Promise(resolve => { release = resolve; });
+    const calls = [];
+    const x = await setup({ segmentSeconds: 2, transcribeImpl: async input => {
+      calls.push(input.segmentIndex);
+      if (calls.length === 1) { begun(); await held; return { text: "STALE", finishReason: "length" }; }
+      return { text: `fresh ${input.segmentIndex}` };
+    } });
+    try {
+      await x.api.start(); await x.add("microphone", RATE * 4);
+      await x.api.flush(); await running;
+      await x.add("system", RATE * 4); await x.api.flush();
+      release(); await x.api.waitForIdle(); await x.api.stop(); await x.api.waitForIdle();
+      assert.deepEqual(calls, [0, 0, 1]);
+      assert.equal(x.api.status().rawText, "fresh 0\n\nfresh 1");
+      const file = path.join(x.store.sessionsRoot, x.api.status().sessionId, "realtime", "state.json");
+      assert.ok(JSON.parse(await fs.readFile(file)).segments.every(s => s.parentIndex == null));
+    } finally { release(); await x.api.shutdown(); }
+  });
+
   console.log(`${count} realtime meeting tests passed`);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

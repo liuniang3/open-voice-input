@@ -19,6 +19,15 @@ function wave(start, end) {
   return Buffer.concat([wavHeader(pcm.length, false), pcm]);
 }
 
+function quietWave(start, end, pauses = []) {
+  const pcm = Buffer.alloc((end - start) * 2, Buffer.from([0xb0, 0x04]));
+  for (const [a, b] of pauses) {
+    const from = Math.max(start, a), to = Math.min(end, b);
+    if (to > from) pcm.fill(0, (from - start) * 2, (to - start) * 2);
+  }
+  return Buffer.concat([wavHeader(pcm.length, false), pcm]);
+}
+
 function fixture(options = {}) {
   const state = options.state || {};
   const streams = [];
@@ -496,7 +505,7 @@ async function main() {
     let opened = 0; let openCount = 0; let maxOpen = 0; const states = [];
     const state = {};
     const api = createMeetingPreview({ state, paceMs: 0, reconnectDelayMs: 0,
-      readAudio: async (start, end) => Buffer.concat([wavHeader((end - start) * 2, false), Buffer.alloc((end - start) * 2)]),
+      readAudio: async (start, end) => quietWave(start, end),
       createStream: ({ onSentence }) => {
         const id = ++opened; openCount++; maxOpen = Math.max(maxOpen, openCount);
         let samples = 0; let closed = false;
@@ -588,6 +597,94 @@ async function main() {
     assert.equal(x.api.snapshot().pendingSegments, 0);
     assert.equal(x.streams.length, 2, "queued invalidated task waits for a new explicit retry");
     await x.api.shutdown();
+  });
+
+  await test("pause rotation releases read-ahead exactly once while the old receipt waits", async () => {
+    const receipt = deferred();
+    const nextAudio = deferred();
+    const readAudio = async (start, end) => quietWave(start, end, [[RATE * 2.7, RATE * 3.3]]);
+    const x = fixture({ windowSeconds: 4, pauseBeforeSeconds: 1, readAudio,
+      configure: (stream, n) => {
+        if (n === 1) {
+          const finish = stream.finish;
+          stream.finish = async () => { await receipt.promise; await finish(); };
+        } else {
+          const append = stream.appendPcm;
+          stream.appendPcm = async pcm => { await append(pcm); nextAudio.resolve(); };
+        }
+      } });
+    try {
+      x.api.kick(RATE * 5 + 37);
+      await nextAudio.promise;
+      const first = x.state.preview.windows[0];
+      assert.equal(first.endFrame, RATE * 3);
+      assert.equal(first.sentFrame, first.endFrame);
+      assert.equal(first.rotationBoundary, "pause");
+      assert.equal(x.state.preview.windows[1].startFrame, first.endFrame);
+      receipt.resolve();
+      await x.api.waitForIdle();
+      await x.api.drain(RATE * 5 + 37);
+      assert.deepEqual(Buffer.concat(x.streams.flatMap(s => s.chunks)), (await readAudio(0, RATE * 5 + 37)).subarray(44));
+      assert.equal(x.state.preview.cursorFrame, RATE * 5 + 37);
+      assert.equal(x.api.snapshot().failedSegments, 0);
+    } finally { receipt.resolve(); await x.api.shutdown(); }
+  });
+
+  await test("pause detector spans separate kicks and drain retains the exact short tail", async () => {
+    const readAudio = async (start, end) => quietWave(start, end, [[RATE * 2.85, RATE * 3.4]]);
+    const x = fixture({ windowSeconds: 4, pauseBeforeSeconds: 1, readAudio });
+    try {
+      for (const end of [RATE * 2.9, RATE * 3.05]) {
+        x.api.kick(end); await x.api.waitForIdle();
+        assert.equal(x.streams.length, 1, "a short quiet interval must not rotate");
+      }
+      x.api.kick(RATE * 3.4); await x.api.waitForIdle();
+      const cut = x.state.preview.windows[0].endFrame;
+      assert.ok(cut >= RATE * 3.15 && cut <= RATE * 3.4);
+      assert.equal(x.streams.length, 2);
+      await x.api.drain(RATE * 3.4 + 13);
+      assert.deepEqual(Buffer.concat(x.streams.flatMap(s => s.chunks)), (await readAudio(0, RATE * 3.4 + 13)).subarray(44));
+    } finally { await x.api.shutdown(); }
+  });
+
+  await test("failed pause window retries its sealed range without repartitioning or replaying success", async () => {
+    const readAudio = async (start, end) => quietWave(start, end, [[RATE * 2.7, RATE * 3.3]]);
+    const x = fixture({ windowSeconds: 4, pauseBeforeSeconds: 1, readAudio,
+      configure: (stream, n) => { if (n === 1) stream.finish = async () => { throw new Error("private response"); }; } });
+    try {
+      x.api.kick(RATE * 5); await x.api.waitForIdle(); await x.api.drain(RATE * 5);
+      assert.equal(x.api.snapshot().failedSegments, 1);
+      assert.deepEqual(x.state.preview.windows.map(w => [w.startFrame, w.endFrame]), [[0, RATE * 3], [RATE * 3, RATE * 5]]);
+      await x.api.retry();
+      assert.equal(x.streams.length, 3);
+      assert.deepEqual(Buffer.concat(x.streams[2].chunks), (await readAudio(0, RATE * 3)).subarray(44));
+      assert.equal(x.api.snapshot().failedSegments, 0);
+      assert(!JSON.stringify(x.state).includes("private response"));
+    } finally { await x.api.shutdown(); }
+  });
+
+  await test("default pause rotation starts at 9m30s and restart checkpoints the released suffix", async () => {
+    const state = {};
+    let sealed;
+    const x = fixture({ state, readAudio: async (start, end) => quietWave(start, end, [[0, RATE * 615]]),
+      onChange: () => {
+        if (!sealed && state.preview.windows.length === 1 && state.preview.windows[0].rotationBoundary === "pause") {
+          sealed = structuredClone(state);
+        }
+      } });
+    try {
+      x.api.kick(RATE * 615); await x.api.waitForIdle(); await x.api.drain(RATE * 615);
+      assert.deepEqual(state.preview.windows.map(w => [w.startFrame, w.endFrame]), [[0, RATE * 570], [RATE * 570, RATE * 615]]);
+      assert.equal(sealed.preview.cursorFrame, RATE * 570);
+      assert.equal(x.streams.flatMap(s => s.chunks).reduce((bytes, b) => bytes + b.length, 0), RATE * 615 * 2);
+      const restored = fixture({ state: sealed });
+      try {
+        await restored.api.recover(RATE * 615);
+        assert.equal(restored.streams.length, 0);
+        assert.deepEqual(sealed.preview.windows.map(w => [w.startFrame, w.endFrame]), [[0, RATE * 570], [RATE * 570, RATE * 615]]);
+        assert.equal(restored.api.snapshot().failedSegments, 2);
+      } finally { await restored.api.shutdown(); }
+    } finally { await x.api.shutdown(); }
   });
 
   console.log(`Meeting preview: ${count} tests passed.`);

@@ -1,6 +1,7 @@
 "use strict";
 
 const { RATE, readMixed } = require("./audio");
+const { createQuietDetector } = require("../audio-boundaries");
 
 const frame = value => Number.isSafeInteger(value) && value >= 0 ? value : 0;
 const failure = code => Object.assign(new Error(code), { code });
@@ -26,15 +27,16 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
   persist = () => {}, now = Date.now, sleep, chunkMs = 100, paceMs = 90,
   windowSeconds = 600, readSeconds = 40, connectTimeoutMs = 10000,
   finishTimeoutMs = 10000, appendTimeoutMs = 10000, drainTimeoutMs = 15000,
-  reconnectDelayMs = 2000 } = {}) {
+  reconnectDelayMs = 2000, pauseBeforeSeconds = 30 } = {}) {
   if (!state) throw failure("preview_dependencies_missing");
   if (![chunkMs, windowSeconds, readSeconds, connectTimeoutMs, finishTimeoutMs,
     appendTimeoutMs, drainTimeoutMs].every(value => Number.isFinite(value) && value > 0)
-    || ![paceMs, reconnectDelayMs].every(value => Number.isFinite(value) && value >= 0)) {
+    || ![paceMs, reconnectDelayMs, pauseBeforeSeconds].every(value => Number.isFinite(value) && value >= 0)) {
     throw failure("preview_limits_invalid");
   }
   readAudio ||= createArchiveReader(() => state.audioPaths || []);
   const limit = Math.max(1, Math.floor(Math.min(600, Math.max(0.001, windowSeconds)) * RATE));
+  const softLimit = limit - Math.floor(Math.min(pauseBeforeSeconds * RATE, limit / 2));
   const readLimit = Math.max(1, Math.floor(Math.min(40, Math.max(0.001, readSeconds)) * RATE));
   const chunkFrames = Math.max(1, Math.floor(Math.min(100, Math.max(0.001, chunkMs)) * RATE / 1000));
   const preview = state.preview ||= { version: 1, cursorFrame: 0, windows: [] };
@@ -127,7 +129,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
   }
 
   function extend(ctx) {
-    if (ctx.retry || ctx.dead) return;
+    if (ctx.retry || ctx.dead || ctx.rotationReady) return;
     ctx.window.endFrame = Math.max(ctx.window.endFrame, Math.min(available, ctx.window.startFrame + limit));
     cursor = Math.max(cursor, ctx.window.endFrame);
     preview.cursorFrame = cursor;
@@ -232,6 +234,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
 
   function context(w, retry = false) {
     return { window: w, retry, stagedSentences: retry ? [] : null,
+      quiet: createQuietDetector(RATE), rotationReady: false,
       dead: false, stream: null, controller: new AbortController() };
   }
 
@@ -239,7 +242,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
     const w = ctx.window;
     while (!ctx.dead) {
       extend(ctx);
-      if (w.sentFrame >= w.endFrame) return;
+      if (ctx.rotationReady || w.sentFrame >= w.endFrame) return;
       const end = Math.min(w.endFrame, w.sentFrame + readLimit);
       const start = w.sentFrame;
       const wav = await wait(ctx, () => readAudio(start, end), appendTimeoutMs, "preview_audio_timeout");
@@ -254,10 +257,22 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
         const next = Math.min(end, sent + chunkFrames);
         const count = next - sent;
         const started = now();
-        await wait(ctx, () => ctx.stream.appendPcm(pcm.subarray((sent - start) * 2, (next - start) * 2)),
+        const packet = pcm.subarray((sent - start) * 2, (next - start) * 2);
+        await wait(ctx, () => ctx.stream.appendPcm(packet),
           appendTimeoutMs, "preview_append_timeout");
         w.sentFrame = next;
         sent = next;
+        const quiet = ctx.quiet.append(packet);
+        if (!ctx.retry && !draining && pauseBeforeSeconds > 0 && quiet && next - w.startFrame >= softLimit) {
+          // Only cut at acknowledged PCM. Release the reserved/read-ahead suffix
+          // so the next task sends it exactly once, even after a restart.
+          ctx.rotationReady = true;
+          w.endFrame = next;
+          w.rotationBoundary = "pause";
+          cursor = next; preview.cursorFrame = cursor;
+          changed();
+          return;
+        }
         // Pacing is proportional for sub-100ms tails and accounts for backpressure.
         await pace(ctx, Math.max(0, paceMs * count / chunkFrames - (now() - started)));
       }
@@ -304,7 +319,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
           if (draining) {
             await finish(ctx);
             active = null;
-          } else if (ctx.window.endFrame - ctx.window.startFrame >= limit) {
+          } else if (ctx.rotationReady || ctx.window.endFrame - ctx.window.startFrame >= limit) {
             if (retiring.size) await Promise.all(retiring.values());
             if (ctx.dead || closed) continue;
             retire(ctx);

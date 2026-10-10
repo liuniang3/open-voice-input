@@ -8,6 +8,7 @@ const { createLinearPcm16Resampler } = require("./resample");
 const { mapArtifactTimeRange } = require("../archive/export-track-wav");
 const { QWEN_NO_BUCKET, MIB } = require("./constants");
 const { writeJsonAtomic } = require("./job-store");
+const { choosePauseFrame } = require("../audio-boundaries");
 
 const READ_FRAMES = 16 * 1024;
 
@@ -144,33 +145,6 @@ function assertSegmentPreflight(wavBytes, durationSeconds, limits = QWEN_NO_BUCK
     throw error;
   }
   return { uriChars, durationSeconds: dur };
-}
-
-/** Prefer a quiet 200ms window nearest the target; continuous speech falls back to a bounded cut. */
-function choosePauseFrame(pcm, sampleRate, targetFrame, minFrame, maxFrame) {
-  const frames = Math.floor(pcm.length / 2);
-  const window = Math.max(1, Math.round(sampleRate * 0.2));
-  const step = Math.max(1, Math.round(sampleRate * 0.02));
-  const low = Math.max(Math.ceil(window / 2), Math.ceil(minFrame));
-  const high = Math.min(frames - Math.ceil(window / 2), Math.floor(maxFrame));
-  let best = Math.max(1, Math.min(frames - 1, Math.round(targetFrame)));
-  let distance = Infinity;
-  // A prefix sum makes the moving RMS search linear in the small search range.
-  const start = Math.max(0, low - Math.ceil(window / 2));
-  const end = Math.min(frames, high + Math.ceil(window / 2));
-  const sums = new Float64Array(Math.max(0, end - start) + 1);
-  for (let i = start; i < end; i++) {
-    const v = pcm.readInt16LE(i * 2) / 32768;
-    sums[i - start + 1] = sums[i - start] + v * v;
-  }
-  for (let center = low; center <= high; center += step) {
-    const a = center - Math.floor(window / 2), b = a + window;
-    if (b > end) continue;
-    const rms = Math.sqrt((sums[b - start] - sums[a - start]) / window);
-    const d = Math.abs(center - targetFrame);
-    if (rms <= 0.006 && d < distance) { best = center; distance = d; }
-  }
-  return best;
 }
 
 async function prepareTrackSegments({

@@ -10,10 +10,14 @@ All notable changes to this project are documented here.
 - File ASR prefers pauses near the 180-second target and enforces actual encoded-size budgets before upload. Qwen's documented five-minute limit is distinct from the app's 210-second / 9 MB Base64 safety budget; MiMo has an independent policy without assuming an undocumented duration/output maximum.
 - On explicit output truncation or an oversized legacy upload, split only the affected audio range into shorter requests. Persist the child plan before sending, reuse successful checkpoints after cancellation/restart and preserve exact audio coverage, ordered text and the complete original recording.
 - Display completed file-transcription ranges while remaining requests run or fail. Show missing ranges, preserve reading position, refresh when returning from the summary view and label partial Markdown/text/Word/JSON exports. Incomplete or stale original transcripts cannot be used as complete summary sources.
+- Live Alibaba transcription now prefers a sustained 300ms quiet boundary in the last 30 seconds of each ten-minute connection window. Release unsent read-ahead to the next connection without replaying or skipping PCM; continuous speech still rotates at the hard limit. Existing failed-window replay retains its exact saved boundaries.
+- Live MiMo fallback transcription searches for a 200ms pause near each configured interval boundary without extending the interval. Explicit output truncation persists a bounded, recursive child-range plan before retrying shorter requests; completed siblings survive failures, cancellation and restart. Raw text remains chronological even when task IDs change, and truncated partial output is never published as complete.
 
 ### Validation
 
 - Regression coverage uses synthetic audio and simulated provider responses for pause boundaries, exact frame coverage, encoded-size limits, truncation recovery, cancellation, checkpoint reuse, legacy plans, partial exports and view updates. No real user recordings or provider credentials are included.
+- Live-meeting regressions cover pause detection across scheduler kicks, read-ahead handoff, waiting final receipts, the default 9m30s rotation threshold, restart coverage, durable child plans, minimum split limits, ordered source IDs and late-arriving audio invalidation.
+- Shared local regression suite passed: `68/68` scripts, including `32` live-preview cases and `28` live-meeting service cases. Native macOS recording, permissions and paste still require hardware validation.
 
 ## v0.4.19 - 2026-10-10
 

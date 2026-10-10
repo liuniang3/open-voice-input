@@ -16,6 +16,8 @@ const {
 } = require("./providers");
 const { RAW_TRANSCRIPT_REL } = require("../analysis/constants");
 const { workspaceSelection } = require("../../asr-defaults");
+const { choosePauseFrame, findQuietFrame } = require("../audio-boundaries");
+const { assertAsrComplete } = require("../../providers/asr/completion");
 
 function createRealtimeMeetingService({ captureService, getSettings = () => ({}), defaultDirectory,
   onUpdate = () => {}, transcribeImpl, cleanImpl, previewStreamImpl, reviewImpl, llmImpl, now = Date.now, pumpIntervalMs = 1000,
@@ -281,23 +283,38 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     }
   }
 
-  function queueSegments(final) {
+  function allocateSegment(startFrame, endFrame, extra = {}) {
+    state.nextSegmentIndex ??= state.segments.reduce((next, segment) => Math.max(next, segment.index + 1), 0);
+    return { index: state.nextSegmentIndex++, startFrame, endFrame,
+      status: "pending", attempts: 0, nextAttempt: 0, text: "", ...extra };
+  }
+
+  async function queueSegments(final) {
     if (isStreaming()) return;
-    const segmentFrames = boundedInterval(
+    const segmentFrames = Math.floor(boundedInterval(
       state.transcriptionIntervalSeconds,
       defaultTranscriptionIntervalSeconds,
       1,
       30
-    ) * RATE;
+    ) * RATE);
     const lengths = Object.values(state.tracks).map(t => t.frames);
     // A silent system endpoint may produce no buffers. Allow a two-second arrival margin,
     // then mix absent source samples as silence so microphone ASR continues to progress.
     const available = final ? Math.max(...lengths) : Math.max(Math.min(...lengths), Math.max(...lengths) - RATE * 2);
     let from = state.segments.at(-1)?.endFrame || 0;
     while (available - from >= segmentFrames || final && available > from) {
-      const end = Math.min(from + segmentFrames, available);
-      state.segments.push({ index: state.segments.length, startFrame: from, endFrame: end,
-        status: "pending", attempts: 0, nextAttempt: 0, text: "" });
+      let end = Math.min(from + segmentFrames, available);
+      // Do not wait beyond the configured interval or split the final short tail.
+      // A bounded lookbehind prefers pauses without cutting away any samples.
+      if (!final || available - from > segmentFrames) {
+        const lookbehind = Math.floor(Math.min(5 * RATE, segmentFrames * 0.3));
+        const start = Math.max(from, end - lookbehind - RATE / 10);
+        const wav = await readMixed(state.audioPaths, start, end);
+        const cut = findQuietFrame(wav.subarray(44), RATE, end - start,
+          end - lookbehind - start, end - start);
+        if (cut != null) end = start + cut;
+      }
+      state.segments.push(allocateSegment(from, end));
       from = end;
     }
   }
@@ -307,7 +324,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     if (!state) return;
     pumpPromise = (async () => {
       for (const track of Object.keys(state.tracks)) await ingestTrack(track, final);
-      queueSegments(final);
+      await queueSegments(final);
       await persist();
       if (isStreaming() && !final && !state.paused) preview?.kick(audioFrames());
       emit();
@@ -327,6 +344,25 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
     state.status = pending ? "stopping" : state.segments.some(s => s.status === "failed") ? "needs_retry" : "completed";
   }
 
+  function splitTruncatedSegment(segment, wav) {
+    const frames = segment.endFrame - segment.startFrame;
+    const minimum = RATE;
+    if (!wav || frames < minimum * 2 || (segment.splitDepth || 0) >= 5) return false;
+    const middle = Math.floor(frames / 2);
+    const search = Math.min(5 * RATE, Math.floor(frames / 4));
+    const cut = choosePauseFrame(wav.subarray(44), RATE, middle,
+      Math.max(minimum, middle - search), Math.min(frames - minimum, middle + search));
+    if (cut < minimum || frames - cut < minimum) return false;
+    const position = state.segments.indexOf(segment);
+    if (position < 0) return false;
+    const extra = { parentIndex: segment.index, splitDepth: (segment.splitDepth || 0) + 1,
+      revision: segment.revision || 0 };
+    state.segments.splice(position, 1,
+      allocateSegment(segment.startFrame, segment.startFrame + cut, extra),
+      allocateSegment(segment.startFrame + cut, segment.endFrame, extra));
+    return true;
+  }
+
   function runWorker() {
     if (isStreaming()) return;
     if (workerPromise || !state || closing || !request) return;
@@ -342,8 +378,9 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         emit();
         controller = new AbortController();
         const revision = segment.revision || 0;
+        let wav;
         try {
-          const wav = await readMixed(current.audioPaths, segment.startFrame, segment.endFrame);
+          wav = await readMixed(current.audioPaths, segment.startFrame, segment.endFrame);
           let energy = 0;
           for (let i = 44; i < wav.length; i += 2) energy += Math.abs(wav.readInt16LE(i));
           const result = energy === 0 ? { text: "" } : await request({
@@ -351,15 +388,30 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
             signal: controller.signal, segmentIndex: segment.index
           });
           if (closing) throw new Error("shutdown");
+          if (result && typeof result === "object" && (result.finishReason != null
+            || result.raw?.finishReason != null || result.completed != null)) assertAsrComplete(result);
           const text = typeof result === "string" ? result : result?.text;
           if (typeof text !== "string" || text.length > 30000) throw new Error("live_response_invalid");
           segment.text = revision === (segment.revision || 0) ? text.trim() : "";
           segment.status = revision === (segment.revision || 0) ? "completed" : "pending";
+          delete segment.error;
           if (current.error?.code === "live_asr_failed") current.error = null;
         } catch (error) {
-          segment.status = closing || segment.attempts < maxAttempts ? "pending" : "failed";
-          segment.nextAttempt = now() + retryBaseMs * 2 ** Math.min(segment.attempts - 1, 5);
-          current.error = safeError(error, "live_asr_failed");
+          if (!closing && revision !== (segment.revision || 0)) {
+            segment.status = "pending"; segment.attempts = 0; segment.nextAttempt = 0;
+          } else if (!closing && ["asr_output_truncated", "response_output_limit"].includes(error?.code)) {
+            // Replace just the failed parent with contiguous children. The existing
+            // persist barrier below commits this plan before any child request runs.
+            if (!splitTruncatedSegment(segment, wav)) {
+              segment.text = ""; segment.status = "failed";
+              segment.error = { code: "asr_output_truncated" };
+              current.error = safeError(error, "live_asr_failed");
+            }
+          } else {
+            segment.status = closing || segment.attempts < maxAttempts ? "pending" : "failed";
+            segment.nextAttempt = now() + retryBaseMs * 2 ** Math.min(segment.attempts - 1, 5);
+            current.error = safeError(error, "live_asr_failed");
+          }
         } finally { controller = null; }
         settleStatus();
         await persist();
@@ -444,7 +496,7 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
           300
         ),
         captureMode: ["microphone", "system"].includes(options.captureMode) ? options.captureMode : "dual",
-        markdownPath, audioPaths: [], tracks: {}, segments: [], error: null, cleanupStatus: "idle" };
+        markdownPath, audioPaths: [], tracks: {}, segments: [], nextSegmentIndex: 0, error: null, cleanupStatus: "idle" };
       for (const track of state.captureMode === "dual" ? ["microphone", "system"] : [state.captureMode]) {
         const file = path.join(sessionDir, "realtime", `${track}-complete.wav`);
         await ensureWave(file);
