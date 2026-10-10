@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][string]$HelperPath)
+param([string]$HelperPath, [string]$ForegroundHandle)
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
 using System;
@@ -10,15 +10,32 @@ public static class InputFieldFixture {
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, IntPtr pid);
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint first, uint second, bool attach);
+    [DllImport("user32.dll")] public static extern bool PeekMessage(IntPtr msg, IntPtr hwnd, uint first, uint last, uint flags);
     public static void Activate(IntPtr hwnd) {
+        IntPtr msg = Marshal.AllocHGlobal(64);
+        try { PeekMessage(msg, IntPtr.Zero, 0, 0, 0); }
+        finally { Marshal.FreeHGlobal(msg); }
         uint foreground = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
         uint current = GetCurrentThreadId();
+        uint target = GetWindowThreadProcessId(hwnd, IntPtr.Zero);
         bool attached = foreground != current && AttachThreadInput(foreground, current, true);
+        bool targetAttached = target != current && target != foreground && AttachThreadInput(target, current, true);
         try { SetForegroundWindow(hwnd); }
-        finally { if (attached) AttachThreadInput(foreground, current, false); }
+        finally {
+            if (targetAttached) AttachThreadInput(target, current, false);
+            if (attached) AttachThreadInput(foreground, current, false);
+        }
     }
 }
 '@
+if ($ForegroundHandle) {
+    if ($ForegroundHandle -notmatch '^[1-9]\d{0,19}$') { throw 'Invalid synthetic target handle' }
+    $target = [IntPtr]([long]$ForegroundHandle)
+    [InputFieldFixture]::Activate($target)
+    if ([InputFieldFixture]::GetForegroundWindow() -ne $target) { throw 'Synthetic target could not take focus' }
+    return
+}
+if (-not $HelperPath) { throw 'HelperPath is required for the text-box test' }
 [void][InputFieldFixture]::SetProcessDpiAwarenessContext([IntPtr](-4))
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing

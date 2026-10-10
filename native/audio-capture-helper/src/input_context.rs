@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use windows::Win32::Foundation::{BOOL, POINT, RECT};
+use windows::Win32::Foundation::{BOOL, HWND, POINT, RECT};
 use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
 use windows::Win32::System::Ole::{SafeArrayDestroy, SafeArrayGetElement, SafeArrayGetLBound, SafeArrayGetUBound};
@@ -35,10 +35,26 @@ unsafe fn range_rect(range: &IUIAutomationTextRange) -> Option<RECT> {
     result
 }
 
-unsafe fn automation_rect(pid: u32) -> Option<(RECT, &'static str)> {
+unsafe fn automation_rect(hwnd: HWND) -> Option<(RECT, &'static str)> {
     let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
     let focused = automation.GetFocusedElement().ok()?;
-    if focused.CurrentProcessId().ok()? != pid as i32 || focused.CurrentIsPassword().ok()?.as_bool() ||
+    // Browser accessibility elements may belong to a renderer PID, not the foreground host PID.
+    let walker = automation.RawViewWalker().ok()?;
+    let mut ancestor = focused.clone();
+    let mut same_window = false;
+    for _ in 0..24 {
+        if let Ok(native) = ancestor.CurrentNativeWindowHandle() {
+            if !native.is_invalid() && GetAncestor(native, GA_ROOT) == GetAncestor(hwnd, GA_ROOT) {
+                same_window = true;
+                break;
+            }
+        }
+        match walker.GetParentElement(&ancestor) {
+            Ok(parent) => ancestor = parent,
+            Err(_) => break,
+        }
+    }
+    if !same_window || focused.CurrentIsPassword().ok()?.as_bool() ||
         focused.CurrentIsOffscreen().ok()?.as_bool() { return None; }
     if let Ok(pattern) = focused.GetCurrentPatternAs::<IUIAutomationTextPattern2>(UIA_TextPattern2Id) {
         let mut active = BOOL(0);
@@ -92,7 +108,14 @@ pub fn print_context() {
             } else { None }
         } else { None };
         let anchor = caret.or_else(|| {
-            if crate::capture::init_com().is_ok() { automation_rect(pid) } else { None }
+            if crate::capture::init_com().is_err() { return None; }
+            // Chromium may enable its accessibility tree only after the first UIA query.
+            for attempt in 0..4 {
+                if GetForegroundWindow() != hwnd { return None; }
+                if let Some(anchor) = automation_rect(hwnd) { return Some(anchor); }
+                if attempt < 3 { std::thread::sleep(std::time::Duration::from_millis(50)); }
+            }
+            None
         });
         if GetForegroundWindow() == hwnd {
             if let Some((rect, source)) = anchor {

@@ -67,4 +67,62 @@ async function run() {
   }
 }
 
-run().catch(error => { console.error(error); process.exitCode = 1; });
+async function browserInputTest() {
+  if (process.platform !== "win32") return;
+  const { _electron } = require(process.env.PLAYWRIGHT_MODULE_PATH || "playwright");
+  const sandbox = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "ovi-input-anchor-"));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+    !/KEY|TOKEN|SECRET|MIMO|QWEN|DASHSCOPE|FUN_ASR|CLEANER|OSS|OVI_/i.test(key)));
+  const application = await _electron.launch({ executablePath: require("electron"),
+    args: [__filename, "--electron-input-fixture", sandbox], env });
+  try {
+    const page = await application.firstWindow();
+    await page.locator("textarea").focus();
+    await application.evaluate(({ BrowserWindow }) => { const win = BrowserWindow.getAllWindows()[0]; win.show(); win.focus(); });
+    await page.waitForFunction(() => document.activeElement?.tagName === "TEXTAREA" && document.hasFocus());
+    const result = await application.evaluate(async ({ BrowserWindow, screen }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      const { readInputContext, dictationBounds, helperPath } = globalThis.inputFixture;
+      const handle = win.getNativeWindowHandle().readBigUInt64LE().toString();
+      await globalThis.inputFixture.focus(handle);
+      const start = Date.now();
+      const context = await readInputContext({ helperPath });
+      const input = await win.webContents.executeJavaScript('(() => { const r = document.querySelector("textarea").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()');
+      const rect = context?.rect ? screen.screenToDipRect(null, { ...context.rect,
+        x: Math.round(context.rect.x), y: Math.round(context.rect.y),
+        width: Math.max(1, Math.round(context.rect.width)), height: Math.round(context.rect.height) }) : null;
+      const bounds = win.getContentBounds();
+      return { targetMatch: context?.target === handle, contextFound: Boolean(context),
+        source: context?.source, elapsed: Date.now() - start, hostFocused: win.isFocused(),
+        rect, input: { ...input, x: input.x + bounds.x, y: input.y + bounds.y },
+        popup: dictationBounds(context, { width: 340, height: 116 }, screen) };
+    });
+    assert.equal(result.targetMatch, true, `Synthetic input must retain foreground focus: ${JSON.stringify(result)}`);
+    assert.ok(["caret", "input"].includes(result.source), `Chromium must expose input geometry: ${JSON.stringify(result)}`);
+    assert.ok(result.rect.x >= result.input.x - 2 && result.rect.x <= result.input.x + result.input.width + 2);
+    assert.ok(result.rect.y >= result.input.y - 2 && result.rect.y <= result.input.y + result.input.height + 2);
+    console.log(`PASS Chromium accessibility input placement and preserved target (${result.source}, ${result.elapsed}ms); synthetic field only`);
+  } finally { await application.close(); }
+}
+
+if (process.versions.electron && process.argv.includes("--electron-input-fixture")) {
+  const { app, BrowserWindow } = require("electron");
+  app.setPath("userData", process.argv[process.argv.indexOf("--electron-input-fixture") + 1]);
+  app.whenReady().then(async () => {
+    globalThis.inputFixture = { readInputContext, dictationBounds,
+      helperPath: resolveHelperPath({ platform: process.platform, appRoot: path.join(__dirname, "..") }),
+      focus: handle => new Promise((resolve, reject) => {
+        require("node:child_process").execFile("powershell.exe", ["-NoProfile", "-File",
+          path.join(__dirname, "fixtures/dictation-input-field.ps1"), "-ForegroundHandle", handle],
+        { windowsHide: true, timeout: 3000, maxBuffer: 8192 }, error => error ? reject(error) : resolve());
+      }) };
+    const win = new BrowserWindow({ width: 720, height: 460, frame: false, backgroundColor: "#ffffff",
+      webPreferences: { sandbox: true } });
+    win.setAlwaysOnTop(true);
+    await win.loadURL("data:text/html," + encodeURIComponent('<html lang="en"><title>Input geometry test</title><body style="margin:0"><textarea aria-label="Synthetic input" style="position:absolute;left:120px;top:160px;width:400px;height:140px">Synthetic input only</textarea><script>document.querySelector("textarea").focus();document.querySelector("textarea").setSelectionRange(6,6)</script></body></html>'));
+    win.show(); win.focus();
+  }).catch(() => app.exit(1));
+} else if (require.main === module) (async () => {
+  await run();
+  if (process.argv.includes("--electron")) await browserInputTest();
+})().catch(error => { console.error(error); process.exitCode = 1; });
