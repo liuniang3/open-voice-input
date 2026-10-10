@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented here.
 
+## v0.4.19 - 2026-10-10
+
+### Changed
+
+- File transcription and live meetings now have independent, collapsible history and vertical transcription-model settings sidebars. Collapse arrows point left; drag the sidebar edge to resize or adjust it with the keyboard. Remember widths and visibility locally, while reserving usable space for the results. Narrow windows use one dismissible drawer at a time; floating meetings hide both sidebars.
+- Rename file settings to transcription-model settings. Expand model settings on workspace entry or model selection when local ASR credentials, endpoint or model compatibility checks fail. Show a specific configuration hint without network requests or exposing credentials; routine status updates respect manual collapse.
+- Place live-meeting history and model-sidebar controls at the left edge of the main header, next to the sidebars they control; omit the duplicate meeting title in the detailed workspace. Keep the session title and window controls in the floating view.
+- Group file transcription and summary actions into a compact horizontal toolbar on wide workspaces, with a subtle separator and adjacent status, labelled model selection, MiMo review and action. Hide unavailable retry/cancel controls and the completed transcription's disabled start button; stack complete workflow groups in narrow reading areas without spreading controls across empty space.
+- Make file-workspace status feedback more visible with a full-width tinted strip, stronger text and an information/loading icon. Distinguish processing, success, warning and failure; wrap long messages and honor reduced motion.
+- New file imports default to their own filename instead of inheriting a selected history record's title. Keep optional import titles separate from history readback, consume each title after import acceptance and preserve the draft when selection is cancelled or fails.
+- File and live-meeting transcript/summary panes grow and shrink with the workspace window. Remove independent height handles and ignore old saved pixel heights; long content scrolls inside the reading area. Preserve the floating meeting's draft/history split control.
+- Move live-meeting setup and save options into the vertical model sidebar. Keep the floating-window entry to the left above the transcript and Markdown opening beside refresh/retry. Name complete microphone and system recordings by their source instead of audio numbers.
+
+### Verification
+
+- Shared local regression suite passed: `67/67` scripts. Browser checks cover Windows/macOS interface styles, sidebar persistence, history selection, narrow drawers, adaptive reading and summaries continuing through navigation.
+- Secret scan and diff checks passed. Release CI builds and tests Windows x64, macOS Intel x64 and Apple Silicon arm64. Native macOS capture, permissions, paste and appearance still require hardware validation.
+
 ## v0.4.18 - 2026-10-08
 
 ### Changed

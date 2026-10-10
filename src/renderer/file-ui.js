@@ -39,6 +39,57 @@
   let openPromise = null;
   let summaryRevision = 0;
   let unsubscribeSummary = null;
+  const sidebarPreferenceKey = "ovi-file-sidebars";
+
+  function syncSidebars() {
+    const details = $("fileSetupDetails");
+    const history = $("fileHistorySidebar");
+    if (!details || !history) return;
+    if (window.innerWidth <= 900 && details.open) history.hidden = true;
+    $("fileSetupToggle")?.setAttribute("aria-expanded", String(details.open));
+    $("fileHistoryToggle")?.setAttribute("aria-expanded", String(!history.hidden));
+    const backdrop = $("fileSidebarBackdrop");
+    if (backdrop) backdrop.hidden = window.innerWidth > 900 || (!details.open && history.hidden);
+  }
+
+  function saveSidebars() {
+    try {
+      window.localStorage.setItem(sidebarPreferenceKey, JSON.stringify({
+        setup: Boolean($("fileSetupDetails")?.open), history: !$("fileHistorySidebar")?.hidden
+      }));
+    } catch { /* Optional local view preference. */ }
+  }
+
+  function setSidebar(kind, open, focus = false) {
+    const details = $("fileSetupDetails");
+    const history = $("fileHistorySidebar");
+    if (!details || !history) return;
+    if (kind === "setup") {
+      details.open = open;
+      if (open && window.innerWidth <= 900) history.hidden = true;
+    } else {
+      history.hidden = !open;
+      if (open && window.innerWidth <= 900) details.open = false;
+    }
+    syncSidebars(); saveSidebars();
+    if (focus) {
+      let target = kind === "setup" ? "fileSetupToggle" : "fileHistoryToggle";
+      if (open) target = kind === "setup" ? "fileAsrProviderSelect" : "fileSessionSearch";
+      $(target)?.focus?.();
+    }
+  }
+
+  function restoreSidebars() {
+    const details = $("fileSetupDetails");
+    const history = $("fileHistorySidebar");
+    if (!details || !history) return;
+    let preference;
+    try { preference = JSON.parse(window.localStorage.getItem(sidebarPreferenceKey)); } catch { /* Defaults also work without storage. */ }
+    details.open = typeof preference?.setup === "boolean" ? preference.setup : true;
+    history.hidden = preference?.history !== true;
+    if (window.innerWidth <= 900 && !history.hidden) details.open = false;
+    syncSidebars();
+  }
 
   const FILE_ASR_MODELS = [
     { provider: "mimo", value: "mimo-v2.5-asr", label: "MiMo V2.5 ASR" },
@@ -113,7 +164,15 @@
       e.customModel.hidden = preset !== "__custom__";
       e.customModel.value = preset === "__custom__" ? model : "";
     }
-    if (e.configStatus) e.configStatus.textContent = `${provider} / ${model}`;
+    const readiness = asrDefaults.workspaceReadiness(state.settings, "file");
+    if (e.configStatus) {
+      e.configStatus.textContent = [`${provider} / ${model}`, readiness.message].filter(Boolean).join(" · ");
+      e.configStatus.dataset.ready = String(readiness.ready);
+    }
+  }
+
+  function expandUnconfiguredSetup() {
+    if (!asrDefaults.workspaceReadiness(state.settings, "file").ready) setSidebar("setup", true);
   }
 
   async function saveFileAsrSelection() {
@@ -127,6 +186,7 @@
       meetingFileAsrModel: model
     })) || { ...state.settings, meetingFileAsrFollowDictation: followsDictation, meetingFileAsrProvider: provider, meetingFileAsrModel: model };
     renderFileAsrSelector();
+    expandUnconfiguredSetup();
     renderSelected();
     setHint(`文件 ASR 已切换为 ${provider} / ${model}。`);
     return { provider, model };
@@ -143,9 +203,13 @@
     return channel?.isCurrent?.(token) && (!sessionId || sessionId === state.selectedId);
   }
 
-  function setHint(text) {
+  function setHint(text, kind = "info") {
     const el = els().hint;
-    if (el) el.textContent = String(text || "");
+    if (el) {
+      el.textContent = String(text || "");
+      el.dataset.kind = kind;
+      el.setAttribute("aria-busy", String(kind === "processing"));
+    }
   }
 
   function setPill(el, kind, text) {
@@ -207,7 +271,6 @@
     state.importSessionId = null;
     state.importBusy = false;
     const e = els();
-    if (e.title) e.title.value = "";
     if (e.name) e.name.textContent = "还没有选择文件";
     if (e.meta) e.meta.textContent = "支持音频和视频；视频会先提取音轨。";
     if (e.model) e.model.textContent = "当前 ASR：—";
@@ -251,7 +314,9 @@
       meta.textContent = [process, row.updatedAt || row.createdAt || ""].filter(Boolean).join(" · ");
       button.appendChild(title);
       button.appendChild(meta);
-      button.addEventListener("click", () => selectSession(row.id).catch((error) => setHint(error.message)));
+      button.addEventListener("click", () => selectSession(row.id).then(() => {
+        if (window.innerWidth <= 900) setSidebar("history", false, true);
+      }).catch((error) => setHint(error.message, "error")));
       e.list.appendChild(button);
     }
   }
@@ -308,12 +373,12 @@
       return;
     }
     const fileName = row.importMeta?.sourceFileName || row.title || row.id;
-    if (e.name) e.name.textContent = row.title || fileName;
-    if (e.title) e.title.value = row.title && row.title !== fileName ? row.title : "";
+    if (e.name) e.name.title = e.name.textContent = row.title || fileName;
     if (e.meta) {
       const kind = row.importMeta?.mediaKind || "音频";
       const status = row.status === "importing" ? "正在导入" : row.status === "stopped" ? "已导入" : row.status || "待处理";
       e.meta.textContent = `${fileName} · ${kind} · ${status}`;
+      e.meta.title = e.meta.textContent;
     }
     const { provider, modelId: model } = asrDefaults.workspaceSelection(state.settings, "file");
     if (e.model) e.model.textContent = `当前 ASR：${provider} / ${model}`;
@@ -343,32 +408,53 @@
     if (e.setupDetails) {
       // Collapse setup once when processing starts so results keep the space.
       if (busyNow && !state.setupCollapsedOnBusy) {
-        e.setupDetails.open = false;
+        setSidebar("setup", false);
         state.setupCollapsedOnBusy = true;
       }
       if (!busyNow) state.setupCollapsedOnBusy = false;
     }
-    if (e.processStart) e.processStart.disabled = !canStart;
-    if (e.processRetry) e.processRetry.disabled = !canRetry;
-    if (e.processCancel) e.processCancel.disabled = !canCancel;
-    if (e.analysisStart) e.analysisStart.disabled = !canAnalyze;
+    if (e.processStart) {
+      e.processStart.disabled = !canStart;
+      e.processStart.hidden = proc === "completed" || processRunning || canRetry;
+    }
+    if (e.processRetry) {
+      e.processRetry.disabled = !canRetry;
+      e.processRetry.hidden = !canRetry;
+    }
+    if (e.processCancel) {
+      e.processCancel.disabled = !canCancel;
+      e.processCancel.hidden = !canCancel;
+    }
     if (e.analysisStart) {
+      e.analysisStart.disabled = !canAnalyze;
+      e.analysisStart.hidden = analysisRunning || canRetryAnalysis;
       e.analysisStart.textContent = ana === "completed" ? "重新生成摘要" : "生成摘要";
     }
-    if (e.analysisRetry) e.analysisRetry.disabled = !canRetryAnalysis;
-    if (e.analysisCancel) e.analysisCancel.disabled = !canCancelAnalysis;
-
-    const processLabel = ui.processStageLabel?.(proc, state.process) || (proc === "idle" ? "尚未开始" : proc);
+    if (e.analysisRetry) {
+      e.analysisRetry.disabled = !canRetryAnalysis;
+      e.analysisRetry.hidden = !canRetryAnalysis;
+    }
+    if (e.analysisCancel) {
+      e.analysisCancel.disabled = !canCancelAnalysis;
+      e.analysisCancel.hidden = !canCancelAnalysis;
+    }
+    const processLabel = proc === "completed" ? "已完成"
+      : ui.processStageLabel?.(proc, state.process) || (proc === "idle" ? "尚未开始" : proc);
     const processKind = proc === "completed" ? "ok" : proc === "failed" ? "error" : processRunning ? "processing" : "idle";
     setPill(e.importStatus, state.importBusy ? "processing" : row ? (hasArchive(row) ? "ok" : "warn") : "idle", state.importBusy ? "导入中" : row ? (hasArchive(row) ? "已导入" : "待导入") : "未选择");
     if (e.processLabel) e.processLabel.textContent = processLabel;
-    if (e.processProgress) e.processProgress.textContent = ui.processProgressText?.(state.process) || "—";
+    if (e.processProgress) {
+      const progress = ui.processProgressText?.(state.process) || "";
+      e.processProgress.textContent = progress;
+      e.processProgress.hidden = !progress || progress === "—";
+    }
     let analysisLabel = ana === "running" ? ui.summaryProgressText?.(state.summaryJob?.progress) || "正在生成摘要…"
-      : ana === "completed" ? (state.summaryJob?.legacy ? "历史摘要（只读）" : "摘要已生成")
+      : ana === "cancelling" ? "正在取消…"
+      : ana === "completed" ? (state.summaryJob?.legacy ? "历史摘要（只读）" : "已生成")
       : ana === "failed" ? "摘要失败，原文保留"
       : ana === "needs_retry" ? "摘要未完成，可重试"
       : ana === "cancelled" ? "摘要已取消"
-      : "尚未开始";
+      : proc === "completed" ? "未生成" : "待转写完成";
     const reason = ui.summaryErrorText?.(state.summaryJob?.error?.code);
     if (reason && ["failed", "needs_retry"].includes(ana)) analysisLabel += ` · ${reason}`;
     if (e.analysisLabel) e.analysisLabel.textContent = analysisLabel;
@@ -386,6 +472,7 @@
     }
     renderSummaryModelOptions();
     renderFileAsrSelector();
+    expandUnconfiguredSetup();
     renderSelected();
   }
 
@@ -457,7 +544,7 @@
         }
         return null;
       })
-      .catch((error) => setHint(error.message || "摘要读取失败，请重试。"));
+      .catch((error) => setHint(error.message || "摘要读取失败，请重试。", "error"));
     if (state.selectedId) ensurePolling();
   }
 
@@ -465,9 +552,10 @@
     if (state.importBusy) return;
     state.importBusy = true;
     renderControls();
-    setHint("选择音频或视频文件…");
+    setHint("选择音频或视频文件…", "processing");
     try {
-      const title = els().title?.value?.trim() || "";
+      const titleInput = els().title;
+      const title = titleInput?.value?.trim() || "";
       const api = window.mimoInput.fileImportMedia || window.mimoInput.meetingImportMedia;
       const res = await api({ title, track: "microphone", role: "self" });
       if (res?.cancelled) {
@@ -475,6 +563,8 @@
         return;
       }
       if (!res?.ok) throw new Error(res?.error?.message || "导入启动失败");
+      // Consume only this import's draft, preserving edits made while choosing a file.
+      if (titleInput && titleInput.value.trim() === title) titleInput.value = "";
       await refreshSessions();
       if (res.sessionId) {
         state.selectedId = res.sessionId;
@@ -502,13 +592,14 @@
         if (status === "stopped") {
           await refreshSessions();
           if (state.selectedId === sessionId) await selectSession(sessionId);
-          setHint("文件已导入，可以开始转写。");
+          setHint("文件已导入，可以开始转写。", "success");
           return;
         }
         if (["import_failed", "import_cancelled", "import_interrupted"].includes(status)) {
           await refreshSessions();
           if (state.selectedId === sessionId) renderSelected();
-          setHint(res?.import?.message || (status === "import_cancelled" ? "文件导入已取消。" : "文件导入失败，请重试。"));
+          setHint(res?.import?.message || (status === "import_cancelled" ? "文件导入已取消。" : "文件导入失败，请重试。"),
+            status === "import_cancelled" ? "warning" : "error");
           return;
         }
         if (i % 2 === 0) {
@@ -517,11 +608,11 @@
           const progress = res?.progress?.total > 0
             ? ` ${Math.min(100, Math.round((100 * (res.progress.bytes || 0)) / res.progress.total))}%`
             : "";
-          setHint(`${phaseLabel}${progress}…`);
+          setHint(`${phaseLabel}${progress}…`, "processing");
         }
         await new Promise((resolve) => setTimeout(resolve, 400));
       }
-      setHint("文件导入超时，请刷新列表后重试。");
+      setHint("文件导入超时，请刷新列表后重试。", "error");
     } finally {
       if (state.importSessionId === sessionId) state.importSessionId = null;
       state.importBusy = false;
@@ -534,7 +625,7 @@
     if (!sessionId) return;
     const api = window.mimoInput.fileImportCancel || window.mimoInput.meetingImportCancel;
     const res = await api({ sessionId });
-    setHint(res?.cancelled ? "正在取消文件导入…" : "当前没有正在导入的文件。");
+    setHint(res?.cancelled ? "正在取消文件导入…" : "当前没有正在导入的文件。", res?.cancelled ? "processing" : "info");
   }
 
   async function processStart({ retry = false } = {}) {
@@ -561,7 +652,7 @@
     } catch (error) {
       state.process = { stage: "failed", status: "failed", lastError: { message: error.message || String(error) } };
       renderControls();
-      setHint(error.message || String(error));
+      setHint(error.message || String(error), "error");
       throw error;
     }
   }
@@ -602,16 +693,16 @@
       renderControls();
       if (state.summaryJob.status !== "running" && state.summaryJob.summary) {
         await loadResult("summary", { expectedSessionId: sessionId });
-        setHint("摘要已完成。");
+        setHint("摘要已完成。", "success");
       } else if (state.summaryJob.status !== "running") {
-        setHint("摘要未完成，可重试。");
+        setHint("摘要未完成，可重试。", "warning");
       }
       ensurePolling();
     } catch (error) {
       if (!accept(channels.analysis, token, sessionId) || atSummaryRevision !== summaryRevision) return;
       acceptSummaryJob({ sessionId, status: "failed" });
       renderControls();
-      setHint(error.message || String(error));
+      setHint(error.message || String(error), "error");
       throw error;
     }
   }
@@ -775,7 +866,7 @@
     });
     if (res?.cancelled) return;
     if (!res?.ok) throw new Error(res?.error?.message || "导出失败");
-    setHint(`已导出 ${res.files?.join("、") || "文件结果"}。`);
+    setHint(`已导出 ${res.files?.join("、") || "文件结果"}。`, "success");
   }
 
   async function openWorkspace({ fromModeEvent = false, sessionId = null } = {}) {
@@ -802,6 +893,27 @@
   }
 
   function bind() {
+    restoreSidebars();
+    $("fileHistoryToggle")?.addEventListener("click", () => setSidebar("history", Boolean($("fileHistorySidebar")?.hidden), true));
+    $("fileSetupToggle")?.addEventListener("click", () => setSidebar("setup", !$("fileSetupDetails")?.open, true));
+    $("fileHistoryClose")?.addEventListener("click", () => setSidebar("history", false, true));
+    $("fileSetupClose")?.addEventListener("click", event => {
+      event.preventDefault(); setSidebar("setup", false, true);
+    });
+    $("fileSetupDetails")?.addEventListener("toggle", () => {
+      syncSidebars(); saveSidebars();
+      if (!$("fileSetupDetails").open && $("fileSetupSidebar")?.contains?.(document.activeElement)) $("fileSetupToggle")?.focus?.();
+    });
+    const closeSidebars = () => { setSidebar("setup", false); setSidebar("history", false); $("fileSetupToggle")?.focus?.(); };
+    $("fileSidebarBackdrop")?.addEventListener("click", closeSidebars);
+    window.addEventListener("resize", () => {
+      if (document.body.classList.contains("file-mode")) syncSidebars();
+    });
+    window.addEventListener("keydown", event => {
+      if (event.key === "Escape" && document.body.classList.contains("file-mode") && $("fileSidebarBackdrop")?.hidden === false) {
+        event.preventDefault(); closeSidebars();
+      }
+    });
     unsubscribeSummary = window.mimoInput.onMeetingFileSummaryUpdate?.((job) => {
       if (!acceptSummaryJob(job)) return;
       // Update state even off-screen, without switching views or starting a job.
@@ -818,17 +930,17 @@
       unsubscribeSummary = null;
       stopPolling();
     });
-    $("fileBtn")?.addEventListener("click", () => openWorkspace().catch((error) => setHint(error.message)));
-    $("fileChooseBtn")?.addEventListener("click", () => importFile().catch((error) => setHint(error.message)));
-    $("fileChooseInlineBtn")?.addEventListener("click", () => importFile().catch((error) => setHint(error.message)));
-    $("fileRefreshBtn")?.addEventListener("click", () => refreshSessions().catch((error) => setHint(error.message)));
+    $("fileBtn")?.addEventListener("click", () => openWorkspace().catch((error) => setHint(error.message, "error")));
+    $("fileChooseBtn")?.addEventListener("click", () => importFile().catch((error) => setHint(error.message, "error")));
+    $("fileChooseInlineBtn")?.addEventListener("click", () => importFile().catch((error) => setHint(error.message, "error")));
+    $("fileRefreshBtn")?.addEventListener("click", () => refreshSessions().catch((error) => setHint(error.message, "error")));
     $("fileSessionSearch")?.addEventListener("input", renderList);
     $("fileProcessStartBtn")?.addEventListener("click", () => processStart().catch(() => {}));
     $("fileProcessRetryBtn")?.addEventListener("click", () => processStart({ retry: true }).catch(() => {}));
-    $("fileProcessCancelBtn")?.addEventListener("click", () => processCancel().catch((error) => setHint(error.message)));
+    $("fileProcessCancelBtn")?.addEventListener("click", () => processCancel().catch((error) => setHint(error.message, "error")));
     $("fileAnalysisStartBtn")?.addEventListener("click", () => summaryStart().catch(() => {}));
     $("fileAnalysisRetryBtn")?.addEventListener("click", () => summaryStart({ retry: true }).catch(() => {}));
-    $("fileAnalysisCancelBtn")?.addEventListener("click", () => summaryCancel().catch((error) => setHint(error.message)));
+    $("fileAnalysisCancelBtn")?.addEventListener("click", () => summaryCancel().catch((error) => setHint(error.message, "error")));
     $("fileAnalysisMimoReview")?.addEventListener("change", renderControls);
     $("fileSummaryModelSelect")?.addEventListener("change", () => {
       state.summaryModel = String(els().summaryModelSelect?.value || "").trim();
@@ -838,14 +950,14 @@
       const provider = els().providerSelect.value;
       if (provider === asrDefaults.FOLLOW_DICTATION) {
         els().modelSelect.value = asrDefaults.FOLLOW_DICTATION;
-        saveFileAsrSelection().catch((error) => setHint(error.message));
+        saveFileAsrSelection().catch((error) => setHint(error.message, "error"));
         return;
       }
       const current = currentFileAsrModel();
       const compatible = FILE_ASR_MODELS.find((item) => item.provider === provider && (provider === "mimo" || item.value === current));
       if (els().modelSelect) els().modelSelect.value = compatible?.value || (provider === "qwen3-asr" ? "qwen3-asr-flash" : "mimo-v2.5-asr");
       els().customModel && (els().customModel.hidden = true);
-      saveFileAsrSelection().catch((error) => setHint(error.message));
+      saveFileAsrSelection().catch((error) => setHint(error.message, "error"));
     });
     $("fileAsrModelSelect")?.addEventListener("change", () => {
       const custom = els().modelSelect.value === "__custom__";
@@ -856,17 +968,18 @@
       const preset = FILE_ASR_MODELS.find((item) => item.value === els().modelSelect.value);
       if (preset && els().providerSelect) els().providerSelect.value = preset.provider;
       if (els().customModel) els().customModel.hidden = !custom;
-      if (!custom) saveFileAsrSelection().catch((error) => setHint(error.message));
+      if (!custom) saveFileAsrSelection().catch((error) => setHint(error.message, "error"));
     });
-    $("fileAsrCustomModelInput")?.addEventListener("change", () => saveFileAsrSelection().catch((error) => setHint(error.message)));
-    $("fileExportBtn")?.addEventListener("click", () => exportCurrent().catch((error) => setHint(error.message)));
+    $("fileAsrCustomModelInput")?.addEventListener("change", () => saveFileAsrSelection().catch((error) => setHint(error.message, "error")));
+    $("fileExportBtn")?.addEventListener("click", () => exportCurrent().catch((error) => setHint(error.message, "error")));
     $("fileCopyResultBtn")?.addEventListener("click", copyCurrent);
     for (const button of panel.querySelectorAll("[data-file-tab]")) {
       button.addEventListener("click", () => loadResult(button.dataset.fileTab).catch(() => {}));
     }
-    window.mimoInput.onOpenFile?.(() => openWorkspace({ fromModeEvent: true }).catch((error) => setHint(error.message)));
+    window.mimoInput.onOpenFile?.(() => openWorkspace({ fromModeEvent: true }).catch((error) => setHint(error.message, "error")));
     window.mimoInput.onWindowMode?.((mode) => {
       if (mode !== "file") stopPolling();
+      else syncSidebars();
     });
   }
 

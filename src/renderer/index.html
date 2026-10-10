@@ -8,6 +8,8 @@
     <link rel="stylesheet" href="./live-meeting.css" />
     <link rel="stylesheet" href="./app-shell.css" />
     <link rel="stylesheet" href="./reading-layout.css" />
+    <link rel="stylesheet" href="./file-workspace.css" />
+    <link rel="stylesheet" href="./workspace-sidebars.css" />
     <link rel="stylesheet" href="./supplier-manager.css" />
     <link rel="stylesheet" href="./settings-workspace.css" />
   </head>
@@ -694,41 +696,34 @@
         </div>
       </section>
 
-      <section id="filePanel" class="file-panel" hidden aria-label="文件转写">
-        <aside class="file-sidebar">
+      <section id="filePanel" class="file-panel" data-sidebar-workspace="file" hidden aria-label="文件转写">
+        <aside id="fileHistorySidebar" class="file-sidebar file-history-sidebar" aria-label="文件转写历史" hidden>
           <div class="file-sidebar-head">
             <div>
-              <strong>文件转写</strong>
-              <span>音频或视频文件</span>
+              <strong>历史记录</strong>
+              <span>文件转写记录</span>
             </div>
-            <button type="button" id="fileRefreshBtn" class="icon-btn" title="刷新文件列表" aria-label="刷新文件列表">↻</button>
+            <div class="file-sidebar-actions">
+              <button type="button" id="fileRefreshBtn" class="icon-btn" title="刷新文件列表" aria-label="刷新文件列表"><span class="ui-icon icon-refresh" aria-hidden="true"></span></button>
+              <button type="button" id="fileHistoryClose" class="icon-btn" title="收起历史记录" aria-label="收起历史记录"><span class="ui-icon icon-chevron sidebar-collapse-icon" aria-hidden="true"></span></button>
+            </div>
           </div>
-          <button type="button" id="fileChooseBtn" class="primary file-choose-btn" title="选择音频或视频文件">选择文件</button>
           <label class="field file-search">
             <span class="sr-only">搜索文件</span>
             <input id="fileSessionSearch" type="search" placeholder="搜索文件名或日期" autocomplete="off" />
           </label>
           <div id="fileSessionList" class="file-session-list" role="listbox" aria-label="文件转写记录"></div>
+          <div class="workspace-sidebar-resize" data-sidebar-resize="history" role="separator" aria-orientation="vertical" aria-label="调整历史记录侧栏宽度" tabindex="0" title="拖动调整侧栏宽度"></div>
         </aside>
 
-        <div class="file-main">
+        <aside id="fileSetupSidebar" class="file-sidebar file-setup-sidebar" aria-label="转录模型设置">
           <details id="fileSetupDetails" class="setup-details" open>
             <summary class="setup-summary">
-              <span class="setup-summary-label">文件与模型设置</span>
-              <span id="fileSetupSummaryMeta" class="setup-summary-meta"></span>
+              <span class="setup-summary-label">转录模型设置</span>
+              <span id="fileSetupSummaryMeta" class="setup-summary-meta" hidden></span>
+              <button type="button" id="fileSetupClose" class="icon-btn" title="收起转录模型设置" aria-label="收起转录模型设置"><span class="ui-icon icon-chevron sidebar-collapse-icon" aria-hidden="true"></span></button>
             </summary>
             <section class="file-console" aria-label="文件选择">
-            <div class="file-console-head">
-              <div>
-                <span class="file-eyebrow">独立文件处理</span>
-                <h2 id="fileSelectedName">还没有选择文件</h2>
-                <p id="fileSelectedMeta" class="file-muted">支持音频和视频；视频会先提取音轨。</p>
-              </div>
-              <div class="file-status-stack">
-                <span id="fileImportStatus" class="file-pill" data-kind="idle">未选择</span>
-                <span id="fileAsrModelLabel" class="file-muted">当前 ASR：—</span>
-              </div>
-            </div>
             <div class="file-model-row">
               <label class="field inline">
                 <span>文件 ASR</span>
@@ -753,36 +748,54 @@
             </div>
             <div class="file-console-actions">
               <label class="field grow">
-                <span>结果标题</span>
-                <input id="fileTitleInput" type="text" maxlength="200" placeholder="默认使用文件名" autocomplete="off" />
+                <span>新文件标题</span>
+                <input id="fileTitleInput" type="text" maxlength="200" placeholder="可选，默认使用新文件名" autocomplete="off" />
               </label>
               <button type="button" id="fileChooseInlineBtn" class="primary" title="选择音频或视频文件">选择文件</button>
             </div>
-            <p id="fileHint" class="file-hint">选择一个文件后，会在本地建立独立记录，再按当前文件 ASR 配置转写。</p>
           </section>
           </details>
+          <div class="workspace-sidebar-resize" data-sidebar-resize="setup" role="separator" aria-orientation="vertical" aria-label="调整转录模型设置侧栏宽度" tabindex="0" title="拖动调整侧栏宽度"></div>
+        </aside>
+        <div id="fileSidebarBackdrop" class="file-sidebar-backdrop" hidden></div>
+
+        <div class="file-main">
+          <div class="file-workspace-toolbar" role="group" aria-label="文件工作区">
+            <button id="fileHistoryToggle" type="button" aria-expanded="false" aria-controls="fileHistorySidebar"><span class="ui-icon icon-panels" aria-hidden="true"></span>历史记录</button>
+            <button id="fileSetupToggle" type="button" aria-expanded="true" aria-controls="fileSetupSidebar"><span class="ui-icon icon-chevron sidebar-toggle-icon" aria-hidden="true"></span>转录模型设置</button>
+            <button type="button" id="fileChooseBtn" class="primary" title="选择音频或视频文件">选择文件</button>
+          </div>
+          <header class="file-current-heading">
+            <div>
+              <h2 id="fileSelectedName">还没有选择文件</h2>
+              <p id="fileSelectedMeta" class="file-muted">支持音频和视频；视频会先提取音轨。</p>
+              <span id="fileAsrModelLabel" class="file-muted">当前 ASR：—</span>
+            </div>
+            <span id="fileImportStatus" class="file-pill" data-kind="idle">未选择</span>
+          </header>
+          <p id="fileHint" class="file-hint" data-kind="info" role="status" aria-live="polite" aria-atomic="true">选择一个音频或视频文件开始处理。</p>
 
           <section class="file-process" aria-label="文件处理">
-            <div class="file-process-row">
-              <div>
-                <span class="file-section-label">第一步 · 原始转写</span>
+            <div class="file-process-row file-transcription-controls" role="group" aria-label="原始转写操作">
+              <div class="file-operation-heading">
+                <span class="file-section-label">转写</span>
                 <strong id="fileProcessLabel">尚未开始</strong>
+                <span id="fileProcessProgress" class="file-muted" aria-live="polite">—</span>
               </div>
-              <span id="fileProcessProgress" class="file-muted" aria-live="polite">—</span>
               <div class="file-action-group">
                 <button type="button" id="fileProcessStartBtn" class="primary" disabled>开始转写</button>
-                <button type="button" id="fileProcessRetryBtn" disabled>重试转写</button>
-                <button type="button" id="fileProcessCancelBtn" disabled>取消</button>
+                <button type="button" id="fileProcessRetryBtn" class="icon-btn" title="重试转写" aria-label="重试转写" disabled><span class="ui-icon icon-refresh" aria-hidden="true"></span></button>
+                <button type="button" id="fileProcessCancelBtn" class="icon-btn" title="取消转写" aria-label="取消转写" disabled><span class="ui-icon icon-close" aria-hidden="true"></span></button>
               </div>
             </div>
-            <div class="file-process-row">
-              <div>
-                <span class="file-section-label">第二步 · 生成摘要</span>
+            <div class="file-process-row file-summary-controls" role="group" aria-label="摘要生成操作">
+              <div class="file-operation-heading">
+                <span class="file-section-label">摘要</span>
                 <strong id="fileAnalysisLabel">尚未开始</strong>
               </div>
               <label class="field inline file-summary-model-field">
-                <span>摘要模型</span>
-                <select id="fileSummaryModelSelect" title="选择摘要模型"></select>
+                <span>模型</span>
+                <select id="fileSummaryModelSelect" aria-label="摘要模型" title="选择摘要模型"></select>
               </label>
               <label class="file-check" title="勾选后先用 MiMo 对保留音频分块复核，再与文件 ASR 证据比对；默认关闭">
                 <input id="fileAnalysisMimoReview" type="checkbox" />
@@ -790,13 +803,13 @@
               </label>
               <div class="file-action-group">
                 <button type="button" id="fileAnalysisStartBtn" class="primary" disabled>生成摘要</button>
-                <button type="button" id="fileAnalysisRetryBtn" disabled>重试摘要</button>
-                <button type="button" id="fileAnalysisCancelBtn" disabled>取消</button>
+                <button type="button" id="fileAnalysisRetryBtn" class="icon-btn" title="重试摘要" aria-label="重试摘要" disabled><span class="ui-icon icon-refresh" aria-hidden="true"></span></button>
+                <button type="button" id="fileAnalysisCancelBtn" class="icon-btn" title="取消摘要" aria-label="取消摘要" disabled><span class="ui-icon icon-close" aria-hidden="true"></span></button>
               </div>
             </div>
           </section>
 
-          <section id="fileResults" class="file-results reading-resizable" aria-label="文件结果">
+          <section id="fileResults" class="file-results" aria-label="文件结果">
             <div class="file-results-head">
               <div class="file-tabs" role="tablist" aria-label="文件结果视图">
                 <button type="button" class="file-tab is-active" role="tab" aria-selected="true" data-file-tab="raw">原始转写</button>
@@ -828,39 +841,31 @@
               <div id="fileResultContent" class="file-result-content" hidden></div>
             </div>
           </section>
-          <div class="reading-resize-grip" role="separator" tabindex="0" aria-label="调整文件结果区域高度" aria-orientation="horizontal" data-resize-target="fileResults" title="拖动调整结果区域高度，双击恢复自动大小"></div>
         </div>
       </section>
 
       <section id="meetingPanel" class="meeting-panel" hidden aria-label="会议实时转录">
-        <section id="liveMeetingPanel" class="live-meeting">
-          <header class="live-heading">
-            <div><span class="live-eyebrow">会议实时转录</span><h2 id="liveSessionTitle">实时会议</h2></div>
-            <div class="live-window-tools" role="group" aria-label="窗口控制">
-              <button id="liveHistoryToggle" class="live-history-toggle" type="button" aria-expanded="false" aria-controls="liveHistoryBrowser">历史记录 <span id="liveHistoryCount">0</span></button>
-              <button id="liveAlwaysOnTop" class="icon-btn live-icon-tool" type="button" title="置顶显示" aria-label="置顶显示" aria-pressed="false" hidden><span class="ui-icon icon-pin" aria-hidden="true"></span></button>
-              <button id="liveDetail" class="icon-btn live-icon-tool" type="button" title="返回详细视图" aria-label="返回详细视图" hidden><span class="ui-icon icon-panels" aria-hidden="true"></span></button>
-            </div>
-          </header>
-          <section id="liveHistoryBrowser" class="live-history-browser" aria-labelledby="liveHistoryHeading" hidden>
+        <section id="liveMeetingPanel" class="live-meeting live-workspace" data-sidebar-workspace="live">
+          <aside id="liveHistoryBrowser" class="live-history-browser workspace-sidebar" aria-labelledby="liveHistoryHeading" hidden>
             <header class="live-history-heading">
               <div>
                 <strong id="liveHistoryHeading">历史记录</strong>
-                <span>选择以前的实时会议后，可查看原文和音频，并重新执行 MiMo 复核、校订或摘要。</span>
               </div>
               <div class="live-history-actions">
-                <label class="live-history-search"><span class="sr-only">搜索历史记录</span><input id="liveHistorySearch" type="search" placeholder="搜索标题、模型或日期" autocomplete="off" /></label>
-                <button id="liveHistoryRefresh" type="button">刷新</button>
-                <button id="liveHistoryClose" type="button" title="关闭历史记录" aria-label="关闭历史记录">×</button>
+                <button id="liveHistoryRefresh" class="icon-btn" type="button" title="刷新历史记录" aria-label="刷新历史记录"><span class="ui-icon icon-refresh" aria-hidden="true"></span></button>
+                <button id="liveHistoryClose" class="icon-btn" type="button" title="收起历史记录" aria-label="收起历史记录"><span class="ui-icon icon-chevron sidebar-collapse-icon" aria-hidden="true"></span></button>
               </div>
             </header>
+            <label class="live-history-search"><span class="sr-only">搜索历史记录</span><input id="liveHistorySearch" type="search" placeholder="搜索标题、模型或日期" autocomplete="off" /></label>
             <div id="liveHistoryList" class="live-history-list" role="listbox" aria-label="实时会议历史"></div>
             <p id="liveHistoryEmpty" class="live-history-empty">暂无实时会议记录。</p>
-          </section>
+            <div class="workspace-sidebar-resize" data-sidebar-resize="history" role="separator" aria-orientation="vertical" aria-label="调整历史记录侧栏宽度" tabindex="0" title="拖动调整侧栏宽度"></div>
+          </aside>
+          <aside id="liveSetupSidebar" class="workspace-sidebar live-setup-sidebar" aria-label="转录模型设置">
           <details id="liveSetupDetails" class="setup-details" open>
             <summary class="setup-summary">
-              <span class="setup-summary-label">会议设置与保存位置</span>
-              <span id="liveSetupSummaryMeta" class="setup-summary-meta"></span>
+              <span class="setup-summary-label">转录模型设置</span>
+              <span id="liveSetupSummaryMeta" class="setup-summary-meta" hidden></span>
             </summary>
             <div class="live-setup">
             <label class="field live-title-field">
@@ -875,6 +880,7 @@
               <span>日期版本模型 ID</span>
               <input id="liveCustomModel" type="text" maxlength="160" autocomplete="off" />
             </label>
+            <p id="liveAsrConfigStatus" class="file-muted" role="status"></p>
             <label class="field">
               <span>音源</span>
               <select id="liveCaptureMode"><option value="dual">麦克风 + 系统声音</option><option value="system">仅系统声音</option><option value="microphone">仅麦克风</option></select>
@@ -894,6 +900,21 @@
             <button id="liveDefaultDestination" type="button">使用默认位置</button>
           </div>
           </details>
+          <div class="workspace-sidebar-resize" data-sidebar-resize="setup" role="separator" aria-orientation="vertical" aria-label="调整转录模型设置侧栏宽度" tabindex="0" title="拖动调整侧栏宽度"></div>
+          </aside>
+          <div id="liveSidebarBackdrop" class="workspace-sidebar-backdrop" hidden></div>
+          <div class="live-main">
+          <header class="live-heading">
+            <div class="live-sidebar-tools" role="group" aria-label="会议侧栏">
+              <button id="liveHistoryToggle" class="live-history-toggle" type="button" aria-expanded="false" aria-controls="liveHistoryBrowser">历史记录 <span id="liveHistoryCount">0</span></button>
+              <button id="liveSetupToggle" type="button" aria-expanded="true" aria-controls="liveSetupSidebar"><span class="ui-icon icon-chevron sidebar-toggle-icon" aria-hidden="true"></span>转录模型设置</button>
+            </div>
+            <div class="live-heading-title"><span class="live-eyebrow">会议实时转录</span><h2 id="liveSessionTitle">实时会议</h2></div>
+            <div class="live-window-tools" role="group" aria-label="窗口控制">
+              <button id="liveAlwaysOnTop" class="icon-btn live-icon-tool" type="button" title="置顶显示" aria-label="置顶显示" aria-pressed="false" hidden><span class="ui-icon icon-pin" aria-hidden="true"></span></button>
+              <button id="liveDetail" class="icon-btn live-icon-tool" type="button" title="返回详细视图" aria-label="返回详细视图" hidden><span class="ui-icon icon-panels" aria-hidden="true"></span></button>
+            </div>
+          </header>
           <div class="live-transport">
             <button id="liveStart" type="button" class="primary" disabled>开始实时转录</button>
             <button id="livePause" type="button" disabled hidden>暂停</button>
@@ -910,13 +931,13 @@
             <p id="liveError" class="live-error" role="alert" hidden></p>
             <button id="liveRefresh" type="button">刷新状态</button>
             <button id="liveRetry" type="button" disabled>重试未完成片段</button>
-          </div>
-          <div class="live-outputs" aria-label="会议输出">
             <button id="liveOpenMarkdown" type="button" disabled>打开原文 Markdown</button>
+          </div>
+          <div class="live-outputs live-reading-tools" aria-label="转录视图与录音">
+            <button id="liveFloat" type="button" title="切换到悬浮窗" hidden><span class="ui-icon icon-float" aria-hidden="true"></span>悬浮窗</button>
             <div id="liveAudioOutputs" class="live-audio-outputs"></div>
           </div>
-          <div class="live-reading-tools"><button id="liveFloat" type="button" title="切换到悬浮窗" hidden><span class="ui-icon icon-float" aria-hidden="true"></span>悬浮窗</button></div>
-          <div id="liveResults" class="live-results reading-resizable">
+          <div id="liveResults" class="live-results">
             <section class="live-text-section" aria-labelledby="liveRawHeading">
               <h2 id="liveRawHeading">原始转写</h2>
               <pre id="liveRaw" class="live-transcript" tabindex="0">尚无转写内容</pre>
@@ -927,7 +948,6 @@
               </div>
             </section>
           </div>
-          <div class="reading-resize-grip live-result-resize" role="separator" tabindex="0" aria-label="调整转录区域高度" aria-orientation="horizontal" data-resize-target="liveResults" title="拖动调整转录区域高度，双击恢复自动大小"></div>
           <div id="liveCleanupSection" class="live-cleanup" hidden>
             <label class="field"><span>摘要模型</span><select id="liveCleanerModel" aria-label="摘要模型"></select></label>
             <label class="live-check" title="勾选后先用 MiMo 对保留音频分块复核，再与实时转写证据比对；默认关闭">
@@ -940,18 +960,18 @@
             <span id="livePostprocessStatus" role="status"></span>
             <button id="liveOpenSummary" type="button" disabled>打开摘要</button>
           </div>
-          <section id="liveSummarySection" class="live-summary reading-resizable" aria-labelledby="liveSummaryHeading" hidden>
+          <section id="liveSummarySection" class="live-summary" aria-labelledby="liveSummaryHeading" hidden>
             <h2 id="liveSummaryHeading">会议摘要</h2>
             <div class="live-summary-layout">
               <section aria-labelledby="liveMindmapHeading"><h3 id="liveMindmapHeading">会议脉络</h3><div id="liveMindmap" class="live-mindmap"></div></section>
               <section aria-labelledby="liveDetailHeading"><h3 id="liveDetailHeading">整理正文</h3><div id="liveSummaryDetail" class="live-summary-detail"></div></section>
             </div>
           </section>
-          <div id="liveSummaryResize" class="reading-resize-grip" role="separator" tabindex="0" aria-label="调整摘要区域高度" aria-orientation="horizontal" data-resize-target="liveSummarySection" title="拖动调整摘要区域高度，双击恢复自动大小" hidden></div>
           <button id="liveRestoreNormal" class="icon-btn live-minimal-restore" type="button" title="恢复悬浮窗" aria-label="恢复悬浮窗" hidden><span class="ui-icon icon-expand" aria-hidden="true"></span></button>
           <div id="liveMinimalControls" class="live-minimal-controls" hidden>
             <label title="转录字体大小"><span class="ui-icon icon-type" aria-hidden="true"></span><input id="liveMinimalFontSize" type="range" min="12" max="28" value="14" step="1" aria-label="转录字体大小" /></label>
             <label title="鼠标移出后的背景不透明度"><span class="ui-icon icon-opacity" aria-hidden="true"></span><input id="liveOpacity" type="range" min="0" max="100" value="90" step="5" aria-label="背景不透明度" /></label>
+          </div>
           </div>
         </section>
         <div id="legacyMeetingHistoryPanel" class="meeting-history legacy-meeting-workbench" aria-hidden="true" inert hidden>
@@ -1165,6 +1185,7 @@
     <script src="./text-supplier-manager.js"></script>
     <script src="./voice-settings-snapshot.js"></script>
     <script src="./reading-layout.js"></script>
+    <script src="./workspace-sidebars.js"></script>
     <script src="./file-ui.js"></script>
     <script src="./live-meeting-ui.js"></script>
     <script src="./home-ui.js"></script>

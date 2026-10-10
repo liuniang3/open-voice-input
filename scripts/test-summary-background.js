@@ -32,12 +32,12 @@ function element(tag = "div") {
     replaceChildren(...children) { this.children = children; },
     removeChild(child) { this.children.splice(this.children.indexOf(child), 1); },
     addEventListener(name, fn) { if (!listeners.has(name)) listeners.set(name, []); listeners.get(name).push(fn); },
-    dispatch(name) { for (const fn of listeners.get(name) || []) fn(); },
+    dispatch(name) { for (const fn of listeners.get(name) || []) fn({ preventDefault() {} }); },
     click() { if (!this.disabled) this.dispatch("click"); }
   };
 }
 
-function fixture(settingsPatch = {}) {
+function fixture(settingsPatch = {}, view = {}) {
   const elements = new Map([...html.matchAll(/<(\w+)\b[^>]*\bid="([^"]+)"[^>]*>/g)]
     .map(match => [match[2], element(match[1])]));
   const $ = id => elements.get(id);
@@ -74,7 +74,8 @@ function fixture(settingsPatch = {}) {
     meetingFileSummaryCancel: ({ sessionId }) => {
       const summary = { sessionId, status: "cancelled" }; jobs.set(sessionId, summary); return { ok: true, summary };
     },
-    meetingAnalysisSummary: () => ({ ok: false })
+    meetingAnalysisSummary: () => ({ ok: false }),
+    fileImportMedia: () => ({ ok: true, cancelled: true })
   };
   const api = Object.fromEntries(Object.keys(handlers).map(name => [name, async payload => {
     calls.push({ name, payload }); return handlers[name](payload);
@@ -88,7 +89,10 @@ function fixture(settingsPatch = {}) {
     for (const callback of modeCallbacks) callback(value);
   };
   setMode("file");
+  const preferences = new Map();
+  const storage = view.storage || { getItem: key => preferences.get(key) ?? null, setItem: (key, value) => preferences.set(key, value) };
   const win = { mimoInput: api, TextSupplierUi, AsrDefaults: require("../src/asr-defaults"), applyWindowMode: setMode,
+    innerWidth: view.width || 1180, localStorage: storage,
     addEventListener: (name, callback) => events.set(name, callback),
     MeetingUi: { ...MeetingUi,
       appendTranscriptBlocks: (container, blocks) => { container.textContent = blocks.map(block => block.text).join("\n"); },
@@ -99,7 +103,7 @@ function fixture(settingsPatch = {}) {
     setInterval: callback => { timers.add(callback); return callback; },
     clearInterval: callback => timers.delete(callback), setTimeout });
   return {
-    $, tabs, timers, callbacks, handlers, jobs, calls, events, setMode, ui: win.FileTranscriptionUi,
+    $, tabs, timers, callbacks, handlers, jobs, calls, events, setMode, storage, ui: win.FileTranscriptionUi,
     mode: () => mode,
     count: name => calls.filter(call => call.name === name).length,
     push(job) { jobs.set(job.sessionId, job); for (const callback of callbacks) callback(job); },
@@ -318,7 +322,7 @@ async function verifyBrowser(page, screenshotDirectory) {
   return { result: "file and meeting summaries survive settings/home navigation", screenshots, errors };
 }
 
-module.exports = { verifyBrowser };
+module.exports = { verifyBrowser, fixture };
 if (require.main === module) (async () => {
   for (const { name, run } of tests) { await run(); console.log(`ok - ${name}`); }
   console.log(`${tests.length} background summary tests passed`);

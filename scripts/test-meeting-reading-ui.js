@@ -7,15 +7,18 @@ const root = path.resolve(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "src/renderer/index.html"), "utf8");
 const css = fs.readFileSync(path.join(root, "src/renderer/live-meeting.css"), "utf8");
 assert.doesNotMatch(html, /id="(?:testConnectionBtn|liveCompact)"/);
-assert.match(html, /data-resize-target="fileResults"/);
-assert.match(html, /data-resize-target="liveResults"/);
-assert.match(html, /data-resize-target="liveSummarySection"/);
+assert.doesNotMatch(html, /reading-resizable|id="liveSummaryResize"|data-resize-target="(?:fileResults|liveSummarySection)"/);
+assert.equal([...html.matchAll(/data-resize-target="liveResults"/g)].length, 1, "only the floating draft/history split remains adjustable");
+assert.match(html, /data-resize-axis="draft"/);
 assert.match(css, /\.live-floating #livePreviewStatus/);
 assert.match(css, /\.live-minimal #liveRaw/);
-console.log("Meeting reading, icon controls, preview-only view and removed settings button contracts passed.");
+console.log("Adaptive reading regions, floating draft split, icon controls and preview-only view contracts passed.");
 
 async function verifyReadingBrowser(page, directory) {
   const { prepareBrowser } = require("./test-meeting-live-ui");
+  await page.addInitScript(() => {
+    for (const id of ["liveResults", "liveSummarySection", "fileResults"]) localStorage.setItem(`ovi-reading-${id}-height`, "1400");
+  });
   const errors = await prepareBrowser(page);
   await page.setViewportSize({ width: 1180, height: 1000 });
   await page.evaluate(async () => {
@@ -24,17 +27,14 @@ async function verifyReadingBrowser(page, directory) {
       startedAtMs: Date.now(), rawText: "本周完成了桌面端的主要流程。\n\n接下来验证会议录制与文件转写。\n\n".repeat(30),
       previewText: "我们还需要检查跨平台的窗口位置和阅读体验。", previewStatus: "streaming", window: { floating: false, alwaysOnTop: false } });
   });
-  const grip = page.locator('[data-resize-target="liveResults"]:not([data-resize-axis])');
-  await grip.scrollIntoViewIfNeeded();
-  const before = await page.locator("#liveResults").evaluate(el => el.getBoundingClientRect().height);
-  const box = await grip.boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - 110, { steps: 8 }); await page.mouse.up();
-  const shorter = await page.locator("#liveResults").evaluate(el => el.getBoundingClientRect().height);
-  assert(shorter < before - 80, "pointer drag must change the actual transcript region, not only a CSS value");
-  await grip.focus(); await grip.press("ArrowDown");
-  const taller = await page.locator("#liveResults").evaluate(el => el.getBoundingClientRect().height);
-  assert(taller > shorter + 20, "keyboard resizing remains accessible");
+  const height = id => page.locator(`#${id}`).evaluate(el => el.clientHeight);
+  const before = await height("liveRaw");
+  await page.setViewportSize({ width: 1180, height: 1200 });
+  assert(await height("liveRaw") > before + 150, "meeting transcript grows with the native window");
+  await page.setViewportSize({ width: 1180, height: 1000 });
+  assert.equal(await height("liveRaw"), before, "shrinking the window restores the available reading height");
+  assert.equal(await page.locator("#liveResults").getAttribute("data-user-sized"), null, "old saved pixel heights are ignored");
+  assert.equal(await page.locator('[data-resize-target]:not([data-resize-axis="draft"])').count(), 0);
   const floatBox = await page.locator("#liveFloat").boundingBox();
   const resultsBox = await page.locator("#liveResults").boundingBox();
   assert(floatBox.y + floatBox.height <= resultsBox.y, "floating entry is directly above the reading pane");
@@ -103,18 +103,47 @@ async function verifyReadingBrowser(page, directory) {
   await page.evaluate(() => window.mockPush({ status: "completed", recording: false, previewText: "", window: { floating: false, alwaysOnTop: false },
     summary: { title: "项目进展", mindmap: { text: "项目", children: [{ text: "进展" }] }, sections: [{ heading: "当前进展", paragraphs: [{ text: "本周已完成桌面端主要流程，接下来将验证录制、转写和跨平台体验。".repeat(30) }], items: [] }] } }));
   await page.setViewportSize({ width: 1180, height: 1000 });
-  const summaryGrip = page.locator("#liveSummaryResize");
-  await summaryGrip.scrollIntoViewIfNeeded(); await summaryGrip.focus(); await summaryGrip.press("ArrowDown");
-  assert.equal(await page.locator("#liveSummarySection").getAttribute("data-user-sized"), "true");
+  const summaryBefore = await height("liveSummarySection");
+  const rawBefore = await height("liveRaw");
+  await page.setViewportSize({ width: 1180, height: 1240 });
+  assert(await height("liveSummarySection") > summaryBefore + 80, "summary and original share extra window space");
+  assert(await height("liveRaw") > rawBefore + 80);
+  const summaryScroll = await page.locator("#liveSummaryDetail").evaluate(el => {
+    const section = el.parentElement;
+    return section.scrollHeight > section.clientHeight && getComputedStyle(section).overflowY === "auto";
+  });
+  assert(summaryScroll, "long summary prose scrolls inside its viewport");
+  if (directory) await page.screenshot({ path: path.join(directory, "meeting-adaptive-summary.png") });
   await page.evaluate(() => window.applyWindowMode("file"));
-  const fileGrip = page.locator('[data-resize-target="fileResults"]');
-  await fileGrip.scrollIntoViewIfNeeded(); await fileGrip.focus(); await fileGrip.press("ArrowUp");
-  assert.equal(await page.locator("#fileResults").getAttribute("data-user-sized"), "true");
-  const fileBefore = await page.locator("#fileResultPane").evaluate(el => el.clientHeight);
-  await fileGrip.press("ArrowDown");
-  assert((await page.locator("#fileResultPane").evaluate(el => el.clientHeight)) > fileBefore + 20);
+  await page.evaluate(() => {
+    document.getElementById("fileSetupDetails").open = false;
+    const content = document.getElementById("fileResultContent");
+    content.hidden = false; document.getElementById("fileResultEmpty").hidden = true;
+    window.MeetingUi.appendTranscriptBlocks(content, [{ text: "文件转写的完整原文。".repeat(1000) }]);
+  });
+  const fileBefore = await height("fileResultPane");
+  await page.setViewportSize({ width: 1180, height: 1000 });
+  assert(await height("fileResultPane") < fileBefore - 150, "file reading viewport shrinks with the window");
+  const fileRawHeight = await height("fileResultPane");
+  await page.evaluate(() => window.MeetingUi.renderSummaryDocument(document.getElementById("fileResultContent"), {
+    title: "文件摘要", mindmap: { text: "内容", children: [{ text: "主要观点" }] },
+    sections: [{ heading: "整理正文", paragraphs: [{ text: "文件摘要的连贯正文。".repeat(1000) }] }]
+  }));
+  assert.equal(await height("fileResultPane"), fileRawHeight, "raw and summary content share the same bounded result viewport");
+  for (const platform of ["win32", "darwin"]) {
+    await page.evaluate(platform => document.documentElement.dataset.platform = platform, platform);
+    for (const size of [{ width: 1180, height: 1000 }, { width: 720, height: 900 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(size);
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      assert(await page.locator("#fileResultPane").evaluate(el => el.clientHeight > 120 && el.scrollHeight > el.clientHeight));
+    }
+  }
+  if (directory) {
+    await page.locator("#fileResultPane").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(directory, "file-adaptive-summary-narrow.png") });
+  }
   assert.deepEqual(errors, []);
-  console.log("Real browser pointer/keyboard reading resize, responsive float, light states, font and opacity controls passed.");
+  console.log("Real browser adaptive transcript/summary sizing, ignored legacy heights, Windows/macOS styles, responsive float and draft/font/opacity controls passed.");
 }
 module.exports = { verifyReadingBrowser };
 if (require.main === module && process.argv.includes("--browser")) (async () => {

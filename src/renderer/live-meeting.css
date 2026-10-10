@@ -30,7 +30,7 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
   -webkit-app-region: no-drag;
 }
 
-.live-meeting > :not(.live-results) { flex: 0 0 auto; }
+.live-meeting > :not(.live-results):not(.live-summary) { flex: 0 0 auto; }
 .live-meeting .field { margin: 0; min-width: 0; gap: 5px; }
 .live-meeting :is(input, select) { width: 100%; min-width: 0; }
 .live-meeting :is(button, input, select, pre) {
@@ -114,8 +114,8 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
 .live-status-light { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%; background: #d3a337; box-shadow: 0 0 0 3px rgba(211,163,55,.12); }
 .live-status-light[data-light="green"] { background: #15986c; box-shadow: 0 0 0 3px rgba(21,152,108,.12); }
 .live-status-light[data-light="red"] { background: #cc514c; box-shadow: 0 0 0 3px rgba(204,81,76,.12); }
-.live-reading-tools { display: flex; justify-content: flex-end; min-height: 0; }
-.live-reading-tools:has(#liveFloat[hidden]) { display: none; }
+.live-reading-tools { display: flex; justify-content: flex-start; min-height: 0; }
+.live-reading-tools:has(#liveFloat[hidden]):has(.live-audio-outputs:empty) { display: none; }
 #liveFloat { display: inline-flex; align-items: center; gap: 7px; color: #11696c; font-weight: 600; }
 .live-font-control { display: flex; align-items: center; gap: 7px; flex: 1 1 130px; max-width: 190px; min-width: 115px; color: #52666d; }
 .live-font-control output { font-size: 11px; width: 20px; font-variant-numeric: tabular-nums; }
@@ -124,8 +124,19 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
 .live-meeting :is(button, input, select, pre):focus-visible,
 .live-history-item:focus-visible { outline: 2px solid var(--ovi-primary); outline-offset: 2px; }
 
-.live-setup { display: grid; grid-template-columns: minmax(160px, 1.3fr) repeat(2, minmax(160px, 1fr)); gap: 12px; }
-.live-setup:has(#liveCustomModelField:not([hidden])) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.live-meeting #liveSetupDetails > .setup-summary { min-height: 28px; padding-block: 2px; }
+.live-setup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, .7fr);
+  align-items: end;
+  gap: 7px 10px;
+}
+.live-setup:has(#liveTranscriptionIntervalField:not([hidden])) {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr) repeat(2, minmax(0, .7fr));
+}
+.live-setup .field { gap: 3px; }
+.live-setup :is(input, select) { height: 32px; min-height: 32px; }
+#liveCustomModelField { grid-column: 1 / -1; grid-row: 2; }
 .live-destination, .live-transport, .live-health, .live-recovery, .live-outputs, .live-audio-outputs, .live-cleanup {
   display: flex;
   flex-wrap: wrap;
@@ -133,10 +144,11 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
   gap: 8px 12px;
   min-width: 0;
 }
-.live-destination { padding-bottom: 12px; border-bottom: 1px solid var(--ovi-border); }
-.live-path-field { flex: 1 1 300px; min-width: 0; font-size: 12px; }
-.live-path-field > span { color: var(--ovi-muted); }
-.live-path-field output { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
+.live-destination { margin-top: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--ovi-border); gap: 6px 10px; }
+.live-destination button { min-height: 32px; height: 32px; font-size: 12px; }
+.live-path-field { display: flex; align-items: baseline; gap: 8px; flex: 1 1 300px; min-width: 0; font-size: 12px; }
+.live-path-field > span { flex: 0 0 auto; color: var(--ovi-muted); }
+.live-path-field output { flex: 1 1 0; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.5; }
 .live-clock { display: flex; align-items: baseline; gap: 8px; margin-left: auto; font-size: 12px; color: var(--ovi-muted); }
 .live-clock strong { color: var(--ovi-text); font-variant-numeric: tabular-nums; font-size: 21px; min-width: 90px; text-align: right; }
 .live-stop { color: #943a30; border-color: rgba(148, 58, 48, 0.3); }
@@ -148,14 +160,14 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
 .live-recover-field { flex: 1 1 180px; max-width: 320px; }
 .live-outputs { font-size: 12px; }
 .live-outputs button { font-size: 12px; }
-.live-results { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 0 220px; min-height: 220px; gap: 16px; }
+.live-results { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); flex: 1 0 160px; min-height: 160px; overflow: hidden; gap: 16px; }
 .live-results.has-corrected { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .live-results:has(#liveReviewedSection:not([hidden])):has(#liveCorrectedSection:not([hidden])) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .live-text-section { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .live-text-section h2 { margin: 0; padding: 8px 0; font-size: 14px; font-weight: 650; border-bottom: 1px solid var(--ovi-border); }
 .live-transcript {
   flex: 1;
-  min-height: 140px;
+  min-height: 0;
   overflow: auto;
   margin: 0;
   padding: 12px 4px;
@@ -170,11 +182,11 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
 .live-preview > span { color: #376f78; font-size: 11px; }
 .live-preview pre { margin: 3px 0 0; max-height: 110px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.7; font-family: inherit; }
 .live-preview[data-kind="failed"] { border-color: #bd6557; }
-.live-summary { border-top: 1px solid var(--ovi-border); padding: 14px 0; }
-.live-summary h2 { font-size: 17px; margin: 0 0 14px; }
+.live-summary { display: flex; flex-direction: column; flex: 1 0 200px; min-height: 200px; overflow: hidden; border-top: 1px solid var(--ovi-border); padding: 14px 0; }
+.live-summary h2 { flex: 0 0 auto; font-size: 17px; margin: 0 0 14px; }
 .live-summary h3 { font-size: 13px; color: var(--ovi-muted); margin: 0 0 12px; }
-.live-summary-layout { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 28px; }
-.live-summary-layout > section { min-width: 0; }
+.live-summary-layout { display: grid; flex: 1 1 0; min-height: 0; overflow: hidden; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); grid-template-rows: minmax(0, 1fr); gap: 28px; }
+.live-summary-layout > section { min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .live-mindmap { font-size: 13px; overflow-wrap: anywhere; }
 .live-mindmap ul { list-style: none; padding-left: 18px; margin: 8px 0; border-left: 1px solid #86b0b8; }
 .live-mindmap > ul { padding-left: 0; border: 0; }
@@ -223,7 +235,7 @@ body.meeting-mode .meeting-panel.live-floating { grid-template-rows: minmax(0, 1
 .live-floating .live-cleanup,
 .live-floating .live-summary { display: none; }
 .live-floating .live-results.has-corrected { grid-template-columns: minmax(0, 1fr); }
-.live-floating .live-results, .live-floating .live-results[data-user-sized="true"] { flex: 1 1 0; height: auto; min-height: 0; overflow: hidden; }
+.live-floating .live-results { flex: 1 1 0; min-height: 0; }
 .live-floating .live-transcript { flex: 1 1 0; min-height: 0; max-height: none; padding: 4px; font-size: var(--live-font-size, 14px); }
 .live-floating .live-error { max-height: 64px; overflow: auto; }
 .live-floating .live-recovery:has(.live-error[hidden]) { display: none; }
@@ -231,8 +243,6 @@ body.meeting-mode .meeting-panel.live-floating { grid-template-rows: minmax(0, 1
 .live-floating .live-health,
 .live-floating #liveElapsedLabel,
 .live-floating #livePreviewStatus,
-.live-floating .live-result-resize,
-.live-floating #liveSummaryResize,
 .live-floating .live-reading-tools { display: none; }
 .live-floating .live-text-section { flex: 1 1 0; min-height: 0; }
 .live-floating .live-preview:not([hidden]) {
@@ -249,7 +259,7 @@ body.meeting-mode:has(.live-floating) { background: transparent; }
 body.meeting-mode:has(.live-floating) .shell { padding: 2px; gap: 0; background: rgba(249,251,251,var(--live-opacity,.9)); }
 body.meeting-mode .meeting-panel.live-floating { background: transparent; border: 0; }
 .live-minimal .live-meeting { padding: 6px; }
-.live-minimal .live-meeting > :not(.live-results):not(.live-minimal-restore):not(.live-minimal-controls) { display: none; }
+.live-minimal .live-main > :not(.live-results):not(.live-minimal-restore):not(.live-minimal-controls) { display: none; }
 .live-minimal #liveRaw, .live-minimal .draft-resize-grip { display: none; }
 .live-minimal .live-preview:not([hidden]) { flex: 1 1 0; border: 0; padding: 4px 28px 4px 6px; background: transparent; }
 .live-minimal .live-preview pre { margin: 0; }
@@ -267,12 +277,13 @@ body.meeting-mode .shell:hover .live-minimal .live-preview pre { scrollbar-color
 
 @media (max-width: 760px) {
   .live-meeting { padding: 12px; }
-  .live-setup { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .live-title-field { grid-column: 1 / -1; }
+  .live-setup, .live-setup:has(#liveTranscriptionIntervalField:not([hidden])) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #liveCustomModelField { grid-row: auto; }
   .live-results.has-corrected,
   .live-results:has(#liveReviewedSection:not([hidden])):has(#liveCorrectedSection:not([hidden])) { grid-template-columns: minmax(0, 1fr); flex-basis: 440px; }
   .live-floating .live-results.has-corrected { flex-basis: 0; }
-  .live-summary-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .live-summary { flex-basis: max(280px, 40vh); min-height: 280px; }
+  .live-summary-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .live-history-heading { flex-direction: column; }
   .live-history-actions { flex: 0 0 auto; width: 100%; }
 }
@@ -280,7 +291,7 @@ body.meeting-mode .shell:hover .live-minimal .live-preview pre { scrollbar-color
 @media (max-width: 480px) {
   body.meeting-mode .topbar { flex-wrap: wrap; gap: 6px; }
   body.meeting-mode .window-actions { flex-wrap: wrap; }
-  .live-setup, .live-setup:has(#liveCustomModelField:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
+  .live-setup, .live-setup:has(#liveTranscriptionIntervalField:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
   .live-title-field { grid-column: auto; }
   .live-clock { margin-left: 0; }
   .live-destination button { flex: 1 1 auto; }

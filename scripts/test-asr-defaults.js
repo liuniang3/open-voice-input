@@ -1,7 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { dictationSelection, workspaceSelection, savedFollowPreferences } = require("../src/asr-defaults");
+const { dictationSelection, workspaceSelection, savedFollowPreferences, workspaceReadiness } = require("../src/asr-defaults");
 const { ensureConnectionProfiles } = require("../src/settings/connection-profiles");
 const { resolveMeetingFileAsrCredentials } = require("../src/meeting/processing/file-asr-credentials");
 
@@ -59,3 +59,24 @@ assert.equal(legacy.asrConnections.aliyun.apiKey, "test-only-legacy-ali");
 assert.equal(legacy.meetingFileAsrProfiles[mimo.asrModel].apiKey, "test-only-legacy-mimo");
 assert.equal(legacy.asrConnections.mimo.apiKey, "test-only-legacy-mimo");
 console.log("PASS shared ASR defaults, transport companions, live switching, explicit selection, migration and credential isolation");
+
+for (const purpose of ["file", "live"]) {
+  assert.equal(workspaceReadiness({ ...qwen, asrConnections: connections }, purpose).ready, true);
+  assert.equal(workspaceReadiness({ ...mimo, asrConnections: connections }, purpose).ready, true);
+  const cleared = { ...qwen, asrConnections: {}, providerConnections: { aliyun: connections.aliyun },
+    asrProfiles: { [qwen.asrModel]: connections.aliyun } };
+  assert.equal(workspaceReadiness(cleared, purpose).ready, false, "cleared ASR credentials cannot borrow another scope or stale profile");
+  for (const baseUrl of ["not-a-url", "http://example.invalid"]) {
+    assert.equal(workspaceReadiness({ ...qwen, asrConnections: { aliyun: { ...connections.aliyun, baseUrl } } }, purpose).ready, false);
+  }
+  const status = workspaceReadiness({ ...qwen, asrConnections: connections }, purpose);
+  assert.deepEqual(Object.keys(status).sort(), ["message", "ready"]);
+  assert.doesNotMatch(JSON.stringify(status), /test-only|example\.invalid/);
+}
+assert.equal(workspaceReadiness({ ...qwen, meetingRealtimeModel: "gpt-test", meetingRealtimeFollowDictation: false,
+  asrConnections: connections }, "live").ready, false);
+assert.equal(workspaceReadiness({ ...qwen, meetingFileAsrModel: "mimo-v2.5-asr", meetingFileAsrProvider: "qwen3-asr",
+  meetingFileAsrFollowDictation: false, asrConnections: connections }, "file").ready, false);
+assert.equal(workspaceReadiness({ ...qwen, asrConnections: { aliyun: { ...connections.aliyun,
+  baseUrl: "wss://dashscope.aliyuncs.com/api-ws/v1/inference" } } }, "live").ready, true);
+console.log("PASS local workspace readiness, valid custom endpoints, invalid models, empty credentials and safe status metadata");

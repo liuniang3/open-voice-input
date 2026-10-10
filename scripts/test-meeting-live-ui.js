@@ -34,7 +34,7 @@ function element(tag = "div") {
   };
 }
 
-function fixture() {
+function fixture(view = {}) {
   const elements = new Map([...html.matchAll(/<(\w+)\b[^>]*\bid="([^"]+)"[^>]*>/g)].map((m) => [m[2], element(m[1])]));
   const $ = (id) => elements.get(id);
   $("liveModel").value = "qwen-audio-3.0-asr-flash-streaming";
@@ -75,13 +75,16 @@ function fixture() {
     return handlers[name](...args);
   }]));
   api.onMeetingLiveUpdate = (callback) => { callbacks.add(callback); return () => callbacks.delete(callback); };
+  const events = new Map();
+  const preferences = new Map();
   const win = { document: { getElementById: $, createElement: element }, mimoInput: api, TextSupplierUi,
-    MeetingUi: require("../src/renderer/meeting-ui"), addEventListener() {} };
+    innerWidth: view.width || 1180, localStorage: view.storage || { getItem: key => preferences.get(key) ?? null, setItem: (key, value) => preferences.set(key, value) },
+    MeetingUi: require("../src/renderer/meeting-ui"), addEventListener: (name, callback) => events.set(name, callback) };
   const ui = createLiveMeetingUi(win, {
     now: () => clock, every: (fn) => { timers.add(fn); return fn; }, cancel: (fn) => timers.delete(fn)
   });
   return {
-    $, ui, api, handlers, calls, timers, callbacks,
+    $, ui, api, handlers, calls, timers, callbacks, win, events,
     setSettings(value) { settings = { ...settings, ...value }; },
     setStatus(value) { status = value; },
     push(value) { status = value; for (const cb of callbacks) cb(value); },
@@ -97,6 +100,38 @@ const test = (name, run) => tests.push({ name, run });
 const completed = (extra = {}) => ({
   sessionId: "s1", status: "completed", recording: false, modelId: "qwen-audio-3.0-asr-flash-streaming",
   rawText: "原始转写文本", pendingSegments: 0, failedSegments: 0, cleanupStatus: "idle", ...extra
+});
+
+test("meeting sidebars remember visibility, enforce narrow drawers and expand invalid ASR only on entry", async () => {
+  const values = new Map([["ovi-live-sidebars", JSON.stringify({ setup: false, history: false })]]);
+  const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  const f = fixture({ storage });
+  f.setSettings({ asrConnections: { aliyun: { apiKey: "test-only-asr-key" } } });
+  await f.ui.open();
+  assert.equal(f.$("liveSetupDetails").open, false);
+  await f.click("liveSetupToggle");
+  await f.click("liveHistoryToggle");
+  assert.equal(f.$("liveSetupDetails").open, true);
+  assert.equal(f.$("liveHistoryBrowser").hidden, false);
+  f.win.innerWidth = 720; f.events.get("resize")();
+  assert.equal(f.$("liveHistoryBrowser").hidden, true);
+  await f.click("liveSetupToggle");
+  await f.click("liveHistoryToggle");
+  assert.equal(f.$("liveSetupDetails").open, false);
+  assert.equal(f.$("liveSidebarBackdrop").hidden, false);
+  await f.click("liveSidebarBackdrop");
+  assert.equal(f.$("liveHistoryBrowser").hidden, true);
+  f.setSettings({ asrConnections: {} }); f.ui.close(); await f.ui.open();
+  assert.equal(f.$("liveSetupDetails").open, true);
+  assert.match(f.$("liveAsrConfigStatus").textContent, /API Key/);
+  await f.click("liveSetupToggle");
+  f.push(completed());
+  assert.equal(f.$("liveSetupDetails").open, false, "snapshot updates must not force settings back open");
+  f.push(completed({ window: { floating: true } }));
+  assert.equal(f.$("liveSidebarBackdrop").hidden, true);
+  assert.equal(f.$("liveSetupToggle").attributes["aria-expanded"], "false");
+  assert.equal(f.count("meetingLiveStart"), 0);
+  f.ui.destroy();
 });
 
 test("view-only open is single-flight; navigation keeps updates and destruction unsubscribes", async () => {
@@ -360,6 +395,7 @@ test("summary is one-shot with default-off MiMo review, durable status and retur
   await f.ui.open();
   const output = { markdownPath: "C:/mock/raw-s1.md", audioPaths: ["C:/mock/microphone-complete.wav", "C:/mock/system-complete.wav"] };
   f.push(completed(output));
+  assert.deepEqual(f.$("liveAudioOutputs").children.map(button => button.textContent), ["打开麦克风录音", "打开系统声音录音"]);
   assert.equal(f.$("liveCleanup"), undefined);
   assert.ok(!f.$("liveUseMimoReview").checked, "MiMo review defaults off");
   f.$("liveCleanerModel").value = "analysis-b";
@@ -390,6 +426,21 @@ test("summary is one-shot with default-off MiMo review, durable status and retur
   assert.deepEqual(f.last("meetingLiveSummarize").args[0],
     { sessionId: "s1", supplierId: "__legacy__", modelId: "analysis-b", useMimoReview: true, reviewModelId: "mimo-v2.5-asr" });
   assert.equal(f.count("meetingLiveCleanup"), 0);
+});
+
+test("audio buttons identify the track from its path or key, never from array order", async () => {
+  const f = fixture();
+  await f.ui.open();
+  const system = "/mock/system-complete.wav";
+  f.push(completed({ audioPaths: [system, "C:\\mock\\microphone-complete.wav", system] }));
+  assert.deepEqual(f.$("liveAudioOutputs").children.map(button => button.textContent), ["打开系统声音录音", "打开麦克风录音"]);
+  f.$("liveAudioOutputs").children[0].click();
+  await tick();
+  assert.deepEqual(f.last("meetingLiveOpenPath").args, [{ path: system }]);
+  f.push(completed({ audioPaths: { system: "/mock/legacy.wav" } }));
+  assert.equal(f.$("liveAudioOutputs").children[0].textContent, "打开系统声音录音");
+  f.push(completed({ audioPaths: ["/mock/unknown.wav"] }));
+  assert.equal(f.$("liveAudioOutputs").children[0].textContent, "打开完整录音");
 });
 
 test("MiMo audio review can recover a saved meeting when realtime ASR has no final text", async () => {
@@ -569,6 +620,9 @@ async function prepareBrowser(page) {
       "/live-meeting.css": ["src/renderer/live-meeting.css", "text/css"],
       "/app-shell.css": ["src/renderer/app-shell.css", "text/css"],
       "/reading-layout.css": ["src/renderer/reading-layout.css", "text/css"],
+      "/file-workspace.css": ["src/renderer/file-workspace.css", "text/css"],
+      "/workspace-sidebars.css": ["src/renderer/workspace-sidebars.css", "text/css"],
+      "/workspace-sidebars.js": ["src/renderer/workspace-sidebars.js", "text/javascript"],
       "/supplier-manager.css": ["src/renderer/supplier-manager.css", "text/css"],
       "/settings-workspace.css": ["src/renderer/settings-workspace.css", "text/css"],
       "/settings-workspace.js": ["src/renderer/settings-workspace.js", "text/javascript"],

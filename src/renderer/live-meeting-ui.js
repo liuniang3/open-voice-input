@@ -55,7 +55,54 @@
     let historyOpen = false;
     let historyLoading = false;
     let setupCollapsedOnActive = false;
+    let asrReadiness = new Map();
+    const sidebarPreferenceKey = "ovi-live-sidebars";
+    try {
+      const preference = JSON.parse(win.localStorage?.getItem(sidebarPreferenceKey));
+      $("liveSetupDetails").open = preference?.setup !== false;
+      historyOpen = preference?.history === true;
+    } catch { $("liveSetupDetails").open = true; }
     const busy = new Set();
+
+    function saveSidebars() {
+      try { win.localStorage?.setItem(sidebarPreferenceKey, JSON.stringify({ setup: Boolean($("liveSetupDetails").open), history: historyOpen })); } catch { /* Optional view preference. */ }
+    }
+
+    function syncSidebars() {
+      const details = $("liveSetupDetails");
+      if (win.innerWidth <= 900 && details.open) historyOpen = false;
+      const setupOpen = Boolean(details.open) && !windowFlags.floating;
+      $("liveSetupToggle")?.setAttribute("aria-expanded", String(setupOpen));
+      $("liveHistoryBrowser").hidden = !historyOpen || windowFlags.floating;
+      $("liveHistoryToggle").setAttribute("aria-expanded", String(historyOpen && !windowFlags.floating));
+      const backdrop = $("liveSidebarBackdrop");
+      if (backdrop) backdrop.hidden = windowFlags.floating || win.innerWidth > 900 || (!setupOpen && !historyOpen);
+    }
+
+    function setSetupOpen(value) {
+      $("liveSetupDetails").open = Boolean(value);
+      if (value && win.innerWidth <= 900) historyOpen = false;
+      syncSidebars(); saveSidebars();
+    }
+
+    function updateAsrReadiness(settings) {
+      const chosen = asrDefaults.workspaceSelection(settings, "live").modelId;
+      asrReadiness = new Map([...new Set([...modelIds, chosen, ...Object.keys(settings.meetingRealtimeProfiles || {})])]
+        .map(modelId => [modelId, asrDefaults.workspaceReadiness(settings, "live", {
+          modelId, provider: batchModel(modelId) ? "mimo" : /^fun-asr/.test(modelId) ? "fun-asr" : "qwen3-asr"
+        })]));
+    }
+
+    function currentAsrReadiness() {
+      const model = selectedModel();
+      if (!supportedModel(model)) return { ready: false, message: "请选择与会议转录兼容的 ASR 模型。" };
+      return asrReadiness.get(model) || asrReadiness.get(/^fun-asr/.test(model) ? "fun-asr-realtime" : DEFAULT_MODEL)
+        || { ready: false, message: "请先在语音识别设置中配置当前 ASR 供应商。" };
+    }
+
+    function expandUnconfiguredSetup() {
+      if (settingsReady && !active(dto) && !currentAsrReadiness().ready) setSetupOpen(true);
+    }
 
     function selectedModel() {
       if ($("liveModel").value === asrDefaults.FOLLOW_DICTATION) return asrDefaults.dictationSelection(asrSettings, "live").modelId;
@@ -126,6 +173,8 @@
       $("liveSaveInterval").value = [10, 15, 30, 60, 120].includes(Number(settings.meetingAutosaveIntervalSeconds))
         ? String(settings.meetingAutosaveIntervalSeconds) : "30";
       settingsReady = true;
+      updateAsrReadiness(settings);
+      expandUnconfiguredSetup();
     }
 
     async function invoke(method, payload) {
@@ -222,8 +271,18 @@
     }
 
     function audioOutputs() {
-      const paths = Array.isArray(dto.audioPaths) ? dto.audioPaths : Object.values(dto.audioPaths || {});
-      return [...new Set(paths.filter((path) => typeof path === "string" && path))];
+      const entries = Array.isArray(dto.audioPaths) ? dto.audioPaths.map(path => ["", path]) : Object.entries(dto.audioPaths || {});
+      const labels = { microphone: "打开麦克风录音", system: "打开系统声音录音", mixed: "打开混合录音" };
+      const seen = new Set();
+      return entries.filter(([, path]) => {
+        if (typeof path !== "string" || !path || seen.has(path)) return false;
+        seen.add(path);
+        return true;
+      }).map(([track, path], index, paths) => {
+        const filename = path.split(/[\\/]/).pop();
+        const source = labels[track] ? track : /^(microphone|system|mixed)-complete\.wav$/i.exec(filename)?.[1]?.toLowerCase();
+        return { path, label: labels[source] || (paths.length === 1 ? "打开完整录音" : `打开录音文件 ${index + 1}`) };
+      });
     }
 
     function acceptWindow(flags) {
@@ -280,7 +339,6 @@
     function renderSummary() {
       const summary = dto.summary;
       $("liveSummarySection").hidden = !summary;
-      $("liveSummaryResize").hidden = !summary;
       const signature = JSON.stringify(summary || null);
       if (signature === summarySignature) return;
       summarySignature = signature;
@@ -466,6 +524,8 @@
 
     function setHistoryOpen(value) {
       historyOpen = Boolean(value) && !windowFlags.floating;
+      if (historyOpen && win.innerWidth <= 900) $("liveSetupDetails").open = false;
+      syncSidebars(); saveSidebars();
       renderHistory();
       if (historyOpen && !historyLoading) void refreshHistory();
     }
@@ -510,7 +570,7 @@
       if (setupDetails) {
         // Collapse setup once when a capture becomes active so the transcript keeps the space.
         if (isActive && !setupCollapsedOnActive) {
-          setupDetails.open = false;
+          setSetupOpen(false);
           setupCollapsedOnActive = true;
         }
         if (!isActive) setupCollapsedOnActive = false;
@@ -519,6 +579,12 @@
       if (setupMeta) {
         const modelLabel = $("liveModel").selectedOptions?.[0]?.textContent || selectedModel() || "";
         setupMeta.textContent = [dto.title || "未命名会议", modelLabel].filter(Boolean).join(" · ");
+      }
+      const readiness = currentAsrReadiness();
+      if ($("liveAsrConfigStatus")) {
+        $("liveAsrConfigStatus").textContent = readiness.message;
+        $("liveAsrConfigStatus").hidden = readiness.ready;
+        $("liveAsrConfigStatus").dataset.ready = String(readiness.ready);
       }
       $("liveStop").textContent = stopFailed ? "重试停止并保存" : busy.has("stop") || dto.status === "stopping" ? "正在停止并保存…" : "停止并保存";
       for (const id of ["liveTitle", "liveModel", "liveCustomModel", "liveCaptureMode", "liveTranscriptionInterval", "liveSaveInterval", "liveChooseDestination", "liveDefaultDestination"]) $(id).disabled = locked;
@@ -577,10 +643,10 @@
       if (signature !== audioSignature) {
         audioSignature = signature;
         $("liveAudioOutputs").replaceChildren();
-        paths.forEach((path, index) => {
+        paths.forEach(({ path, label }) => {
           const button = doc.createElement("button");
           button.type = "button";
-          button.textContent = `打开音频 ${index + 1}`;
+          button.textContent = label;
           button.title = path;
           button.disabled = !can("meetingLiveOpenPath");
           button.addEventListener("click", () => action("open", () => invoke("meetingLiveOpenPath", { path })));
@@ -633,10 +699,10 @@
       renderSummary();
       renderClock();
       renderHistory();
+      syncSidebars();
     }
 
     function open() {
-      setHistoryOpen(false);
       if (openFlight) return openFlight;
       opened = true;
       loaded = false;
@@ -664,6 +730,7 @@
             if (epoch === generation) {
               loadSettings(settings);
               if (active(dto) && dto.captureMode) $("liveCaptureMode").value = dto.captureMode;
+              if (historyOpen) void refreshHistory();
             }
           } catch (error) {
             if (epoch === generation) errorText = error.message;
@@ -748,7 +815,7 @@
     for (const id of ["liveFontSize", "liveMinimalFontSize"]) $(id).addEventListener("input", () => presentation({ fontSize: Number($(id).value) }));
     $("liveOpacity").addEventListener("input", () => presentation({ opacity: Number($("liveOpacity").value) / 100 }));
     win.addEventListener("resize", () => {
-      if (!windowFlags.floating) return;
+      if (!windowFlags.floating) { syncSidebars(); return; }
       const minimal = win.innerWidth < 420 || win.innerHeight < 260;
       if (minimal !== windowFlags.minimal) { windowFlags.minimal = minimal; render(); }
     });
@@ -774,12 +841,15 @@
     });
     function saveModel() {
       render();
+      expandUnconfiguredSetup();
       if (!supportedModel(selectedModel()) || active(dto)) return;
       const modelId = selectedModel();
       const followsDictation = $("liveModel").value === asrDefaults.FOLLOW_DICTATION;
       void action("model", async () => {
-        await invoke("saveSettings", { meetingRealtimeModel: modelId, meetingRealtimeFollowDictation: followsDictation });
+        const settings = await invoke("saveSettings", { meetingRealtimeModel: modelId, meetingRealtimeFollowDictation: followsDictation });
         asrSettings.meetingRealtimeFollowDictation = followsDictation;
+        updateAsrReadiness(settings);
+        expandUnconfiguredSetup();
       });
     }
     function saveIntervals() {
@@ -799,6 +869,13 @@
     $("liveHistoryClose").addEventListener("click", () => setHistoryOpen(false));
     $("liveHistoryRefresh").addEventListener("click", () => { void refreshHistory(); });
     $("liveHistorySearch").addEventListener("input", renderHistory);
+    $("liveSetupToggle")?.addEventListener("click", () => setSetupOpen(!$("liveSetupDetails").open));
+    $("liveSetupDetails")?.addEventListener("toggle", () => { syncSidebars(); saveSidebars(); });
+    const closeSidebars = () => { setSetupOpen(false); setHistoryOpen(false); $("liveSetupToggle")?.focus?.(); };
+    $("liveSidebarBackdrop")?.addEventListener("click", closeSidebars);
+    win.addEventListener("keydown", event => {
+      if (opened && event.key === "Escape" && $("liveSidebarBackdrop")?.hidden === false) { event.preventDefault(); closeSidebars(); }
+    });
     $("liveHistoryBrowser").addEventListener("keydown", (event) => {
       if (event.key === "Escape") { event.preventDefault(); setHistoryOpen(false); $("liveHistoryToggle").focus(); }
     });
