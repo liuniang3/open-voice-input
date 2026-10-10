@@ -658,7 +658,7 @@ function pickBlockTimes(it) {
 
 function formatTranscriptBlocks(doc) {
   const items = Array.isArray(doc?.items) ? doc.items : [];
-  return items.map((it) => {
+  const blocks = items.map((it) => {
     const { beginMs, endMs } = pickBlockTimes(it);
     return {
       id: it.id,
@@ -672,6 +672,13 @@ function formatTranscriptBlocks(doc) {
       text: String(it.text || it.correctedText || "")
     };
   });
+  for (const range of doc?.missingRanges || []) {
+    blocks.push({ id: `missing:${range.track}:${range.seq}`, speakerId: "未完成",
+      beginMs: range.beginMs, endMs: range.endMs,
+      timeLabel: `${formatClockMs(range.beginMs)} – ${formatClockMs(range.endMs)}`,
+      text: "此时间段尚未完成转写，已完成内容保留，可继续重试。" });
+  }
+  return blocks.sort((a, b) => (a.beginMs ?? 0) - (b.beginMs ?? 0));
 }
 
 /**
@@ -1129,6 +1136,7 @@ function summaryErrorText(code) {
     postprocess_response_incomplete: "模型返回中途结束，重试机会已用完",
     postprocess_output_limit: "模型输出达到上限，请提高最大输出或换用更大输出模型",
     postprocess_context_limit: "供应商拒绝了上下文长度，请检查该模型的上下文设置",
+    postprocess_transcription_incomplete: "原始转写尚未完成，请先重试缺失时间段",
     postprocess_credentials_invalid: "模型认证失败，请检查供应商地址及密钥",
     postprocess_credentials_missing: "尚未配置模型密钥",
     postprocess_rate_limited: "供应商限流，重试机会已用完",

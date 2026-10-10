@@ -1,3 +1,5 @@
+const { assertAsrComplete } = require("./completion");
+
 function buildAsrUserContent({ audioDataUrl }) {
   return [
     {
@@ -16,7 +18,7 @@ function createQwen3AsrProvider({ client, cleanTranscript, getOptions = () => ({
     if (options.language) asrOptions.language = options.language;
     if (typeof options.enableItn === "boolean") asrOptions.enable_itn = options.enableItn;
 
-    return client.requestChat(
+    const response = await client.requestChat(
       [
         {
           role: "user",
@@ -25,10 +27,12 @@ function createQwen3AsrProvider({ client, cleanTranscript, getOptions = () => ({
       ],
       {
         extraBody: Object.keys(asrOptions).length ? { asr_options: asrOptions } : {},
-        maxTokens: 2048,
+        maxTokens: null,
+        includeSampling: false,
         signal: signal || undefined
       }
     );
+    return assertAsrComplete(response);
   }
 
   async function transcribeRaw({ audioDataUrl, signal = null }) {

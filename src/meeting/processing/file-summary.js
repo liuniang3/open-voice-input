@@ -46,9 +46,20 @@ async function readRawTranscript(sessionDir) {
   for (const file of candidates) {
     try {
       assertPathInsideRoot(sessionDir, file);
+      let job = null;
+      try { job = JSON.parse(await fs.readFile(path.join(path.dirname(file), "job.json"), "utf8")); }
+      catch (error) { if (error.code !== "ENOENT") throw fault("postprocess_transcription_incomplete"); }
+      if (job && (job.status !== "completed" || Object.values(job.tracks || {})
+        .some(track => (track.segments || []).some(segment => segment.status !== "completed")))) {
+        throw fault("postprocess_transcription_incomplete");
+      }
       const raw = JSON.parse(await fs.readFile(file, "utf8"));
+      if (raw.complete === false || (job && Number(raw.generation || 1) !== Number(job.generation || 1))) {
+        throw fault("postprocess_transcription_incomplete");
+      }
       if (raw && Array.isArray(raw.items)) return { file, transcript: raw };
-    } catch {
+    } catch (error) {
+      if (error.code === "postprocess_transcription_incomplete") throw error;
       /* missing or corrupt candidate; keep scanning */
     }
   }

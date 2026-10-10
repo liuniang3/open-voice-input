@@ -9,7 +9,7 @@ const {
 const {
   createNoBucketMeetingTranscriptionService
 } = require("../transcription/no-bucket-service");
-const { JOB_STATUS, SEGMENT_STATUS, QWEN_NO_BUCKET } = require("../transcription/constants");
+const { JOB_STATUS, SEGMENT_STATUS, QWEN_NO_BUCKET, fileAsrLimits } = require("../transcription/constants");
 const { getSessionDir, assertPathInsideRoot } = require("../paths");
 const { resolveMeetingQwenCredentials } = require("./meeting-credentials");
 const { resolveMeetingFileAsrCredentials } = require("./file-asr-credentials");
@@ -1236,7 +1236,7 @@ function createMeetingSessionProcessor({
       if (processMode === "file") {
         const creds = resolveFileCreds();
         const fileLimits = {
-          ...QWEN_NO_BUCKET,
+          ...fileAsrLimits(creds.provider),
           provider: creds.provider,
           mode: "file",
           note: "Imported audio/video file mode uses local Base64 segments without OSS upload or speaker diarization."
@@ -1295,7 +1295,8 @@ function createMeetingSessionProcessor({
           await nb.prepare({
             ...prepArgs,
             modelId: creds.modelId,
-            fingerprintMode: "file"
+            fingerprintMode: "file",
+            signal
           });
         }
         const job = await nb.run({ signal });
@@ -1547,7 +1548,7 @@ function createMeetingSessionProcessor({
           })
         : resolveCreds();
       const nb = makeNoBucket(sessionDir, id, creds, signal, fileMode ? "file_asr_retry" : "no_bucket_retry", {
-        limits: fileMode ? { ...QWEN_NO_BUCKET, provider: creds.provider, mode: "file" } : QWEN_NO_BUCKET,
+        limits: fileMode ? { ...fileAsrLimits(creds.provider), mode: "file" } : QWEN_NO_BUCKET,
         fingerprintMode: fileMode ? "file" : "no_bucket",
         transcriptMeta: fileMode ? buildFileTranscriptMeta(session, creds) : {}
       });

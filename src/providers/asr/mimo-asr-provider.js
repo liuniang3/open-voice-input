@@ -1,3 +1,4 @@
+const { assertAsrComplete } = require("./completion");
 const MIMO_ASR_MODEL = "mimo-v2.5-asr";
 
 function normalizeMimoAsrModel(model) {
@@ -32,7 +33,7 @@ function createMimoAsrProvider({ client, cleanTranscript, getOptions = () => ({}
           }
         },
         includeSampling: false,
-        maxTokens: 2048,
+        maxTokens: null,
         model: normalizeMimoAsrModel(options.model),
         signal: signal || undefined,
         stream: true
@@ -40,10 +41,7 @@ function createMimoAsrProvider({ client, cleanTranscript, getOptions = () => ({}
     );
 
     if (signal?.aborted) throw Object.assign(new Error("aborted"), { code: "aborted" });
-    if (response.finishReason && response.finishReason !== "stop") {
-      throw Object.assign(new Error("ASR response did not complete"), { code: "asr_response_incomplete" });
-    }
-    return response;
+    return assertAsrComplete(response);
   }
 
   async function transcribeRaw(payload) {

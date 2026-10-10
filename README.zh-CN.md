@@ -95,6 +95,10 @@ Open Voice Input 目前是 Electron MVP，不是真正的 Windows 输入法驱�
 
 分段文本只保存在当前进程内存中，不写入磁盘。`Fast` 模式直接拼接各段原始转写；`Stable` 模式先拼接全部转写，再调用一次清理模型，避免每段分别清理导致上下文割裂。
 
+**文件转写的分段与恢复**：新任务在约 180 秒附近优先寻找至少 200 毫秒的安静区间，按实际编码体积限制每次上传，采用 210 秒与 9 MB Base64 的客户端安全预算。这些是请求策略，不是模型的最大输出能力；千问官方限制仍是 5 分钟和 10 MB，MiMo 不套用千问的官方时长限制。专用 ASR 不再传入固定的 2048-token 上限及语言模型采样参数。供应商明确报告输出截断时，程序仅将该段继续拆分重试，成功的子段即时保存，重启或手动重试后复用缓存。拆分有最小时长和层数限制；仍失败的范围明确保留为缺口，不用半截文字冒充完整转写。
+
+文件处理中与失败后可以查看、复制和导出已完成内容；未完成区间会单独标注。完整原始音频保持不变，只有全部转写完成后才保存完整原文并允许生成摘要。旧的成功缓存继续保留；历史缓存若已经包含过去未被检测到的截断文字，需要重新转写才能恢复，程序无法仅凭旧文本判断丢失了哪些语音。
+
 来源：[MiMo-V2.5-ASR 语音识别](https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/Speech-Recognition)、[阿里云非实时语音识别](https://help.aliyun.com/zh/model-studio/non-realtime-speech-recognition-user-guide)、[阿里云实时语音识别](https://help.aliyun.com/zh/model-studio/real-time-speech-recognition-user-guide)。
 
 ## 安装

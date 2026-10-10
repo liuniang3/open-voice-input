@@ -88,6 +88,10 @@ The client uploads 16 kHz mono 16-bit PCM WAV. Its Base64 representation is appr
 
 Segment transcripts are cached only in process memory. `Fast` mode joins raw ASR segments directly. `Stable` mode joins every segment first and invokes the cleanup model once, avoiding per-segment rewriting.
 
+**File ASR segmentation and recovery:** new tasks prefer a quiet boundary near 180 seconds, with a 210-second / 9 MB Base64 client safety budget checked against actual encoded size. These are upload policies, not model output limits. Qwen's documented limit remains five minutes and 10 MB; MiMo uses its own policy without inheriting Qwen's documented duration cap. Dedicated ASR requests omit the arbitrary 2048-token output cap and LLM sampling parameters. Explicitly truncated ranges are split into shorter requests, with the child plan and successful results persisted for restart/retry. Recovery stops at a minimum duration/depth and reports remaining gaps instead of accepting partial output.
+
+Completed file-transcription ranges are visible and exportable while processing or after failure; partial exports identify missing ranges. Original full audio is preserved, and summaries require a complete current transcript. Existing successful caches are retained. Historical text that was already truncated by an older version must be retranscribed; missing speech cannot be reliably inferred from that cached text alone.
+
 Sources: [MiMo-V2.5-ASR Speech Recognition](https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/Speech-Recognition), [Alibaba Cloud non-realtime ASR](https://help.aliyun.com/zh/model-studio/non-realtime-speech-recognition-user-guide), and [Alibaba Cloud realtime ASR](https://help.aliyun.com/zh/model-studio/real-time-speech-recognition-user-guide).
 
 ## Install

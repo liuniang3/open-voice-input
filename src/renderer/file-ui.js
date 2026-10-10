@@ -26,6 +26,7 @@
     analysis: null,
     resultTab: "raw",
     rawDoc: null,
+    rawRevision: null,
     summaryDoc: null,
     summaryJob: null,
     summaryPath: "",
@@ -530,7 +531,7 @@
     if (atSummaryRevision === summaryRevision && job?.ok) acceptSummaryJob(job.summary);
     renderSelected();
     renderControls();
-    if (state.process?.stage === "completed" || row?.hasRaw) {
+    if (state.process?.stage === "completed" || row?.hasRaw || state.process?.transcription?.segmentCompleted > 0) {
       await loadResult(state.resultTab, { expectedSessionId: state.selectedId });
     } else {
       resetResultView("文件已导入，开始转写后结果会显示在这里。");
@@ -717,7 +718,12 @@
     renderControls();
   }
 
-  async function loadResult(tab, { expectedSessionId = null } = {}) {
+  function rawRevision() {
+    const t = state.process?.transcription || {};
+    return [state.process?.stage, t.jobGeneration, t.segmentCompleted, t.segmentTotal].join(":");
+  }
+
+  async function loadResult(tab, { expectedSessionId = null, refreshRaw = false } = {}) {
     if (!state.selectedId || (expectedSessionId && expectedSessionId !== state.selectedId)) return;
     state.resultTab = tab === "summary" ? "summary" : "raw";
     for (const button of panel.querySelectorAll("[data-file-tab]")) {
@@ -728,14 +734,19 @@
     const sessionId = state.selectedId;
     const token = channels.result.next();
     const e = els();
-    if (e.resultEmpty) e.resultEmpty.hidden = false;
-    if (e.resultContent) e.resultContent.hidden = true;
+    const scroll = $("fileResultPane")?.scrollTop || 0;
+    if (!refreshRaw) {
+      if (e.resultEmpty) e.resultEmpty.hidden = false;
+      if (e.resultContent) e.resultContent.hidden = true;
+    }
     try {
       if (state.resultTab === "raw") {
-        if (!state.rawDoc) {
+        if (!state.rawDoc || refreshRaw || state.rawRevision !== rawRevision()) {
+          const revision = rawRevision();
           const res = await window.mimoInput.meetingTranscriptGet({ sessionId });
           if (!accept(channels.result, token, sessionId) || state.selectedId !== sessionId) return;
           state.rawDoc = res?.ok ? res.transcript : null;
+          state.rawRevision = revision;
         }
         if (!accept(channels.result, token, sessionId)) return;
         const blocks = ui.formatTranscriptBlocks?.(state.rawDoc) || [];
@@ -747,6 +758,7 @@
           e.resultContent.hidden = blocks.length === 0;
           ui.appendTranscriptBlocks?.(e.resultContent, blocks);
         }
+        if (refreshRaw && $("fileResultPane")) $("fileResultPane").scrollTop = scroll;
       } else {
         if (!state.summaryDoc) await loadSummaryResults(sessionId);
         if (!accept(channels.result, token, sessionId) || state.selectedId !== sessionId) return;
@@ -811,8 +823,9 @@
     if (process?.ok) state.process = process.processing;
     if (atSummaryRevision === summaryRevision && job?.ok) acceptSummaryJob(job.summary);
     renderControls();
-    if (state.process?.stage === "completed" && !state.rawDoc) {
-      await loadResult("raw", { expectedSessionId: sessionId });
+    if (state.resultTab === "raw" && (state.process?.transcription?.segmentCompleted > 0 || state.process?.stage === "completed")
+      && (!state.rawDoc || state.rawRevision !== rawRevision())) {
+      await loadResult("raw", { expectedSessionId: sessionId, refreshRaw: true });
     }
     if (state.summaryJob?.summary && state.resultTab !== "raw") {
       await loadResult(state.resultTab, { expectedSessionId: sessionId });

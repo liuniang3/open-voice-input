@@ -16,7 +16,8 @@ const PROFILE_ALLOWLIST = new Set([
   "maxDataUriChars",
   "workDirName",
   "timestampPrecision",
-  "diarization"
+  "diarization",
+  "id", "pauseSearchSeconds", "pauseLookaheadSeconds", "minSplitSeconds", "maxSplitDepth"
 ]);
 
 function sha256Text(text) {
@@ -137,6 +138,12 @@ function sanitizeTranscriptForPersist(transcript) {
     speakers: sanitizeForPersist(src.speakers || {}),
     policy: sanitizeForPersist(src.policy || {}),
     count: 0,
+    ...(typeof src.complete === "boolean" ? {
+      complete: src.complete,
+      segmentCompleted: Number(src.segmentCompleted) || 0,
+      segmentTotal: Number(src.segmentTotal) || 0,
+      missingRanges: sanitizeForPersist(src.missingRanges || [])
+    } : {}),
     items: []
   };
 

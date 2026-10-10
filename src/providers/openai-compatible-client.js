@@ -64,6 +64,7 @@ function createOpenAiCompatibleClient({
   async function requestChat(messages, {
     extraBody = {},
     maxTokens = 1024,
+    includeSampling = true,
     signal = null,
     requestHeaders = null,
     stream = false,
@@ -74,7 +75,7 @@ function createOpenAiCompatibleClient({
   } = {}) {
     if (stream) {
       return withRetries(attempt => requestStream(messages, {
-        extraBody, maxTokens, signal, requestHeaders, onProgress, attempt, idleTimeoutMs, progressTimeoutMs
+        extraBody, maxTokens, includeSampling, signal, requestHeaders, onProgress, attempt, idleTimeoutMs, progressTimeoutMs
       }), { signal, maxRetries, sleepImpl, random, onRetry: value => notify(onProgress, { stage: "retrying", ...value }) });
     }
     if (signal?.aborted) {
@@ -123,9 +124,8 @@ function createOpenAiCompatibleClient({
           : {
               model: resolveModel(),
               messages,
-              max_completion_tokens: maxTokens,
-              temperature: 0,
-              top_p: 0.1,
+              ...(maxTokens == null ? {} : { max_completion_tokens: maxTokens }),
+              ...(includeSampling ? { temperature: 0, top_p: 0.1 } : {}),
               stream: false,
               ...extraBody
             })
@@ -146,6 +146,7 @@ function createOpenAiCompatibleClient({
         content: String(message.content || "").trim(),
         reasoningContent: String(message.reasoning_content || "").trim(),
         finishReason: parsed.finishReason,
+        completed: parsed.completed || parsed.finishReason === "stop",
         body: parsed.body
       };
     } catch (error) {
@@ -217,7 +218,9 @@ function createOpenAiCompatibleClient({
       headers[headerName] = `${headerValuePrefix}${key}`;
       const body = style === "responses"
         ? buildResponsesRequest(resolveModel(), messages, maxTokens, { ...extraBody, stream: true })
-        : { model: resolveModel(), messages, max_completion_tokens: maxTokens, ...extraBody, stream: true };
+        : { model: resolveModel(), messages,
+            ...(maxTokens == null ? {} : { max_completion_tokens: maxTokens }),
+            ...extraBody, stream: true };
       const response = await abortable(fetchFn(`${resolveBaseUrl()}/${style === "responses" ? "responses" : "chat/completions"}`, {
         method: "POST", headers, body: JSON.stringify(body), signal: controller.signal
       }), controller.signal);
@@ -284,7 +287,7 @@ function createOpenAiCompatibleClient({
       }
       progress({ stage: "validating", outputChars: String(parsed.message.content || "").length });
       return { content: String(parsed.message.content || "").trim(), reasoningContent: String(parsed.message.reasoning_content || "").trim(),
-        finishReason: parsed.finishReason, body: parsed.body };
+        finishReason: parsed.finishReason, completed: true, body: parsed.body };
     } catch (error) {
       if (signal?.aborted) throw abortError();
       if (timeoutCode) throw Object.assign(new Error(timeoutCode), { code: timeoutCode });
@@ -321,7 +324,7 @@ function buildResponsesRequest(model, messages, maxTokens, extraBody) {
   return {
     model,
     input: Array.isArray(messages) ? messages : [],
-    max_output_tokens: maxTokens,
+    ...(maxTokens == null ? {} : { max_output_tokens: maxTokens }),
     stream: false,
     ...extras
   };

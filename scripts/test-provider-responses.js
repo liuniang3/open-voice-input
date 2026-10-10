@@ -190,7 +190,8 @@ async function main() {
         for (const body of [sse(reason), json(reason)]) {
           const client = clientFor("mimo", async () => response(body));
           const provider = createMimoAsrProvider({ client, cleanTranscript: text => { cleans++; return text; } });
-          await assert.rejects(provider[method]({ audioDataUrl: "data:audio/wav;base64,AA==" }), hasCode("asr_response_incomplete"));
+          await assert.rejects(provider[method]({ audioDataUrl: "data:audio/wav;base64,AA==" }),
+            hasCode(reason === "length" ? "asr_output_truncated" : "asr_response_incomplete"));
         }
       }
       assert.equal(cleans, 0);

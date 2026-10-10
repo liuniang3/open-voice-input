@@ -36,7 +36,7 @@ function createMimoClient({ getSettings, useEnvironmentFallback = true, fetchImp
     const body = {
       model: model || settings.model,
       messages,
-      max_completion_tokens: maxTokens,
+      ...(maxTokens == null ? {} : { max_completion_tokens: maxTokens }),
       stream,
       ...extraBody
     };
@@ -83,6 +83,7 @@ function createMimoClient({ getSettings, useEnvironmentFallback = true, fetchImp
       return {
         content: String(message.content || "").trim(),
         finishReason: parsed.finishReason,
+        completed: parsed.completed || parsed.finishReason === "stop",
         reasoningContent: String(message.reasoning_content || "").trim()
       };
     } catch (error) {

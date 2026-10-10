@@ -131,6 +131,12 @@ function toTranscriptDto(transcript) {
     speakers: transcript.speakers || {},
     policy: stripForbiddenKeys(transcript.policy || {}),
     count: items.length,
+    ...(typeof transcript.complete === "boolean" ? {
+      complete: transcript.complete,
+      segmentCompleted: Number(transcript.segmentCompleted) || 0,
+      segmentTotal: Number(transcript.segmentTotal) || 0,
+      missingRanges: stripForbiddenKeys(transcript.missingRanges || [])
+    } : {}),
     items: items.map((item) => ({
       id: item.id ?? null,
       track: item.track ?? null,

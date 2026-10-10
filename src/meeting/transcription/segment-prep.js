@@ -7,11 +7,11 @@ const { parseWavHeader, readPcm16Frames, buildMonoPcm16WavHeader } = require("./
 const { createLinearPcm16Resampler } = require("./resample");
 const { mapArtifactTimeRange } = require("../archive/export-track-wav");
 const { QWEN_NO_BUCKET, MIB } = require("./constants");
+const { writeJsonAtomic } = require("./job-store");
 
 const READ_FRAMES = 16 * 1024;
 
-/** Effective PCM duration from 10 MiB Base64 budget (WAV+header ≈ raw*4/3). ~245s @16k mono. */
-const EFFECTIVE_PCM_DURATION_CAP_SECONDS = 245;
+const EFFECTIVE_PCM_DURATION_CAP_SECONDS = QWEN_NO_BUCKET.effectivePcmDurationCapSeconds;
 
 async function ensureDir(dir) {
   await fsp.mkdir(dir, { recursive: true });
@@ -38,13 +38,18 @@ function makePartSuffix() {
   return `${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString("hex")}`;
 }
 
-async function sha256File(filePath) {
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw Object.assign(new Error("aborted"), { code: "aborted" });
+}
+
+async function sha256File(filePath, signal) {
   const fh = await fsp.open(filePath, "r");
   const hash = crypto.createHash("sha256");
   try {
     const buf = Buffer.alloc(64 * 1024);
     let pos = 0;
     for (;;) {
+      throwIfAborted(signal);
       const { bytesRead } = await fh.read(buf, 0, buf.length, pos);
       if (bytesRead <= 0) break;
       hash.update(buf.subarray(0, bytesRead));
@@ -58,7 +63,7 @@ async function sha256File(filePath) {
 
 function estimateDataUriChars(wavBytes) {
   const b64 = Math.ceil(wavBytes / 3) * 4;
-  return 22 + b64;
+  return "data:audio/wav;base64,".length + b64;
 }
 
 /**
@@ -75,6 +80,16 @@ function createPcmAccumulator() {
       if (!buf || !buf.length) return;
       chunks.push(buf);
       total += buf.length;
+    },
+    peek(n = total) {
+      const size = Math.min(n, total);
+      const out = Buffer.alloc(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        offset += chunk.copy(out, offset, 0, Math.min(chunk.length, size - offset));
+        if (offset === size) break;
+      }
+      return out;
     },
     /** Take first n bytes; leave remainder. */
     take(n) {
@@ -113,22 +128,49 @@ function createPcmAccumulator() {
 
 function assertSegmentPreflight(wavBytes, durationSeconds, limits = QWEN_NO_BUCKET) {
   const dur = Number(durationSeconds);
-  if (dur > limits.hardSegmentSeconds || dur > limits.documentedMaxDurationSeconds) {
+  if (dur > limits.hardSegmentSeconds || (limits.documentedMaxDurationSeconds > 0 && dur > limits.documentedMaxDurationSeconds)) {
     const error = new Error(
-      `segment duration ${dur.toFixed(2)}s exceeds hard limit ${limits.hardSegmentSeconds}s (Qwen Base64 max 300s; effective PCM cap ~${EFFECTIVE_PCM_DURATION_CAP_SECONDS}s from 10 MiB Base64)`
+      `${limits.provider} segment duration ${dur.toFixed(2)}s exceeds upload duration budget`
     );
     error.code = "segment_duration_exceeded";
     throw error;
   }
   const uriChars = estimateDataUriChars(wavBytes);
-  if (uriChars > limits.maxDataUriChars || uriChars > limits.maxBase64Chars + 64) {
+  if (uriChars > limits.maxDataUriChars || Math.ceil(wavBytes / 3) * 4 > limits.maxBase64Chars) {
     const error = new Error(
-      `segment data URI ~${uriChars} chars exceeds ${limits.maxBase64Chars} Base64 budget (10 MiB; ~${EFFECTIVE_PCM_DURATION_CAP_SECONDS}s PCM @16k mono before network)`
+      `${limits.provider} segment data URI ~${uriChars} chars exceeds ${limits.maxBase64Chars} Base64 budget`
     );
     error.code = "segment_size_exceeded";
     throw error;
   }
   return { uriChars, durationSeconds: dur };
+}
+
+/** Prefer a quiet 200ms window nearest the target; continuous speech falls back to a bounded cut. */
+function choosePauseFrame(pcm, sampleRate, targetFrame, minFrame, maxFrame) {
+  const frames = Math.floor(pcm.length / 2);
+  const window = Math.max(1, Math.round(sampleRate * 0.2));
+  const step = Math.max(1, Math.round(sampleRate * 0.02));
+  const low = Math.max(Math.ceil(window / 2), Math.ceil(minFrame));
+  const high = Math.min(frames - Math.ceil(window / 2), Math.floor(maxFrame));
+  let best = Math.max(1, Math.min(frames - 1, Math.round(targetFrame)));
+  let distance = Infinity;
+  // A prefix sum makes the moving RMS search linear in the small search range.
+  const start = Math.max(0, low - Math.ceil(window / 2));
+  const end = Math.min(frames, high + Math.ceil(window / 2));
+  const sums = new Float64Array(Math.max(0, end - start) + 1);
+  for (let i = start; i < end; i++) {
+    const v = pcm.readInt16LE(i * 2) / 32768;
+    sums[i - start + 1] = sums[i - start] + v * v;
+  }
+  for (let center = low; center <= high; center += step) {
+    const a = center - Math.floor(window / 2), b = a + window;
+    if (b > end) continue;
+    const rms = Math.sqrt((sums[b - start] - sums[a - start]) / window);
+    const d = Math.abs(center - targetFrame);
+    if (rms <= 0.006 && d < distance) { best = center; distance = d; }
+  }
+  return best;
 }
 
 async function prepareTrackSegments({
@@ -140,7 +182,8 @@ async function prepareTrackSegments({
   outputDir,
   targetSegmentSeconds = QWEN_NO_BUCKET.targetSegmentSeconds,
   targetSampleRate = QWEN_NO_BUCKET.targetSampleRate,
-  limits = QWEN_NO_BUCKET
+  limits = QWEN_NO_BUCKET,
+  signal = null
 } = {}) {
   if (!wavPath) {
     const error = new Error("wavPath required");
@@ -170,8 +213,15 @@ async function prepareTrackSegments({
     throw error;
   }
 
-  const sourceSha = await sha256File(wavPath);
-  const targetFramesPerSeg = Math.max(1, Math.floor(targetSampleRate * targetSegmentSeconds));
+  const sourceSha = await sha256File(wavPath, signal);
+  const byteCap = Math.floor(Math.min(limits.maxBase64Chars, limits.maxDataUriChars - 64) / 4) * 3;
+  const hardFrames = Math.floor(Math.min(limits.hardSegmentSeconds,
+    limits.documentedMaxDurationSeconds > 0 ? limits.documentedMaxDurationSeconds : Infinity,
+    (byteCap - 44) / 2 / targetSampleRate) * targetSampleRate);
+  if (hardFrames < 1) throw Object.assign(new Error("ASR upload budget is too small."), { code: "segment_size_exceeded" });
+  const targetFramesPerSeg = Math.max(1, Math.min(hardFrames, Math.floor(targetSampleRate * targetSegmentSeconds)));
+  const searchFrames = Math.floor(targetSampleRate * Math.min(limits.pauseSearchSeconds || 0, targetSegmentSeconds * 0.1));
+  const lookaheadFrames = Math.min(hardFrames, targetFramesPerSeg + Math.floor(targetSampleRate * Math.min(limits.pauseLookaheadSeconds || 0, targetSegmentSeconds * 0.045)));
   const resampler = createLinearPcm16Resampler(wavInfo.sampleRate, targetSampleRate);
   const acc = createPcmAccumulator();
 
@@ -182,6 +232,7 @@ async function prepareTrackSegments({
   let segSourceFrameStart = 0;
 
   async function publishSegment(pcmBuf, sourceFrameStart, sourceFrameEnd, outFrameStart, outFrameEnd) {
+    throwIfAborted(signal);
     if (!pcmBuf.length) return null;
     const durationSeconds = pcmBuf.length / 2 / targetSampleRate;
     const header = buildMonoPcm16WavHeader(pcmBuf.length, targetSampleRate);
@@ -241,6 +292,12 @@ async function prepareTrackSegments({
       seq,
       sourceWavPath: path.resolve(wavPath),
       sourceWavSha256: sourceSha,
+      sourceTimeMapping: {
+        sessionOriginQpc: meta.sessionOriginQpc ?? null,
+        qpcFrequency: meta.qpcFrequency ?? null,
+        chunks: (meta.chunks || []).filter(c => c.endMs >= artifactBeginMs && c.beginMs <= artifactEndMs)
+          .map(c => ({ seq: c.seq, beginMs: c.beginMs, endMs: c.endMs, qpcStart: c.qpcStart, qpcFrequency: c.qpcFrequency }))
+      },
       sourceSampleRate: wavInfo.sampleRate,
       sourceFrameStart,
       sourceFrameEnd,
@@ -273,17 +330,20 @@ async function prepareTrackSegments({
   const srcFh = await fsp.open(wavInfo.path, "r");
   try {
     while (sourceFrameCursor < wavInfo.frameCount) {
+      throwIfAborted(signal);
       const end = Math.min(wavInfo.frameCount, sourceFrameCursor + READ_FRAMES);
       const pcmIn = await readPcm16Frames(wavInfo, sourceFrameCursor, end, srcFh);
       const pcmOut = resampler.push(pcmIn);
       sourceFrameCursor = end;
       acc.push(pcmOut);
 
-      while (acc.length / 2 >= targetFramesPerSeg) {
-        const takeBytes = targetFramesPerSeg * 2;
+      while (acc.length / 2 >= lookaheadFrames) {
+        const cutFrames = choosePauseFrame(acc.peek(lookaheadFrames * 2), targetSampleRate, targetFramesPerSeg,
+          Math.max(1, targetFramesPerSeg - searchFrames), lookaheadFrames);
+        const takeBytes = cutFrames * 2;
         const slice = acc.take(takeBytes);
         const outStart = outFrameCursor;
-        const outEnd = outFrameCursor + targetFramesPerSeg;
+        const outEnd = outFrameCursor + cutFrames;
         outFrameCursor = outEnd;
         const srcStart = segSourceFrameStart;
         const srcEndApprox = Math.min(
@@ -301,6 +361,16 @@ async function prepareTrackSegments({
 
   const tail = resampler.flush();
   if (tail.length) acc.push(tail);
+  while (acc.length / 2 > hardFrames) {
+    const cutFrames = choosePauseFrame(acc.peek(hardFrames * 2), targetSampleRate, targetFramesPerSeg,
+      Math.max(1, targetFramesPerSeg - searchFrames), hardFrames);
+    const outEnd = outFrameCursor + cutFrames;
+    const srcEnd = Math.min(wavInfo.frameCount, Math.round(outEnd / targetSampleRate * wavInfo.sampleRate));
+    const published = await publishSegment(acc.take(cutFrames * 2), segSourceFrameStart, srcEnd, outFrameCursor, outEnd);
+    if (published) segments.push(published);
+    outFrameCursor = outEnd;
+    segSourceFrameStart = srcEnd;
+  }
   if (acc.length >= 2) {
     const frames = Math.floor(acc.length / 2);
     const slice = acc.take(frames * 2);
@@ -330,6 +400,60 @@ async function prepareTrackSegments({
   };
 }
 
+async function splitPreparedSegment(segment, { outputDir, nextSeq, limits = QWEN_NO_BUCKET, signal } = {}) {
+  throwIfAborted(signal);
+  const info = await parseWavHeader(segment.wavPath);
+  const parentMeta = JSON.parse(await fsp.readFile(segment.metaPath, "utf8"));
+  let sourceTimeMapping = parentMeta.sourceTimeMapping;
+  if (!sourceTimeMapping && parentMeta.sourceWavPath) {
+    // Old plans retain their original archive sidecar; prefer it over interpolating across recording pauses.
+    sourceTimeMapping = await fsp.readFile(`${parentMeta.sourceWavPath}.sidecar.json`, "utf8")
+      .then(JSON.parse).catch(() => null);
+  }
+  const minFrames = Math.ceil(info.sampleRate * (limits.minSplitSeconds || 5));
+  if (info.frameCount < minFrames * 2 || (segment.splitDepth || 0) >= (limits.maxSplitDepth || 6)) return null;
+  await ensureDir(outputDir);
+  const pcm = await readPcm16Frames(info, 0, info.frameCount);
+  if (pcm.length !== info.frameCount * 2) throw Object.assign(new Error("Segment audio is incomplete."), { code: "segment_audio_incomplete" });
+  const middle = Math.floor(info.frameCount / 2);
+  const range = Math.min(Math.floor(info.sampleRate * 8), middle - minFrames);
+  const cut = choosePauseFrame(pcm, info.sampleRate, middle, middle - range, middle + range);
+  const children = [];
+  function map(valueStart, valueEnd, frame) {
+    return valueStart == null || valueEnd == null ? null : valueStart + (valueEnd - valueStart) * frame / info.frameCount;
+  }
+  for (const [index, start, end] of [[0, 0, cut], [1, cut, info.frameCount]]) {
+    throwIfAborted(signal);
+    const seq = nextSeq + index;
+    const wavPath = path.join(outputDir, `${segment.track || "audio"}_seg_${String(seq).padStart(4, "0")}.wav`);
+    const metaPath = wavPath.replace(/\.wav$/, ".json");
+    const data = pcm.subarray(start * 2, end * 2);
+    const bytes = Buffer.concat([buildMonoPcm16WavHeader(data.length, info.sampleRate), data]);
+    assertSegmentPreflight(bytes.length, (end - start) / info.sampleRate, limits);
+    const part = `${wavPath}.${makePartSuffix()}.part`;
+    await fsp.writeFile(part, bytes);
+    await fsp.rename(part, wavPath);
+    const child = { ...segment, seq, wavPath, metaPath,
+      contentSha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+      durationSeconds: (end - start) / info.sampleRate,
+      splitDepth: (segment.splitDepth || 0) + 1, parentSeq: segment.seq,
+      attempts: 0, status: "pending", hasResult: false, lastError: null };
+    for (const prefix of ["artifact", "session", "qpc"]) {
+      const a = prefix === "qpc" ? "qpcBegin" : `${prefix}BeginMs`;
+      const b = prefix === "qpc" ? "qpcEnd" : `${prefix}EndMs`;
+      child[a] = map(segment[a], segment[b], start);
+      child[b] = map(segment[a], segment[b], end);
+    }
+    if (sourceTimeMapping) {
+      const mapped = mapArtifactTimeRange(sourceTimeMapping, child.artifactBeginMs, child.artifactEndMs);
+      for (const field of ["sessionBeginMs", "sessionEndMs", "qpcBegin", "qpcEnd"]) child[field] = mapped[field];
+    }
+    await writeJsonAtomic(metaPath, { ...child, sourceTimeMapping });
+    children.push(child);
+  }
+  return children;
+}
+
 async function segmentToDataUrl(segmentWavPath, limits = QWEN_NO_BUCKET) {
   const info = await parseWavHeader(segmentWavPath);
   const buf = await fsp.readFile(segmentWavPath);
@@ -352,6 +476,8 @@ module.exports = {
   estimateDataUriChars,
   sha256File,
   createPcmAccumulator,
+  choosePauseFrame,
+  splitPreparedSegment,
   EFFECTIVE_PCM_DURATION_CAP_SECONDS,
   MIB
 };

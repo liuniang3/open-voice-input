@@ -182,6 +182,7 @@ async function testProviderDispatchAndIsolation() {
     return responseJson({
       choices: [
         {
+          finish_reason: "stop",
           message: {
             content: isMimo ? "mimo imported text" : "qwen imported text"
           }
@@ -261,7 +262,7 @@ async function testFailedRetryKeepsProvider() {
     const body = JSON.parse(init.body);
     calls.push({ url, body });
     if (fail) return responseJson({ error: { message: "mock upstream failure" } }, 503);
-    return responseJson({ choices: [{ message: { content: "retry succeeded" } }] });
+    return responseJson({ choices: [{ finish_reason: "stop", message: { content: "retry succeeded" } }] });
   }, async () => {
     await assert.rejects(() => processor.processSession(fixture.sessionId));
     const jobPath = path.join(fixture.sessionDir, "transcription", "qwen-no-bucket", "job.json");
@@ -352,7 +353,7 @@ async function testAnalysisReadsImportedRawTranscript() {
     apiKey: FAKE_MIMO_KEY
   }));
 
-  await withMockFetch(async () => responseJson({ choices: [{ message: { content: "analysis source text" } }] }), async () => {
+  await withMockFetch(async () => responseJson({ choices: [{ finish_reason: "stop", message: { content: "analysis source text" } }] }), async () => {
     await processor.processSession(fixture.sessionId);
   });
 
@@ -402,7 +403,7 @@ async function testForcedAnalysisUsesFreshGenerationWithoutStaleResults() {
     apiKey: FAKE_MIMO_KEY
   }));
 
-  await withMockFetch(async () => responseJson({ choices: [{ message: { content: "fresh generation text" } }] }), async () => {
+  await withMockFetch(async () => responseJson({ choices: [{ finish_reason: "stop", message: { content: "fresh generation text" } }] }), async () => {
     await processor.processSession(fixture.sessionId);
   });
 
@@ -476,7 +477,7 @@ async function testSparseLegacySummaryRehydratesFromMergeArtifact() {
     apiKey: FAKE_MIMO_KEY
   }));
 
-  await withMockFetch(async () => responseJson({ choices: [{ message: { content: "legacy source text" } }] }), async () => {
+  await withMockFetch(async () => responseJson({ choices: [{ finish_reason: "stop", message: { content: "legacy source text" } }] }), async () => {
     await processor.processSession(fixture.sessionId);
   });
 

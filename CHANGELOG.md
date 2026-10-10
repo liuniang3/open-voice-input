@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Fixed
+
+- Dedicated Qwen and MiMo ASR omit the arbitrary 2048-token output cap and language-model sampling parameters. Ordinary cleanup/summary budgets remain unchanged. Require a normal completion marker and reject truncated or interrupted ASR output before publishing it.
+- File ASR prefers pauses near the 180-second target and enforces actual encoded-size budgets before upload. Qwen's documented five-minute limit is distinct from the app's 210-second / 9 MB Base64 safety budget; MiMo has an independent policy without assuming an undocumented duration/output maximum.
+- On explicit output truncation or an oversized legacy upload, split only the affected audio range into shorter requests. Persist the child plan before sending, reuse successful checkpoints after cancellation/restart and preserve exact audio coverage, ordered text and the complete original recording.
+- Display completed file-transcription ranges while remaining requests run or fail. Show missing ranges, preserve reading position, refresh when returning from the summary view and label partial Markdown/text/Word/JSON exports. Incomplete or stale original transcripts cannot be used as complete summary sources.
+
+### Validation
+
+- Regression coverage uses synthetic audio and simulated provider responses for pause boundaries, exact frame coverage, encoded-size limits, truncation recovery, cancellation, checkpoint reuse, legacy plans, partial exports and view updates. No real user recordings or provider credentials are included.
+
 ## v0.4.19 - 2026-10-10
 
 ### Changed

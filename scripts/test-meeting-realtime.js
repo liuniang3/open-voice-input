@@ -326,7 +326,7 @@ async function main() {
     const originalFetch = global.fetch; const requests = [];
     global.fetch = async (_url, options) => {
       requests.push(JSON.parse(options.body));
-      return { ok: true, text: async () => JSON.stringify({ choices: [{ message: { content: "um, original words" } }] }) };
+      return { ok: true, text: async () => JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "um, original words" } }] }) };
     };
     try {
       const asr = transcriber({ provider: "mimo", modelId: "mimo-v2.5-asr", apiKey: "fixture", baseUrl: "https://example.invalid/v1" });

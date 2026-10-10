@@ -1,7 +1,7 @@
 "use strict";
 
 const path = require("node:path");
-const { prepareTrackSegments, segmentToDataUrl } = require("./segment-prep");
+const { prepareTrackSegments, segmentToDataUrl, splitPreparedSegment } = require("./segment-prep");
 const { createJobStore } = require("./job-store");
 const { QWEN_NO_BUCKET, JOB_STATUS, SEGMENT_STATUS } = require("./constants");
 const { SELF_SPEAKER_ID } = require("../timeline/merge-timeline");
@@ -50,12 +50,20 @@ function buildRawTranscriptFromJob(job, { resultsByKey = {}, limits = QWEN_NO_BU
   const meta = transcriptMeta && typeof transcriptMeta === "object" ? transcriptMeta : {};
   const remoteSpeakerId = limits.remoteSpeakerId || QWEN_NO_BUCKET.remoteSpeakerId;
   const items = [];
+  const missingRanges = [];
+  let segmentTotal = 0, segmentCompleted = 0;
   for (const track of ["microphone", "system"]) {
     const segs = job.tracks?.[track]?.segments || [];
     for (const seg of segs) {
-      if (seg.status !== SEGMENT_STATUS.COMPLETED) continue;
       const key = `${track}:${seg.seq}`;
       const result = resultsByKey[key];
+      segmentTotal += 1;
+      if (seg.status !== SEGMENT_STATUS.COMPLETED || !result) {
+        missingRanges.push({ track, seq: seg.seq, beginMs: seg.sessionBeginMs ?? seg.artifactBeginMs,
+          endMs: seg.sessionEndMs ?? seg.artifactEndMs, status: seg.status === "completed" ? "invalid" : seg.status });
+        continue;
+      }
+      segmentCompleted += 1;
       const text = String(result?.text ?? "").trim();
       if (!text) continue;
       const speakerId =
@@ -126,6 +134,10 @@ function buildRawTranscriptFromJob(job, { resultsByKey = {}, limits = QWEN_NO_BU
       ...meta
     },
     count: items.length,
+    complete: segmentTotal > 0 && segmentCompleted === segmentTotal,
+    segmentCompleted,
+    segmentTotal,
+    missingRanges,
     items
   };
 }
@@ -174,7 +186,7 @@ function createNoBucketMeetingTranscriptionService({
     logger({ event, ...sanitizeLogDetail(detail) });
   }
 
-  async function prepare({ microphone, system, modelId = null, fingerprintMode = null } = {}) {
+  async function prepare({ microphone, system, modelId = null, fingerprintMode = null, signal = null } = {}) {
     if (runActive) {
       const error = new Error("cannot prepare while a run is active (in-process)");
       error.code = "job_already_running";
@@ -187,19 +199,41 @@ function createNoBucketMeetingTranscriptionService({
     const fpMode =
       fingerprintMode || (skipTranscriptWrite ? "enhanced_mic" : "no_bucket");
 
+    const existing = await store.loadJob();
+    for (const [track, spec] of [["microphone", microphone], ["system", system]]) {
+      throwIfAborted(signal);
+      if (!spec?.wavPath) continue;
+      const integrity = await verifyArchiveIntegrity({ wavPath: spec.wavPath, sidecarPath: spec.sidecarPath, sidecar: spec.sidecar });
+      sourceArtifacts[track] = { wavPath: spec.wavPath, sourceWavSha256: integrity.contentSha256 };
+    }
+    const fp = sourceFingerprint(sourceArtifacts, modelId, fpMode, provider);
+    const prevMode = existing?.fingerprintMode || (existing?.transcriptDeferred ? "enhanced_mic" : "no_bucket");
+    const sourceChanged = existing && sourceFingerprint(existing.sourceArtifacts, existing.modelId, prevMode, existing.provider) !== fp;
+    const generation = sourceChanged ? (existing.generation || 1) + 1 : existing?.generation || 1;
+    // Preserve the persisted plan (including split children and legacy safe cuts) before writing any new segment files.
+    if (existing && !sourceChanged && Object.values(existing.tracks || {}).some(t => t.segments?.length)) {
+      if (existing.status === JOB_STATUS.COMPLETED) return existing;
+      for (const state of Object.values(existing.tracks)) {
+        for (const seg of state.segments || []) {
+          if (seg.status !== SEGMENT_STATUS.COMPLETED) {
+            seg.status = SEGMENT_STATUS.PENDING;
+            seg.attempts = 0;
+            seg.lastError = null;
+          }
+        }
+      }
+      existing.status = JOB_STATUS.READY;
+      existing.lastError = null;
+      return store.saveJob(existing);
+    }
+
     for (const [track, spec] of [
       ["microphone", microphone],
       ["system", system]
     ]) {
       if (!spec?.wavPath) continue;
-      // Strict Stage 1A integrity — require contentSha256
-      await verifyArchiveIntegrity({
-        wavPath: spec.wavPath,
-        sidecarPath: spec.sidecarPath,
-        sidecar: spec.sidecar
-      });
-
-      const outDir = path.join(store.segmentsDir, track);
+      throwIfAborted(signal);
+      const outDir = path.join(store.segmentsDir, `generation-${generation}`, track);
       const result = await prepareTrackSegments({
         wavPath: spec.wavPath,
         sidecarPath: spec.sidecarPath,
@@ -209,7 +243,8 @@ function createNoBucketMeetingTranscriptionService({
         outputDir: outDir,
         targetSegmentSeconds: limits.targetSegmentSeconds,
         targetSampleRate: limits.targetSampleRate,
-        limits
+        limits,
+        signal
       });
       sourceArtifacts[track] = {
         wavPath: spec.wavPath,
@@ -236,28 +271,6 @@ function createNoBucketMeetingTranscriptionService({
       }));
     }
 
-    const existing = await store.loadJob();
-    const fp = sourceFingerprint(sourceArtifacts, modelId, fpMode, provider);
-    const prevMode = existing?.fingerprintMode
-      || (existing?.transcriptDeferred ? "enhanced_mic" : "no_bucket");
-    const prevFp = existing
-      ? sourceFingerprint(existing.sourceArtifacts || {}, existing.modelId, prevMode, existing.provider)
-      : null;
-    let generation = existing?.generation || 1;
-    const sourceChanged = existing && prevFp !== fp;
-    if (sourceChanged) {
-      generation = (existing.generation || 1) + 1;
-    }
-
-    // If completed with same source — keep completed (run will validate)
-    if (
-      existing &&
-      existing.status === JOB_STATUS.COMPLETED &&
-      !sourceChanged
-    ) {
-      return existing;
-    }
-
     let job = await store.createJob({
       sessionId: sessionId || existing?.sessionId,
       provider,
@@ -265,8 +278,7 @@ function createNoBucketMeetingTranscriptionService({
       sourceArtifacts,
       generation,
       profile: pickSafeProfile({
-        targetSegmentSeconds: limits.targetSegmentSeconds,
-        maxBase64Chars: limits.maxBase64Chars,
+        ...limits,
         modelId
       })
     });
@@ -423,7 +435,8 @@ function createNoBucketMeetingTranscriptionService({
         const tstate = job.tracks[track];
         if (!tstate?.segments?.length) continue;
 
-        for (const seg of tstate.segments) {
+        for (let segIndex = 0; segIndex < tstate.segments.length; segIndex++) {
+          const seg = tstate.segments[segIndex];
           throwIfAborted(signal);
           while (paused) {
             job.status = JOB_STATUS.PAUSED;
@@ -485,6 +498,7 @@ function createNoBucketMeetingTranscriptionService({
 
           let attempt = seg.attempts || 0;
           let lastErr = null;
+          let wasSplit = false;
           while (attempt < maxAttempts) {
             throwIfAborted(signal);
             attempt += 1;
@@ -499,6 +513,14 @@ function createNoBucketMeetingTranscriptionService({
                 track,
                 seq: seg.seq
               });
+              throwIfAborted(signal);
+              // Defensive boundary for injected/custom adapters as well as the dedicated providers.
+              const finish = result?.finishReason ?? result?.raw?.finishReason;
+              if (finish && finish !== "stop") {
+                throw Object.assign(new Error("ASR output was not complete."), {
+                  code: finish === "length" ? "asr_output_truncated" : "asr_response_incomplete"
+                });
+              }
               const text = String(result?.text ?? "");
               await store.writeSegmentResult({
                 track,
@@ -520,6 +542,24 @@ function createNoBucketMeetingTranscriptionService({
               break;
             } catch (error) {
               if (error?.code === "aborted") throw error;
+              if (["asr_output_truncated", "response_output_limit", "segment_duration_exceeded", "segment_size_exceeded"].includes(error?.code)) {
+                const nextSeq = Math.max(...tstate.segments.map(s => s.seq), ...(tstate.splitParents || []).map(s => s.seq)) + 1;
+                const children = await splitPreparedSegment({ ...seg, track }, {
+                  outputDir: path.dirname(seg.wavPath), nextSeq, limits, signal
+                });
+                if (children) {
+                  tstate.splitParents = [...(tstate.splitParents || []), { seq: seg.seq, parentSeq: seg.parentSeq ?? null,
+                    contentSha256: seg.contentSha256, childSeqs: children.map(c => c.seq), reason: error.code }];
+                  tstate.segments.splice(segIndex, 1, ...children);
+                  job = await store.saveJob(job);
+                  log("segment_split", { track, seq: seg.seq, children: children.map(c => c.seq) });
+                  wasSplit = true;
+                  break;
+                }
+                // The smallest recoverable range stays failed; never accept its partial output.
+                attempt = maxAttempts;
+                seg.attempts = attempt;
+              }
               lastErr = {
                 code: error.code || "transcribe_failed",
                 message: sanitizeErrorMessage(error.message || error)
@@ -534,6 +574,7 @@ function createNoBucketMeetingTranscriptionService({
               }
             }
           }
+          if (wasSplit) { segIndex -= 1; continue; }
           if (lastErr) {
             job.status = JOB_STATUS.FAILED;
             job.lastError = {
@@ -541,7 +582,7 @@ function createNoBucketMeetingTranscriptionService({
               track,
               seq: seg.seq,
               hint:
-                "No-bucket mode uses Qwen3-ASR without remote diarization. For multi-speaker remote IDs configure Fun-ASR with a public HTTPS URL publisher (not included in Stage 2A). Exhausted failures require retryFailed({ resetAttempts: true })."
+                "Completed ranges are preserved. Retry resumes only missing ranges."
             };
             job = await store.saveJob(job);
             const err = new Error(lastErr.message);
@@ -662,11 +703,26 @@ function createNoBucketMeetingTranscriptionService({
       job._transcript = transcript;
       return job;
     } catch (error) {
-      if (error?.code === "aborted") {
+      if (error?.code === "aborted" || signal?.aborted) {
         const j = await store.loadJob();
         if (j) {
           j.status = JOB_STATUS.CANCELLED;
           j.lastError = { code: "aborted", message: "cancelled" };
+          await store.saveJob(j);
+        }
+      } else {
+        const j = await store.loadJob().catch(() => null);
+        if (j && [JOB_STATUS.RUNNING, JOB_STATUS.PAUSED].includes(j.status)) {
+          j.status = JOB_STATUS.FAILED;
+          j.lastError = { code: error.code || "transcribe_failed", message: sanitizeErrorMessage(error.message) };
+          for (const state of Object.values(j.tracks || {})) {
+            for (const seg of state.segments || []) {
+              if (seg.status === SEGMENT_STATUS.RUNNING) {
+                seg.status = SEGMENT_STATUS.FAILED;
+                seg.lastError = j.lastError;
+              }
+            }
+          }
           await store.saveJob(j);
         }
       }
@@ -757,7 +813,22 @@ function createNoBucketMeetingTranscriptionService({
   }
 
   async function getTranscript() {
-    return store.readTranscript();
+    const job = await store.loadJob();
+    if (!job || job.transcriptDeferred) return store.readTranscript();
+    if (job.status === JOB_STATUS.COMPLETED) {
+      const raw = await store.readTranscript().catch(() => null);
+      if (raw && Number(raw.generation || 1) === Number(job.generation || 1)) return raw;
+    }
+    const resultsByKey = {};
+    for (const track of ["microphone", "system"]) {
+      for (const seg of job.tracks?.[track]?.segments || []) {
+        if (seg.status !== SEGMENT_STATUS.COMPLETED) continue;
+        const v = await store.readValidatedSegmentResult(track, seg.seq, seg.contentSha256, job.generation || 1);
+        if (v.ok) resultsByKey[`${track}:${seg.seq}`] = v.result;
+      }
+    }
+    return buildRawTranscriptFromJob(job, { resultsByKey, limits: { ...limits, provider: job.provider },
+      transcriptMeta: job.transcriptMeta || transcriptMeta });
   }
 
   return {

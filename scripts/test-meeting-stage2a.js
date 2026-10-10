@@ -235,7 +235,7 @@ async function run() {
     assert.throws(() => assertSegmentPreflight(1000, 301), (e) => e.code === "segment_duration_exceeded");
     // 300s @16k mono pcm16 wav ≈ 300*16000*2+44 bytes → Base64 >> 10MiB
     const bytes300s = 44 + 300 * 16000 * 2;
-    assert.throws(() => assertSegmentPreflight(bytes300s, 300), (e) => e.code === "segment_size_exceeded");
+    assert.throws(() => assertSegmentPreflight(bytes300s, 300, { ...QWEN_NO_BUCKET, hardSegmentSeconds: 300 }), (e) => e.code === "segment_size_exceeded");
     assert.ok(EFFECTIVE_PCM_DURATION_CAP_SECONDS < 300);
     assert.ok(estimateDataUriChars(12 * 1024 * 1024) > QWEN_NO_BUCKET.maxBase64Chars);
   });
@@ -288,7 +288,7 @@ async function run() {
     const client = {
       async requestChat(messages, opts) {
         calls.push({ messages, opts });
-        return { content: "  hi  ", body: {} };
+        return { content: "  hi  ", finishReason: "stop", body: {} };
       }
     };
     const provider = createQwen3AsrProvider({
@@ -724,7 +724,7 @@ async function run() {
     };
     try {
       const p = createQwen3AsrProvider({
-        client: { requestChat: async () => ({ content: "local" }) },
+        client: { requestChat: async () => ({ content: "local", finishReason: "stop" }) },
         cleanTranscript: (t) => t
       });
       assert.equal((await p.transcribeMeetingSegment({ audioDataUrl: "data:audio/wav;base64,AA==" })).text, "local");

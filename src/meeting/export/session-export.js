@@ -220,6 +220,7 @@ function normalizeScope(scope) {
 function appendTranscriptSection(lines, title, transcript, speakerMap, { preferSource = false } = {}) {
   lines.push(`## ${title}`);
   lines.push("");
+  lines.push(...transcriptCompletenessNotice(transcript));
   const items = Array.isArray(transcript?.items) ? transcript.items : [];
   if (!items.length) {
     lines.push("_（无内容）_");
@@ -236,6 +237,14 @@ function appendTranscriptSection(lines, title, transcript, speakerMap, { preferS
     lines.push(itemText(it) || "…");
     lines.push("");
   }
+}
+
+function transcriptCompletenessNotice(doc) {
+  if (doc?.complete !== false) return [];
+  return [
+    `转写尚未完成（已完成 ${doc.segmentCompleted || 0}/${doc.segmentTotal || 0} 段）；以下仅包含已完成内容。`,
+    ...(doc.missingRanges || []).map(r => `未完成：${formatClock(r.beginMs)} – ${formatClock(r.endMs)}`), ""
+  ];
 }
 
 function sharedSummaryClaimText(claim) {
@@ -339,6 +348,7 @@ function buildTxt({ transcript, corrected, summary, speakerMap, scope = "all" } 
   const parts = [];
   function pushDoc(label, doc, preferSource) {
     parts.push(`【${label}】`);
+    parts.push(...transcriptCompletenessNotice(doc));
     const items = Array.isArray(doc?.items) ? doc.items : [];
     if (!items.length) {
       parts.push("（无）");
@@ -471,6 +481,9 @@ function buildJsonBundle({ session, transcript, summary, corrected, speakerMap, 
       ? {
           schema: transcript.schema || null,
           sessionId: transcript.sessionId || session?.id || null,
+          ...(typeof transcript.complete === "boolean" ? { complete: transcript.complete,
+            segmentCompleted: transcript.segmentCompleted, segmentTotal: transcript.segmentTotal,
+            missingRanges: sanitizeExportJson(transcript.missingRanges || []) } : {}),
           items: (transcript.items || []).map((it) => {
             const { beginMs, endMs } = pickItemMs(it);
             return {
