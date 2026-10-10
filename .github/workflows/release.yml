@@ -51,6 +51,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
           files: |
             dist/*.exe
             dist/*.exe.blockmap
@@ -98,6 +99,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
           files: |
             dist/*.dmg
             dist/*.zip
@@ -105,3 +107,38 @@ jobs:
             dist/latest-*-mac.yml
             dist/macOS-*-SHA256SUMS.txt
           body_path: docs/releases/${{ github.ref_name }}.md
+
+  publish-release:
+    needs: [build-windows, build-macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all desktop assets exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets > release-assets.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const version = process.env.GITHUB_REF_NAME.replace(/^v/, "");
+          const names = new Set(JSON.parse(fs.readFileSync("release-assets.json", "utf8")).assets.map(asset => asset.name));
+          const expected = [
+            `Open-Voice-Input-Setup-${version}-x64.exe`,
+            `Open-Voice-Input-Setup-${version}-x64.exe.blockmap`,
+            `Open-Voice-Input-Portable-${version}-x64.exe`,
+            "latest.yml", "SHA256SUMS.txt",
+            ...["x64", "arm64"].flatMap(arch => [
+              `Open-Voice-Input-macOS-${version}-${arch}.dmg`,
+              `Open-Voice-Input-macOS-${version}-${arch}.zip`,
+              `Open-Voice-Input-macOS-${version}-${arch}.zip.blockmap`,
+              `latest-${arch}-mac.yml`, `macOS-${arch}-SHA256SUMS.txt`
+            ])
+          ];
+          const missing = expected.filter(name => !names.has(name));
+          if (missing.length) throw new Error(`Release assets missing: ${missing.join(", ")}`);
+          console.log(`Verified ${expected.length} desktop assets.`);
+          NODE
+      - name: Publish complete desktop release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## v0.4.20 - 2026-10-11
+
 ### Fixed
 
 - Dedicated Qwen and MiMo ASR omit the arbitrary 2048-token output cap and language-model sampling parameters. Ordinary cleanup/summary budgets remain unchanged. Require a normal completion marker and reject truncated or interrupted ASR output before publishing it.
@@ -18,6 +20,10 @@ All notable changes to this project are documented here.
 - Regression coverage uses synthetic audio and simulated provider responses for pause boundaries, exact frame coverage, encoded-size limits, truncation recovery, cancellation, checkpoint reuse, legacy plans, partial exports and view updates. No real user recordings or provider credentials are included.
 - Live-meeting regressions cover pause detection across scheduler kicks, read-ahead handoff, waiting final receipts, the default 9m30s rotation threshold, restart coverage, durable child plans, minimum split limits, ordered source IDs and late-arriving audio invalidation.
 - Shared local regression suite passed: `68/68` scripts, including `32` live-preview cases and `28` live-meeting service cases. Native macOS recording, permissions and paste still require hardware validation.
+
+### Release
+
+- Build Windows installer/portable and unsigned macOS Intel/Apple Silicon packages into a draft release. Publish only after all platform builds and uploads succeed, including update metadata and checksums.
 
 ## v0.4.19 - 2026-10-10
 
