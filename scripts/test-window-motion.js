@@ -6,7 +6,7 @@ const path = require("node:path");
 const { createWindowMotion, DURATIONS } = require("../src/window-motion");
 const root = path.resolve(__dirname, "..");
 
-function fixture(platform = "win32", { unsupportedOpacity = false } = {}) {
+function fixture(platform = "win32", { unsupportedOpacity = false, prepareBubble } = {}) {
   let clock = 0;
   let id = 0;
   const timers = new Map();
@@ -23,7 +23,7 @@ function fixture(platform = "win32", { unsupportedOpacity = false } = {}) {
     hide() { calls.push("hide"); this.visible = false; },
     setOpacity(value) { if (unsupportedOpacity) throw new Error("unsupported"); this.opacity = value; }
   };
-  const motion = createWindowMotion({ window: win, platform, now: () => clock,
+  const motion = createWindowMotion({ window: win, platform, prepareBubble, now: () => clock,
     schedule(fn, delay) { const key = ++id; timers.set(key, { fn, at: clock + delay }); return key; },
     cancel(key) { timers.delete(key); }
   });
@@ -116,6 +116,64 @@ async function run() {
     assert.equal(f.timers.size, 0, "visual capability failures never block show/hide");
   }
   assert.ok(DURATIONS.enter <= 180 && DURATIONS.leave <= 120);
+  for (const platform of ["win32", "darwin"]) {
+    let ready;
+    const f = fixture(platform, { prepareBubble: () => new Promise(resolve => { ready = resolve; }) });
+    f.motion.setReducedMotion(false);
+    const shown = f.motion.show({ bubble: true, entrance: { origin: { x: 10, y: 0 }, offset: { x: 0, y: -20 } } });
+    assert.equal(f.win.visible, false, "do not reveal the old full-size surface before the bubble's first frame is prepared");
+    f.motion.show();
+    assert.equal(f.win.visible, false, "focus cannot bypass first-frame preparation");
+    ready(true);
+    assert.equal(await shown, true);
+    assert.equal(f.win.visible, true);
+    f.advance(300);
+    assert.equal(f.win.opacity, 1);
+    console.log(`PASS ${platform}: delayed first-frame preparation stays hidden until ready`);
+    for (const action of ["hide", "hideImmediately", "finishEntrance", "dispose"]) {
+      let delayed;
+      const cancelled = fixture(platform, { prepareBubble: () => new Promise(resolve => { delayed = resolve; }) });
+      cancelled.motion.setReducedMotion(false);
+      const pending = cancelled.motion.show({ bubble: true });
+      await cancelled.motion[action]();
+      assert.equal(await pending, false);
+      delayed(true); await Promise.resolve();
+      cancelled.advance(1000);
+      assert.equal(cancelled.win.visible, false, `${action} must prevent late preparation from revealing a window`);
+      assert.equal(cancelled.timers.size, 0);
+    }
+    let delayed;
+    const fallback = fixture(platform, { prepareBubble: () => new Promise(resolve => { delayed = resolve; }) });
+    fallback.motion.setReducedMotion(false);
+    const pending = fallback.motion.show({ bubble: true });
+    fallback.advance(DURATIONS.prepare + 32);
+    assert.equal(await pending, true, "a stalled renderer cannot block native visibility indefinitely");
+    const before = fallback.win.opacity;
+    delayed(true); await Promise.resolve();
+    assert.equal(fallback.calls.filter(call => call === "show").length, 1, "late preparation cannot restart native show after fallback");
+    assert.equal(fallback.win.opacity, before);
+    assert.equal(fallback.calls.some(call => call[0] === "dictation:entrance" && call[1]?.phase === "play"), false);
+    fallback.advance(300);
+    assert.equal(fallback.win.opacity, 1); assert.equal(fallback.timers.size, 0);
+    for (const prepareBubble of [() => Promise.reject(new Error("renderer gone")), () => { throw new Error("renderer unavailable"); }]) {
+      const failed = fixture(platform, { prepareBubble });
+      failed.motion.setReducedMotion(false);
+      assert.equal(await failed.motion.show({ bubble: true }), true);
+      failed.advance(300);
+      assert.equal(failed.win.opacity, 1); assert.equal(failed.timers.size, 0);
+    }
+    let reducedReady;
+    const reduced = fixture(platform, { prepareBubble: () => new Promise(resolve => { reducedReady = resolve; }) });
+    reduced.motion.setReducedMotion(false);
+    const reducedShown = reduced.motion.show({ bubble: true });
+    reduced.motion.setReducedMotion(true);
+    assert.equal(await reducedShown, true);
+    assert.equal(reduced.win.visible, true); assert.equal(reduced.win.opacity, 1);
+    reducedReady(true); await Promise.resolve();
+    assert.equal(reduced.calls.filter(call => call === "show").length, 1);
+    assert.equal(reduced.timers.size, 0);
+    console.log(`PASS ${platform}: pending cancellation, bounded failure, late timeout result and Reduce Motion cannot restart reveal`);
+  }
   for (const platform of ["win32", "darwin"]) {
     const f = fixture(platform);
     f.motion.setReducedMotion(false);

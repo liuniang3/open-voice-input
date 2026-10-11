@@ -3,19 +3,28 @@
 (function (root) {
   function createDictationMotion(win = root) {
     const doc = win.document, preference = win.matchMedia("(prefers-reduced-motion: reduce)");
-    let active = null;
+    let active = null, preparing = null;
     function cancel() {
+      if (preparing) {
+        win.cancelAnimationFrame(preparing.frame);
+        preparing.resolve(false);
+        preparing = null;
+      }
       const previous = active;
       active = null;
       previous?.forEach(animation => animation.cancel());
       doc.body.classList.remove("dictation-entering");
     }
     function enter(value) {
+      if (value?.phase === "play") {
+        active?.forEach(animation => animation.play());
+        return;
+      }
       cancel();
       const shell = doc.querySelector(".shell"), origin = value?.origin;
       if (!shell || !value || preference.matches || !doc.body.classList.contains("recording-mode") ||
           ![origin?.x, origin?.y].every(Number.isFinite) ||
-          origin.x < 0 || origin.x > win.innerWidth || origin.y < 0 || origin.y > win.innerHeight) return;
+          origin.x < 0 || origin.x > win.innerWidth || origin.y < 0 || origin.y > win.innerHeight) return false;
       doc.body.classList.add("dictation-entering");
       const options = { duration: 240, easing: "cubic-bezier(0.33, 1, 0.68, 1)", fill: "both" };
       const pivot = `${origin.x}px ${origin.y}px`;
@@ -29,14 +38,31 @@
           active.push(content.animate([{ opacity: 0 }, { opacity: 0, offset: 0.25 }, { opacity: 1 }], options));
         }
         const animations = active;
+        if (value.phase === "prepare") {
+          animations.forEach(animation => { animation.pause(); animation.currentTime = 0; });
+        }
         void Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
           if (active === animations) cancel();
         });
-      } catch { cancel(); }
+        if (value.phase === "prepare") return new Promise(resolve => {
+          const pending = { resolve, frame: 0 };
+          preparing = pending;
+          // One painted frame at the small scale precedes native window visibility.
+          pending.frame = win.requestAnimationFrame(() => {
+            pending.frame = win.requestAnimationFrame(() => {
+              if (preparing !== pending) return;
+              preparing = null;
+              resolve(active === animations);
+            });
+          });
+        });
+        return true;
+      } catch { cancel(); return false; }
     }
     const onPreference = () => { if (preference.matches) cancel(); };
     preference.addEventListener("change", onPreference);
-    return { enter, cancel, dispose() { cancel(); preference.removeEventListener("change", onPreference); } };
+    return { enter, prepare: value => enter({ ...value, phase: "prepare" }), cancel,
+      dispose() { cancel(); preference.removeEventListener("change", onPreference); } };
   }
   root.DictationMotion = { createDictationMotion };
   root.dictationMotion = createDictationMotion();

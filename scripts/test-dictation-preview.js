@@ -94,7 +94,8 @@ async function unitTests() {
   let completeHide;
   const context = { mainWindow: { isDestroyed: () => false, hide: () => hides.push(true) },
     windowFocusRevision: 0, windowMode: "recording", unregisterRecordingKeyFallbacks() {},
-    dictationPreview: { isVisible: () => true, hide(callback) { completeHide = callback; return Promise.resolve(true); } },
+    dictationPreview: { isActive: () => true, isVisible: () => false,
+      hide(callback) { completeHide = callback; return Promise.resolve(true); } },
     setWindowMode(value) { context.windowMode = value; } };
   vm.runInNewContext(main.slice(main.indexOf("function hideWindow("), main.indexOf("function sendWhenLoaded(")), context);
   await context.hideWindow();
@@ -203,8 +204,40 @@ async function verifyNative() {
     assert.deepEqual(await application.evaluate(() => globalThis.fixtureInjected), [finished.text]);
     assert.equal(await application.evaluate(() => globalThis.fixtureApp.preview().isVisible()), false);
     await page.evaluate(() => window.mimoInput.setReducedMotion(false));
+    await application.evaluate(() => {
+      globalThis.fixtureFirstFrames = [];
+      globalThis.fixtureMainExposures = [];
+      const popup = globalThis.fixtureApp.preview().getWindow(), main = globalThis.fixtureApp.main();
+      let prepared = false;
+      const execute = popup.webContents.executeJavaScript.bind(popup.webContents);
+      popup.webContents.executeJavaScript = (...args) => {
+        const result = execute(...args);
+        if (!args[0].includes("dictationMotion?.prepare(")) return result;
+        prepared = false;
+        return result.then(value => { prepared = value === true; return value; });
+      };
+      const show = popup.show.bind(popup);
+      popup.show = () => {
+        if (!popup.isVisible()) globalThis.fixtureFirstFrames.push({ prepared, opacity: popup.getOpacity() });
+        show();
+      };
+      main.on("resize", () => {
+        if (main.isVisible() && globalThis.fixtureApp.state().windowMode === "recording")
+          globalThis.fixtureMainExposures.push(main.getBounds());
+      });
+    });
     await popup.evaluate(() => {
       window.bubbleObservations = [];
+      window.preparedBubbleFrames = [];
+      window.originalPrepare = window.dictationMotion.prepare;
+      window.dictationMotion.prepare = async value => {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const ready = await window.originalPrepare(value);
+        const shell = document.querySelector(".shell"), rect = shell.getBoundingClientRect();
+        window.preparedBubbleFrames.push({ width: rect.width, height: rect.height,
+          states: shell.getAnimations().map(a => a.playState), ready });
+        return ready;
+      };
       const animate = Element.prototype.animate;
       Element.prototype.animate = function (frames, options) {
         if (this.classList.contains("shell")) {
@@ -263,6 +296,31 @@ async function verifyNative() {
     await page.waitForFunction(() => !isRecording && !isStartingRecording && currentWindowMode === "compact");
     assert.equal(await application.evaluate(() => globalThis.fixtureApp.preview().isVisible()), false);
     console.log("PASS Escape during bubble entrance cancels the actual recording without waiting for animation completion");
+    await popup.evaluate(() => {
+      window.dictationMotion.prepare = window.originalPrepare;
+      window.dictationPreview.onDictationEntrance(value => { if (value?.phase === "play") window.dictationPreview.command("cancel"); });
+    });
+    await application.evaluate(() => globalThis.fixtureApp.showHome());
+    await page.waitForFunction(() => document.body.classList.contains("home-mode"));
+    await application.evaluate(() => globalThis.fixtureApp.showAndStart());
+    await page.waitForFunction(() => !isRecording && !isStartingRecording && currentWindowMode === "compact");
+    const reveals = await application.evaluate(async () => ({
+      frames: globalThis.fixtureFirstFrames, exposures: globalThis.fixtureMainExposures
+    }));
+    assert.ok(reveals.frames.length >= 3);
+    for (const frame of reveals.frames) {
+      assert.equal(frame.prepared, true, "native show must wait for the renderer's first-frame acknowledgement");
+      assert.equal(frame.opacity, 0, "the native surface starts invisible before playing the prepared bubble");
+    }
+    const preparedFrames = await popup.evaluate(() => window.preparedBubbleFrames);
+    assert.equal(preparedFrames.length, 2);
+    for (const frame of preparedFrames) {
+      assert.equal(frame.ready, true);
+      assert.ok(frame.width <= 13 && frame.height <= 17, "native reveal starts at the tiny bubble, never the old full popup");
+      assert.deepEqual(frame.states, ["paused"], "native show waits for the painted, paused first frame even when the renderer is delayed");
+    }
+    assert.deepEqual(reveals.exposures, [], "Home never exposes the old compact main surface while preparing the display");
+    console.log("PASS actual native first reveal is a paused tiny bubble under renderer delay, repeated starts and visible Home transitions");
     await application.evaluate(() => { globalThis.fixtureExternalInput.destroy(); });
     assert.equal(await application.evaluate(() => globalThis.fixtureInjected.length), 1, "Escape never pastes");
     await application.evaluate(() => globalThis.fixtureApp.showHome());

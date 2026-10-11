@@ -460,6 +460,25 @@ async function integrationTests() {
   }
   console.log("ok - native input context precedes focus, anchored fixed geometry and paste target survives reentry");
   for (const platform of ["win32", "darwin"]) {
+    for (const destination of ["compact", "settings"]) {
+      const pending = mainHarness(platform);
+      pending.context.previewGate = deferred();
+      pending.run(`dictationPreview = { show: () => previewGate.promise, hide: () => Promise.resolve(true),
+        isActive: () => true, isVisible: () => false }; showAndStart();`);
+      await new Promise(setImmediate);
+      assert.equal(pending.run("windowMode"), "recording");
+      const calls = pending.events.length;
+      pending.run(`setWindowMode('${destination}');`);
+      pending.context.previewGate.resolve(false);
+      await new Promise(setImmediate);
+      assert.equal(pending.run("windowMode"), destination);
+      assert.equal(pending.run("captureOwner"), null, "cancelled preparation releases unused microphone ownership");
+      assert.equal(pending.run("shortStartPending"), false);
+      assert.equal(pending.events.slice(calls).includes("focus"), false, "cancel/navigation cannot resurrect the fallback window");
+    }
+  }
+  console.log("ok - cancellation/navigation during preparation never reveals or starts the stale dictation");
+  for (const platform of ["win32", "darwin"]) {
     const focused = mainHarness(platform);
     const defaults = focused.run("DEFAULT_SETTINGS");
     const fresh = ensureConnectionProfiles(structuredClone(defaults));

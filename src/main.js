@@ -55,7 +55,7 @@ const { openConsole: openAsrProviderConsole } = require("./asr-provider-info");
 const { workspaceSelection, savedFollowPreferences } = require("./asr-defaults");
 const { normalizePresentation, minimalBounds, visibleBounds, createMeetingWindowStore } = require("./settings/meeting-window");
 const { createTransparentPreview } = require("./meeting/transparent-preview");
-const { createWindowMotion } = require("./window-motion");
+const { createWindowMotion, prepareDictationBubble } = require("./window-motion");
 const { createDictationPreview } = require("./dictation-preview");
 const { readInputContext, dictationBounds, dictationPlacement } = require("./dictation-placement");
 
@@ -955,7 +955,8 @@ function createWindow() {
     }
   });
 
-  windowMotion = createWindowMotion({ window: mainWindow });
+  windowMotion = createWindowMotion({ window: mainWindow,
+    prepareBubble: value => prepareDictationBubble(mainWindow, value) });
   mainWindow.webContents.on("before-input-event", handleFocusedHotkey);
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
   dictationPreview = createDictationPreview({ BrowserWindow, ipcMain, mainWindow,
@@ -1050,10 +1051,12 @@ function showAndStart() {
   const inputContext = freshCapture ? getDictationInputContext() : Promise.resolve(null);
   captureOwner = "short";
   shortStartPending = true;
+  let startSent = false;
   void Promise.all([inputContext, requireCapturePermissions("microphone")]).then(async ([context]) => {
     if (meetingQuitCleanupStarted) throw liveError("app_quitting");
     if (freshCapture) targetWindowHandle = context?.target || getForegroundWindowHandle();
     logEvent("hotkey: showAndStart");
+    if (freshCapture) windowMotion.hideImmediately();
     setWindowMode("recording");
     prepareWindowForDisplay(mainWindow, "recording");
     let entrance = null;
@@ -1068,24 +1071,31 @@ function showAndStart() {
         logEvent("dictation: placement", "fallback display-unavailable");
       }
     }
-    if (!dictationPreview || !await dictationPreview.show({ reposition: freshCapture, entrance }))
-      windowMotion.show({ bubble: freshCapture, entrance });
+    const shown = dictationPreview && await dictationPreview.show({ reposition: freshCapture, entrance });
+    if (windowMode !== "recording" || captureOwner !== "short") return;
+    if (!shown)
+      await windowMotion.show({ bubble: freshCapture, entrance });
     if (meetingQuitCleanupStarted) throw liveError("app_quitting");
+    if (windowMode !== "recording" || captureOwner !== "short") return;
     enforceWindowGeometry(mainWindow, "recording");
     focusMainWindow();
     registerRecordingKeyFallbacks();
     sendWhenLoaded(mainWindow, "hotkey-record");
+    startSent = true;
   }).catch((error) => {
     if (captureOwner === "short") captureOwner = null;
     return showCaptureError(error);
-  }).catch(() => {}).finally(() => { shortStartPending = false; });
+  }).catch(() => {}).finally(() => {
+    if (freshCapture && !startSent && captureOwner === "short") captureOwner = null;
+    shortStartPending = false;
+  });
 }
 
 function showWindowOnly() {
   if (!mainWindow) return;
   if (liveTransparentPreview?.reveal()) return;
   if (captureOwner || realtimeMeeting?.status().recording) {
-    if (dictationPreview?.isVisible()) focusMainWindow();
+    if (dictationPreview?.isActive()) focusMainWindow();
     else { windowMotion.show(); mainWindow.focus(); }
     return;
   }
@@ -1095,7 +1105,7 @@ function showWindowOnly() {
 function showHome() {
   if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
   if (captureOwner === "short" || windowMode === "recording") {
-    if (!dictationPreview?.isVisible()) windowMotion.show();
+    if (!dictationPreview?.isActive()) windowMotion.show();
     focusMainWindow();
     return { ok: false, error: { message: "请先结束当前语音输入。" } };
   }
@@ -1345,7 +1355,7 @@ function hideWindow(win = mainWindow, { resetMode = true } = {}) {
   if (win === mainWindow) {
     windowFocusRevision++;
     unregisterRecordingKeyFallbacks();
-    if (dictationPreview?.isVisible()) {
+    if (dictationPreview?.isActive()) {
       const hideRevision = windowFocusRevision, hideMode = windowMode;
       return dictationPreview.hide(() => {
         if (hideRevision !== windowFocusRevision || windowMode !== hideMode) return;
@@ -1450,6 +1460,7 @@ function hotkeyCandidates() {
 
 function focusMainWindow() {
   if (!mainWindow) return;
+  if (dictationPreview?.isActive() && !dictationPreview.isVisible()) return;
   focusWindow(dictationPreview?.isVisible() ? dictationPreview.getWindow() : mainWindow, "main");
 }
 

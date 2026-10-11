@@ -1,9 +1,16 @@
 "use strict";
 
-const DURATIONS = Object.freeze({ enter: 160, bubble: 240, leave: 110 });
+const DURATIONS = Object.freeze({ enter: 160, bubble: 240, prepare: 350, leave: 110 });
+
+function prepareDictationBubble(win, value) {
+  try {
+    return Promise.resolve(win.webContents.executeJavaScript(
+      `window.dictationMotion?.prepare(${JSON.stringify(value)}) ?? false`)).catch(() => false);
+  } catch { return Promise.resolve(false); }
+}
 
 function createWindowMotion({ window: win, platform = process.platform,
-  now = () => performance.now(), schedule = setTimeout, cancel = clearTimeout }) {
+  prepareBubble, now = () => performance.now(), schedule = setTimeout, cancel = clearTimeout }) {
   // Stay still until the renderer has reported the system accessibility setting.
   let reducedMotion = true;
   let disposed = false;
@@ -48,7 +55,7 @@ function createWindowMotion({ window: win, platform = process.platform,
     current.entrance = null;
   }
 
-  function prepareEntrance(value) {
+  function prepareEntrance(value, notify = true) {
     try {
       const bounds = win.getBounds();
       const origin = value?.origin || { x: bounds.width / 2, y: bounds.height / 2 };
@@ -62,7 +69,7 @@ function createWindowMotion({ window: win, platform = process.platform,
       if (platform === "darwin") {
         try { win.setVibrancy?.(null); } catch {}
       }
-      sendEntrance({ origin, duration: DURATIONS.bubble });
+      if (notify) sendEntrance({ origin, duration: DURATIONS.bubble });
       return { bounds, last, origin };
     } catch { return null; }
   }
@@ -102,23 +109,53 @@ function createWindowMotion({ window: win, platform = process.platform,
   }
 
   function show({ bubble = false, entrance = null } = {}) {
-    if (!alive()) return;
+    if (!alive()) return Promise.resolve(false);
+    if (transition?.kind === "prepare" && !bubble) return transition.promise;
     const reversing = transition?.kind === "hide";
     if (reversing) cancelTransition();
-    if (win.isVisible() && !reversing && !bubble) { win.show(); return; }
+    if (win.isVisible() && !reversing && !bubble) { win.show(); return Promise.resolve(true); }
     cancelTransition();
     const from = reversing ? opacity : 0;
     const animate = enabled() && writeOpacity(from);
     if (!animate) writeOpacity(1);
-    const geometry = animate && bubble ? prepareEntrance(entrance) : null;
+    const staged = animate && bubble && typeof prepareBubble === "function";
+    if (staged) win.hide();
+    const geometry = animate && bubble ? prepareEntrance(entrance, !staged) : null;
     if (geometry) geometry.start = { ...geometry.last };
     else if (bubble) sendEntrance(null);
+    if (staged && geometry) {
+      let resolve;
+      const promise = new Promise(done => { resolve = done; });
+      const current = { kind: "prepare", entrance: geometry, from, promise, resolve };
+      transition = current;
+      current.start = prepared => {
+        if (transition !== current || current.kind !== "prepare") return;
+        if (!alive()) { cancelTransition(); return; }
+        cancel(current.timer);
+        if (!prepared) settleEntrance(current);
+        current.kind = "show";
+        current.to = 1;
+        current.started = now();
+        current.duration = current.entrance ? DURATIONS.bubble : DURATIONS.enter;
+        try { win.show(); } catch { cancelTransition(); writeOpacity(1); return; }
+        if (prepared) sendEntrance({ phase: "play" });
+        resolve(true); current.resolve = null;
+        if (enabled()) step(current); else complete(current);
+      };
+      current.timer = schedule(() => current.start(false), DURATIONS.prepare);
+      try {
+        Promise.resolve(prepareBubble({ origin: geometry.origin, duration: DURATIONS.bubble }))
+          .then(value => current.start(value === true), () => current.start(false));
+      } catch { current.start(false); }
+      return promise;
+    }
     win.show();
     if (animate) {
       transition = { kind: "show", from, to: 1, entrance: geometry,
         started: now(), duration: geometry ? DURATIONS.bubble : DURATIONS.enter };
       step(transition);
     }
+    return Promise.resolve(true);
   }
 
   function hide(onHidden) {
@@ -137,7 +174,10 @@ function createWindowMotion({ window: win, platform = process.platform,
 
   function setReducedMotion(value) {
     reducedMotion = value !== false;
-    if (reducedMotion && transition) complete(transition);
+    if (reducedMotion && transition) {
+      if (transition.kind === "prepare") transition.start(false);
+      else complete(transition);
+    }
   }
 
   function dispose() {
@@ -147,8 +187,12 @@ function createWindowMotion({ window: win, platform = process.platform,
   }
 
   return { show, hide, setReducedMotion, dispose,
+    hideImmediately() { cancelTransition(); if (alive()) { win.hide(); writeOpacity(1); } },
     isBubbleEntering: () => Boolean(transition?.entrance),
-    finishEntrance: () => { if (transition?.kind === "show") complete(transition); } };
+    finishEntrance: () => {
+      if (transition?.kind === "prepare") cancelTransition();
+      else if (transition?.kind === "show") complete(transition);
+    } };
 }
 
-module.exports = { createWindowMotion, DURATIONS };
+module.exports = { createWindowMotion, prepareDictationBubble, DURATIONS };

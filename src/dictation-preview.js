@@ -2,7 +2,7 @@
 
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { createWindowMotion } = require("./window-motion");
+const { createWindowMotion, prepareDictationBubble } = require("./window-motion");
 
 function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized, onCommand,
   platform = process.platform } = {}) {
@@ -21,8 +21,8 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
       backgroundMaterial: "none", roundedCorners: false,
       show: false, resizable: false, movable: true, skipTaskbar: true, alwaysOnTop: true,
       webPreferences: { preload: path.join(__dirname, "dictation-preview-preload.js"),
-        contextIsolation: true, nodeIntegration: false, sandbox: true } });
-    motion = createWindowMotion({ window: win });
+        contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } });
+    motion = createWindowMotion({ window: win, prepareBubble: value => prepareDictationBubble(win, value) });
     motion.setReducedMotion(reducedMotion);
     ready = win.loadFile(page).then(() => true).catch(() => false);
     // Per-pixel alpha is the only backdrop on Windows. Native Acrylic/accent
@@ -65,14 +65,18 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
       if (!enabled) state = { kind: "recording", title: "正在录音", detail: "", preview: false };
       enabled = true;
       if (!await ready || !alive() || failed || !enabled || revision !== current) return false;
+      if (reposition) motion.hideImmediately();
       if (reposition || !win.isVisible()) win.setBounds(mainWindow.getBounds(), false);
-      publish(); motion.show({ bubble: reposition, entrance }); mainWindow.hide(); return true;
+      publish(); mainWindow.hide();
+      const shown = await motion.show({ bubble: reposition, entrance });
+      return shown && alive() && enabled && revision === current;
     },
     hide(onHidden) {
       enabled = false; revision++;
       return motion ? motion.hide(onHidden) : Promise.resolve(false);
     },
     getWindow: () => alive() ? win : null,
+    isActive: () => alive() && enabled,
     isVisible: () => alive() && enabled && win.isVisible(),
     setReducedMotion: value => { reducedMotion = value; motion?.setReducedMotion(value); },
     dispose() {

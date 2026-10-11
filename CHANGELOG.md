@@ -9,6 +9,16 @@ All notable changes to this project are documented here.
 - Dictation enters as a small rounded bubble from the captured caret or input-field edge, then expands into the existing 340-by-116 popup over 240 ms. Prefer upward expansion near the display bottom; missing geometry uses a centered entrance. Only the short anchor-to-popup gap moves, while the viewport, recording and keyboard availability remain unchanged.
 - Share the bubble presentation across Windows and macOS, respect live Reduce Motion changes and cancel entrance state on hide/navigation. Repeated focus does not restart the animation; manual dragging immediately retains the user's position. macOS restores its native backdrop after the rounded surface expands; native macOS appearance still requires hardware validation.
 
+### Fixed
+
+- Prepare and paint the paused tiny-bubble first frame while hidden before revealing the dictation window. Hide the previous workspace before changing recording geometry, preventing a full-size flash followed by a disappearing/reappearing bubble. Keep hidden display rendering active on Windows.
+- Cancel pending presentation on hide/navigation, preserve the new workspace and release unused capture ownership. Repeated focus waits for preparation; a bounded preparation fallback and late results cannot restart native reveal. Respect Reduce Motion during preparation.
+
+### Validation
+
+- Regressions cover Windows/macOS preparation, delayed first frames, repeated focus, cancellation, timeout fallback, late acknowledgements and live Reduce Motion. Actual Windows Electron tests verify prepared frames before native show under a simulated renderer delay, visible Home transitions, Escape during entrance, complete Stable-mode paste and background spectrum updates. Native macOS appearance still requires hardware validation.
+- Shared local regression suite passed: `69/69` scripts. Browser/native Electron presentation checks and sensitive-information checks passed using isolated synthetic data.
+
 ## v0.4.21 - 2026-10-11
 
 ### Added
