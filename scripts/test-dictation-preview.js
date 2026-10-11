@@ -225,6 +225,10 @@ async function verifyNative() {
         if (main.isVisible() && globalThis.fixtureApp.state().windowMode === "recording")
           globalThis.fixtureMainExposures.push(main.getBounds());
       });
+      main.on("show", () => {
+        if (globalThis.fixtureApp.state().windowMode === "recording" && main.getOpacity() > 0)
+          globalThis.fixtureMainExposures.push(main.getBounds());
+      });
     });
     await popup.evaluate(() => {
       window.bubbleObservations = [];
@@ -304,10 +308,14 @@ async function verifyNative() {
     await page.waitForFunction(() => document.body.classList.contains("home-mode"));
     await application.evaluate(() => globalThis.fixtureApp.showAndStart());
     await page.waitForFunction(() => !isRecording && !isStartingRecording && currentWindowMode === "compact");
+    await application.evaluate(() => { globalThis.fixtureApp.showHome(); globalThis.fixtureApp.main().minimize(); });
+    await page.waitForFunction(() => document.body.classList.contains("home-mode"));
+    await application.evaluate(() => globalThis.fixtureApp.showAndStart());
+    await page.waitForFunction(() => !isRecording && !isStartingRecording && currentWindowMode === "compact");
     const reveals = await application.evaluate(async () => ({
       frames: globalThis.fixtureFirstFrames, exposures: globalThis.fixtureMainExposures
     }));
-    assert.ok(reveals.frames.length >= 3);
+    assert.ok(reveals.frames.length >= 4);
     for (const frame of reveals.frames) {
       assert.equal(frame.prepared, true, "native show must wait for the renderer's first-frame acknowledgement");
       assert.equal(frame.opacity, 0, "the native surface starts invisible before playing the prepared bubble");
