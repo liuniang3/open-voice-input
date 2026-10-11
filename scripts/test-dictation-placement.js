@@ -77,31 +77,39 @@ async function browserInputTest() {
     args: [__filename, "--electron-input-fixture", sandbox], env });
   try {
     const page = await application.firstWindow();
-    await page.locator("textarea").focus();
-    await application.evaluate(({ BrowserWindow }) => { const win = BrowserWindow.getAllWindows()[0]; win.show(); win.focus(); });
-    await page.waitForFunction(() => document.activeElement?.tagName === "TEXTAREA" && document.hasFocus());
-    const result = await application.evaluate(async ({ BrowserWindow, screen }) => {
-      const win = BrowserWindow.getAllWindows()[0];
-      const { readInputContext, dictationBounds, helperPath } = globalThis.inputFixture;
-      const handle = win.getNativeWindowHandle().readBigUInt64LE().toString();
-      await globalThis.inputFixture.focus(handle);
-      const start = Date.now();
-      const context = await readInputContext({ helperPath });
-      const input = await win.webContents.executeJavaScript('(() => { const r = document.querySelector("textarea").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()');
-      const rect = context?.rect ? screen.screenToDipRect(null, { ...context.rect,
-        x: Math.round(context.rect.x), y: Math.round(context.rect.y),
-        width: Math.max(1, Math.round(context.rect.width)), height: Math.round(context.rect.height) }) : null;
-      const bounds = win.getContentBounds();
-      return { targetMatch: context?.target === handle, contextFound: Boolean(context),
-        source: context?.source, elapsed: Date.now() - start, hostFocused: win.isFocused(),
-        rect, input: { ...input, x: input.x + bounds.x, y: input.y + bounds.y },
-        popup: dictationBounds(context, { width: 340, height: 116 }, screen) };
-    });
-    assert.equal(result.targetMatch, true, `Synthetic input must retain foreground focus: ${JSON.stringify(result)}`);
-    assert.ok(["caret", "input"].includes(result.source), `Chromium must expose input geometry: ${JSON.stringify(result)}`);
-    assert.ok(result.rect.x >= result.input.x - 2 && result.rect.x <= result.input.x + result.input.width + 2);
-    assert.ok(result.rect.y >= result.input.y - 2 && result.rect.y <= result.input.y + result.input.height + 2);
-    console.log(`PASS Chromium accessibility input placement and preserved target (${result.source}, ${result.elapsed}ms); synthetic field only`);
+    for (const fixture of [
+      { label: "textarea", tag: '<textarea data-fixture-input aria-label="Synthetic input" style="width:400px;height:140px">Synthetic input only</textarea>', depth: 0 },
+      { label: "deep rich editor", tag: '<div data-fixture-input contenteditable="true" role="textbox" aria-label="Synthetic editor" style="width:400px;min-height:140px"><p>Synthetic input only</p></div>', depth: 40 },
+      { label: "empty deep rich editor", tag: '<div data-fixture-input contenteditable="true" role="textbox" aria-label="Synthetic editor" style="width:400px;min-height:140px"><p><br></p></div>', depth: 40 }
+    ]) {
+      const opening = '<div role="group">'.repeat(fixture.depth);
+      await page.setContent(`<html lang="en"><title>Input geometry test</title><body style="margin:0"><div style="position:absolute;left:120px;top:160px">${opening}${fixture.tag}${'</div>'.repeat(fixture.depth)}</div></body></html>`);
+      await page.locator("[data-fixture-input]").focus();
+      await application.evaluate(({ BrowserWindow }) => { const win = BrowserWindow.getAllWindows()[0]; win.show(); win.focus(); });
+      await page.waitForFunction(() => document.activeElement?.hasAttribute("data-fixture-input") && document.hasFocus());
+      const result = await application.evaluate(async ({ BrowserWindow, screen }) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        const { readInputContext, dictationBounds, helperPath } = globalThis.inputFixture;
+        const handle = win.getNativeWindowHandle().readBigUInt64LE().toString();
+        await globalThis.inputFixture.focus(handle);
+        const start = Date.now();
+        const context = await readInputContext({ helperPath });
+        const input = await win.webContents.executeJavaScript('(() => { const r = document.querySelector("[data-fixture-input]").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()');
+        const rect = context?.rect ? screen.screenToDipRect(null, { ...context.rect,
+          x: Math.round(context.rect.x), y: Math.round(context.rect.y),
+          width: Math.max(1, Math.round(context.rect.width)), height: Math.round(context.rect.height) }) : null;
+        const bounds = win.getContentBounds();
+        return { targetMatch: context?.target === handle, contextFound: Boolean(context),
+          source: context?.source, elapsed: Date.now() - start, hostFocused: win.isFocused(),
+          rect, input: { ...input, x: input.x + bounds.x, y: input.y + bounds.y },
+          popup: dictationBounds(context, { width: 340, height: 116 }, screen) };
+      });
+      assert.equal(result.targetMatch, true, `Synthetic input must retain foreground focus: ${JSON.stringify(result)}`);
+      assert.ok(["caret", "input"].includes(result.source), `${fixture.label} must expose input geometry: ${JSON.stringify(result)}`);
+      assert.ok(result.rect.x >= result.input.x - 2 && result.rect.x <= result.input.x + result.input.width + 2);
+      assert.ok(result.rect.y >= result.input.y - 2 && result.rect.y <= result.input.y + result.input.height + 2);
+      console.log(`PASS ${fixture.label} accessibility input placement and preserved target (${result.source}, ${result.elapsed}ms); synthetic field only`);
+    }
   } finally { await application.close(); }
 }
 

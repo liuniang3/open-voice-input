@@ -8,6 +8,10 @@ All notable changes to this project are documented here.
 
 - Anchor the short-dictation popup near the insertion caret or focused text field when invoked. Windows uses native caret/UI Automation geometry with mixed-DPI conversion; macOS uses Accessibility geometry without prompting for permission just to position the popup. Bound native queries, clamp to the display work area and keep a centered fallback, the original paste target and manually moved position during an active recording. No input-field text is read or logged.
 
+### Fixed
+
+- Resolve deeply nested Windows accessibility trees such as the Codex chat composer instead of rejecting the focused input before reaching its host window. Include filled/empty rich-editor regressions and check the visible popup's final position through the actual recording flow. Placement logs contain only the positioning method and timing, never field text or target identifiers.
+
 ## v0.4.20 - 2026-10-11
 
 ### Fixed

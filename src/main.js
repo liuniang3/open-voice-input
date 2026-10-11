@@ -1060,7 +1060,10 @@ function showAndStart() {
       try {
         const recent = Date.now() - invokedAt < 2000 ? context : null;
         mainWindow.setBounds(dictationBounds(recent, WINDOW_SIZES.recording, screen), false);
-      } catch { /* Keep the normal centered popup if display geometry is unavailable. */ }
+        logEvent("dictation: placement", `${recent?.source || "fallback"} elapsedMs=${Date.now() - invokedAt}`);
+      } catch {
+        logEvent("dictation: placement", "fallback display-unavailable");
+      }
     }
     if (!dictationPreview || !await dictationPreview.show({ reposition: freshCapture })) windowMotion.show();
     if (meetingQuitCleanupStarted) throw liveError("app_quitting");

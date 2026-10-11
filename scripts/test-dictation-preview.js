@@ -202,10 +202,34 @@ async function verifyNative() {
     assert.equal(finished.text.endsWith("最后一句也必须保留。"), true);
     assert.deepEqual(await application.evaluate(() => globalThis.fixtureInjected), [finished.text]);
     assert.equal(await application.evaluate(() => globalThis.fixtureApp.preview().isVisible()), false);
-    await application.evaluate(() => globalThis.fixtureApp.showAndStart());
+    const anchor = await application.evaluate(async ({ BrowserWindow, screen }) => {
+      const area = screen.getPrimaryDisplay().workArea;
+      const target = new BrowserWindow({ x: area.x + 80, y: area.y + 70, width: 720, height: 460,
+        frame: false, show: false, backgroundColor: "#ffffff", webPreferences: { sandbox: true } });
+      globalThis.fixtureExternalInput = target;
+      const editor = '<div role="group">'.repeat(40) +
+        '<div id="input" contenteditable="true" role="textbox" aria-label="Synthetic editor" style="width:400px;min-height:140px"><p>Synthetic input only</p></div>' + '</div>'.repeat(40);
+      await target.loadURL("data:text/html," + encodeURIComponent(`<html lang="en"><body style="margin:0"><div style="position:absolute;left:120px;top:160px">${editor}</div><script>document.getElementById("input").focus()</script></body></html>`));
+      target.show(); target.focus();
+      const handle = target.getNativeWindowHandle().readBigUInt64LE().toString();
+      await globalThis.fixtureApp.focusSyntheticTarget(handle);
+      const context = await globalThis.fixtureApp.inputContext();
+      if (!["caret", "input"].includes(context?.source)) throw new Error("synthetic_editor_not_located");
+      const expected = globalThis.fixtureApp.placement(context, { width: 340, height: 116 }, screen);
+      globalThis.fixtureApp.showAndStart();
+      return { expected, handle };
+    });
     await page.waitForFunction(() => isRecording);
+    const positioned = await application.evaluate(() => ({
+      popup: globalThis.fixtureApp.preview().getWindow().getBounds(),
+      target: globalThis.fixtureApp.state().targetWindowHandle
+    }));
+    assert.deepEqual(positioned.popup, anchor.expected, "actual recording popup must retain the native editor anchor after renderer startup/focus");
+    assert.equal(positioned.target, anchor.handle, "positioning preserves the external paste target");
+    console.log("PASS actual recording popup follows a deep external rich editor, with fixed geometry and the original paste target");
     await popup.keyboard.press("Escape");
     await page.waitForFunction(() => !isRecording && currentWindowMode === "compact");
+    await application.evaluate(() => { globalThis.fixtureExternalInput.destroy(); });
     assert.equal(await application.evaluate(() => globalThis.fixtureInjected.length), 1, "Escape never pastes");
     await application.evaluate(() => globalThis.fixtureApp.showHome());
     await page.waitForFunction(() => document.body.classList.contains("home-mode"));
@@ -224,7 +248,14 @@ if (process.versions.electron && process.argv.includes("--electron-app-fixture")
   app.setPath("appData", sandbox); app.setPath("documents", path.join(sandbox, "documents"));
   const filename = path.join(root, "src/main.js"), mod = new Module(filename, module);
   mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename));
-  mod._compile(fs.readFileSync(filename, "utf8") + "\nglobalThis.fixtureApp = { showAndStart, focusMainWindow, showHome, settingsSave: saveSettings, main: () => mainWindow, preview: () => dictationPreview, state: () => ({ windowMode, shortStartPending, captureOwner, shortcutCaptureSuspended }) };", filename);
+  mod._compile(fs.readFileSync(filename, "utf8") + `
+globalThis.fixtureApp = { showAndStart, focusMainWindow, showHome, settingsSave: saveSettings,
+  inputContext: getDictationInputContext, placement: dictationBounds,
+  focusSyntheticTarget: handle => new Promise((resolve, reject) => execFile("powershell.exe", ["-NoProfile", "-File",
+    path.join(__dirname, "../scripts/fixtures/dictation-input-field.ps1"), "-ForegroundHandle", handle],
+    { windowsHide: true, timeout: 3000, maxBuffer: 8192 }, error => error ? reject(error) : resolve())),
+  main: () => mainWindow, preview: () => dictationPreview,
+  state: () => ({ windowMode, shortStartPending, captureOwner, shortcutCaptureSuspended, targetWindowHandle }) };`, filename);
 } else if (require.main === module) (async () => {
   await unitTests();
   if (process.argv.includes("--electron")) await verifyNative();

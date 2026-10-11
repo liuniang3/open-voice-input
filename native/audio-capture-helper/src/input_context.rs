@@ -42,7 +42,9 @@ unsafe fn automation_rect(hwnd: HWND) -> Option<(RECT, &'static str)> {
     let walker = automation.RawViewWalker().ok()?;
     let mut ancestor = focused.clone();
     let mut same_window = false;
-    for _ in 0..24 {
+    // Rich editors can have more than 30 non-native ancestors before their host window.
+    // The parent process still bounds the entire query, including a slow provider.
+    for _ in 0..64 {
         if let Ok(native) = ancestor.CurrentNativeWindowHandle() {
             if !native.is_invalid() && GetAncestor(native, GA_ROOT) == GetAncestor(hwnd, GA_ROOT) {
                 same_window = true;
