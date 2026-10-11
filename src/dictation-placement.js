@@ -48,7 +48,7 @@ function toDip(rect, context, screen) {
   } catch { return null; }
 }
 
-function dictationBounds(context, size, screen) {
+function dictationPlacement(context, size, screen) {
   let anchor = context?.source ? toDip(context.rect, context, screen) : null;
   const windowRect = context ? toDip(context.windowRect, context, screen) : null;
   if (anchor && windowRect && (anchor.x + anchor.width < windowRect.x ||
@@ -79,7 +79,23 @@ function dictationBounds(context, size, screen) {
     const above = anchor.y - height - gap;
     y = below + height <= area.y + area.height - margin ? below : above;
   }
-  return { x: clamp(x, area.x, area.width, width), y: clamp(y, area.y, area.height, height), width, height };
+  const bounds = { x: clamp(x, area.x, area.width, width), y: clamp(y, area.y, area.height, height), width, height };
+  let entrance = null;
+  if (anchor) {
+    const above = bounds.y + height <= anchor.y;
+    const point = {
+      x: Math.max(area.x, Math.min(anchor.x + (context.source === "caret" ? anchor.width / 2 : Math.min(16, anchor.width / 2)), area.x + area.width)),
+      y: Math.max(area.y, Math.min(context.source === "caret" ? anchor.y + anchor.height / 2
+        : above ? anchor.y : anchor.y + anchor.height, area.y + area.height))
+    };
+    const origin = { x: Math.max(8, Math.min(point.x - bounds.x, width - 8)), y: above ? height : 0 };
+    // Move only the short gap to the field; the recording viewport never resizes.
+    const offset = { x: point.x - bounds.x - origin.x, y: point.y - bounds.y - origin.y };
+    if (Math.abs(offset.x) <= 48 && Math.abs(offset.y) <= 48) entrance = { origin, offset };
+  }
+  return { bounds, entrance };
 }
 
-module.exports = { readInputContext, parseInputContext, dictationBounds };
+function dictationBounds(context, size, screen) { return dictationPlacement(context, size, screen).bounds; }
+
+module.exports = { readInputContext, parseInputContext, dictationBounds, dictationPlacement };

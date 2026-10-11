@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { parseInputContext, readInputContext, dictationBounds } = require("../src/dictation-placement");
+const { parseInputContext, readInputContext, dictationBounds, dictationPlacement } = require("../src/dictation-placement");
 const { resolveHelperPath } = require("../src/meeting/paths");
 
 const size = { width: 340, height: 116 };
@@ -16,6 +16,19 @@ const context = rect => ({ target: "456", source: "caret", coordinateSpace: "dip
 async function run() {
   assert.deepEqual(dictationBounds(context({ x: 300, y: 200, width: 0, height: 20 }), size, screen),
     { x: 290, y: 230, ...size });
+  for (const rect of [{ x: 300, y: 200, width: 1, height: 20 }, { x: 950, y: 760, width: 1, height: 20 }]) {
+    const placed = dictationPlacement(context(rect), size, screen);
+    const { origin, offset } = placed.entrance;
+    assert.equal(placed.bounds.x + origin.x + offset.x, rect.x + rect.width / 2);
+    assert.equal(placed.bounds.y + origin.y + offset.y, rect.y + rect.height / 2,
+      "the small bubble starts at the actual caret center, including upward entrances at the display edge");
+    assert.equal(origin.y, rect.y === 200 ? 0 : size.height);
+    assert.ok(origin.x <= size.width && origin.x >= 0);
+  }
+  assert.equal(dictationPlacement(null, size, screen).entrance, null, "unknown geometry never invents a caret");
+  const field = dictationPlacement({ ...context({ x: 300, y: 200, width: 400, height: 80 }), source: "input" }, size, screen);
+  assert.equal(field.bounds.y + field.entrance.origin.y + field.entrance.offset.y, 280,
+    "input-only fallback starts near the input edge, rather than inventing a selection position");
   assert.deepEqual(dictationBounds(context({ x: 950, y: 760, width: 1, height: 20 }), size, screen),
     { x: 652, y: 634, ...size });
   assert.deepEqual(dictationBounds(null, size, screen), { x: 330, y: 342, ...size });

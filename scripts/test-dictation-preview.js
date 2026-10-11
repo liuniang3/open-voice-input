@@ -202,6 +202,17 @@ async function verifyNative() {
     assert.equal(finished.text.endsWith("最后一句也必须保留。"), true);
     assert.deepEqual(await application.evaluate(() => globalThis.fixtureInjected), [finished.text]);
     assert.equal(await application.evaluate(() => globalThis.fixtureApp.preview().isVisible()), false);
+    await page.evaluate(() => window.mimoInput.setReducedMotion(false));
+    await popup.evaluate(() => {
+      window.bubbleObservations = [];
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (frames, options) {
+        if (this.classList.contains("shell")) {
+          window.bubbleObservations.push({ frames, options, width: innerWidth, height: innerHeight });
+        }
+        return animate.call(this, frames, options);
+      };
+    });
     const anchor = await application.evaluate(async ({ BrowserWindow, screen }) => {
       const area = screen.getPrimaryDisplay().workArea;
       const target = new BrowserWindow({ x: area.x + 80, y: area.y + 70, width: 720, height: 460,
@@ -220,15 +231,38 @@ async function verifyNative() {
       return { expected, handle };
     });
     await page.waitForFunction(() => isRecording);
+    await popup.waitForFunction(() => window.bubbleObservations.length > 0 && !document.body.classList.contains("dictation-entering"));
+    const bubble = await popup.evaluate(() => window.bubbleObservations.at(-1));
+    assert.deepEqual([bubble.width, bubble.height], [340, 116]);
+    assert.equal(bubble.frames[0].transform, "scale(0.035, 0.14)");
+    assert.equal(bubble.options.duration, 240);
     const positioned = await application.evaluate(() => ({
       popup: globalThis.fixtureApp.preview().getWindow().getBounds(),
       target: globalThis.fixtureApp.state().targetWindowHandle
     }));
     assert.deepEqual(positioned.popup, anchor.expected, "actual recording popup must retain the native editor anchor after renderer startup/focus");
     assert.equal(positioned.target, anchor.handle, "positioning preserves the external paste target");
-    console.log("PASS actual recording popup follows a deep external rich editor, with fixed geometry and the original paste target");
+    console.log("PASS actual recording popup expands from a deep external rich editor, settles at its anchor with fixed geometry and preserves the paste target");
     await popup.keyboard.press("Escape");
     await page.waitForFunction(() => !isRecording && currentWindowMode === "compact");
+    await popup.evaluate(() => {
+      window.cancelledDuringBubble = false;
+      window.dictationPreview.onDictationEntrance(value => {
+        if (!value) return;
+        setTimeout(() => {
+          window.cancelledDuringBubble = document.body.classList.contains("dictation-entering");
+          window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        }, 60);
+      });
+    });
+    await application.evaluate(async () => {
+      await globalThis.fixtureApp.focusSyntheticTarget(globalThis.fixtureExternalInput.getNativeWindowHandle().readBigUInt64LE().toString());
+      globalThis.fixtureApp.showAndStart();
+    });
+    await popup.waitForFunction(() => window.cancelledDuringBubble);
+    await page.waitForFunction(() => !isRecording && !isStartingRecording && currentWindowMode === "compact");
+    assert.equal(await application.evaluate(() => globalThis.fixtureApp.preview().isVisible()), false);
+    console.log("PASS Escape during bubble entrance cancels the actual recording without waiting for animation completion");
     await application.evaluate(() => { globalThis.fixtureExternalInput.destroy(); });
     assert.equal(await application.evaluate(() => globalThis.fixtureInjected.length), 1, "Escape never pastes");
     await application.evaluate(() => globalThis.fixtureApp.showHome());

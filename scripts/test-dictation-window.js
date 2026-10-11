@@ -10,7 +10,7 @@ const sizes = vm.runInNewContext(`(${main.match(/const WINDOW_SIZES = (\{[\s\S]*
 const geometry = main.slice(main.indexOf("function enforceWindowGeometry("), main.indexOf("function clamp("));
 
 function verifyGeometry(win, platform = process.platform) {
-  const context = { mainWindow: win, liveWindowRestore: null, windowMode: "recording", WINDOW_SIZES: sizes,
+  const context = { mainWindow: win, windowMotion: null, liveWindowRestore: null, windowMode: "recording", WINDOW_SIZES: sizes,
     os: { platform: () => platform },
     RESIZABLE_WINDOW_MODES: new Set(["settings", "result", "meeting", "file", "home"]),
     setWindowAlwaysOnTop: (window, topmost) => window.setAlwaysOnTop(topmost), logEvent() {} };

@@ -2461,6 +2461,7 @@ async function setTranscriptionMode(mode, { silent = false } = {}) {
 }
 
 function applyWindowMode(mode) {
+  if (mode !== "recording") window.dictationMotion?.cancel();
   if (mode !== "settings") endHotkeyCapture();
   cancelAnimationFrame(recordingScrollFrame);
   recordingScrollFrame = 0;

@@ -57,7 +57,7 @@ const { normalizePresentation, minimalBounds, visibleBounds, createMeetingWindow
 const { createTransparentPreview } = require("./meeting/transparent-preview");
 const { createWindowMotion } = require("./window-motion");
 const { createDictationPreview } = require("./dictation-preview");
-const { readInputContext, dictationBounds } = require("./dictation-placement");
+const { readInputContext, dictationBounds, dictationPlacement } = require("./dictation-placement");
 
 let meetingImportJobs = null;
 function getMeetingImportJobs() {
@@ -1056,16 +1056,20 @@ function showAndStart() {
     logEvent("hotkey: showAndStart");
     setWindowMode("recording");
     prepareWindowForDisplay(mainWindow, "recording");
+    let entrance = null;
     if (freshCapture) {
       try {
         const recent = Date.now() - invokedAt < 2000 ? context : null;
-        mainWindow.setBounds(dictationBounds(recent, WINDOW_SIZES.recording, screen), false);
+        const placement = dictationPlacement(recent, WINDOW_SIZES.recording, screen);
+        mainWindow.setBounds(placement.bounds, false);
+        entrance = placement.entrance;
         logEvent("dictation: placement", `${recent?.source || "fallback"} elapsedMs=${Date.now() - invokedAt}`);
       } catch {
         logEvent("dictation: placement", "fallback display-unavailable");
       }
     }
-    if (!dictationPreview || !await dictationPreview.show({ reposition: freshCapture })) windowMotion.show();
+    if (!dictationPreview || !await dictationPreview.show({ reposition: freshCapture, entrance }))
+      windowMotion.show({ bubble: freshCapture, entrance });
     if (meetingQuitCleanupStarted) throw liveError("app_quitting");
     enforceWindowGeometry(mainWindow, "recording");
     focusMainWindow();
@@ -1159,6 +1163,7 @@ function showFileTranscriptionWorkspace() {
 }
 
 function setWindowMode(mode) {
+  if (mode !== "recording") windowMotion?.finishEntrance();
   const previousMode = windowMode;
   if (mode !== "meeting") restoreLiveWindow();
   windowMode = mode;
@@ -1283,7 +1288,7 @@ function enforceWindowGeometry(win, mode = windowMode, resetSize = false) {
   if (!win || win.isDestroyed()) return;
   // Let the native backdrop show through the dictation surface, not the text.
   if (os.platform() === "darwin") {
-    try { win.setVibrancy?.(mode === "recording" ? "under-window" : null); } catch {}
+    try { win.setVibrancy?.(mode === "recording" && !windowMotion?.isBubbleEntering() ? "under-window" : null); } catch {}
   }
   if (win === mainWindow && mode === "meeting" && liveWindowRestore) {
     win.setResizable(true);

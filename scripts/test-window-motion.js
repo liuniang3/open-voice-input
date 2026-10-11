@@ -12,7 +12,11 @@ function fixture(platform = "win32", { unsupportedOpacity = false } = {}) {
   const timers = new Map();
   const calls = [];
   const win = {
-    visible: false, destroyed: false, opacity: 1,
+    visible: false, destroyed: false, opacity: 1, bounds: { x: 290, y: 230, width: 340, height: 116 },
+    webContents: { send: (...args) => calls.push(args) },
+    getBounds() { return { ...this.bounds }; },
+    setPosition(x, y) { this.bounds = { ...this.bounds, x, y }; },
+    setVibrancy(value) { this.vibrancy = value; },
     isDestroyed() { return this.destroyed; },
     isVisible() { return this.visible; },
     show() { calls.push("show"); this.visible = true; },
@@ -112,6 +116,45 @@ async function run() {
     assert.equal(f.timers.size, 0, "visual capability failures never block show/hide");
   }
   assert.ok(DURATIONS.enter <= 180 && DURATIONS.leave <= 120);
+  for (const platform of ["win32", "darwin"]) {
+    const f = fixture(platform);
+    f.motion.setReducedMotion(false);
+    const final = { ...f.win.bounds };
+    const entrance = { origin: { x: 10, y: 0 }, offset: { x: 0, y: -20 } };
+    f.motion.show({ bubble: true, entrance });
+    assert.equal(f.win.visible, true, "bubble animation never delays recording or keyboard availability");
+    assert.equal(f.win.bounds.y, 210);
+    assert.equal(f.win.bounds.width, 340); assert.equal(f.win.bounds.height, 116);
+    assert.deepEqual(f.calls.find(call => call[0] === "dictation:entrance")[1], { origin: entrance.origin, duration: 240 });
+    if (platform === "darwin") assert.equal(f.win.vibrancy, null);
+    f.advance(80);
+    assert.ok(f.win.bounds.y > 210 && f.win.bounds.y < 230);
+    const midway = f.win.bounds.y;
+    f.motion.show();
+    assert.equal(f.win.bounds.y, midway, "repeated shortcut focus does not restart the bubble");
+    f.advance(240);
+    assert.deepEqual(f.win.bounds, final);
+    assert.equal(f.win.opacity, 1); assert.equal(f.timers.size, 0);
+    if (platform === "darwin") assert.equal(f.win.vibrancy, "under-window");
+    f.motion.show({ bubble: true, entrance }); f.advance(32);
+    f.win.setPosition(650, 500); f.advance(240);
+    assert.equal(f.win.bounds.x, 650, "manual dragging owns the position immediately");
+    assert.equal(f.win.bounds.y, 500);
+    if (platform === "darwin") assert.equal(f.win.vibrancy, "under-window");
+    f.motion.show({ bubble: true, entrance }); f.advance(32);
+    const hiding = f.motion.hide(); f.advance(150); await hiding;
+    assert.equal(f.win.visible, false); assert.equal(f.timers.size, 0);
+    f.motion.show({ bubble: true, entrance }); f.advance(32);
+    f.motion.setReducedMotion(true);
+    assert.equal(f.motion.isBubbleEntering(), false); assert.equal(f.timers.size, 0);
+    assert.equal(f.win.opacity, 1);
+    f.motion.setReducedMotion(false); f.motion.show({ bubble: true, entrance });
+    f.motion.finishEntrance();
+    f.win.bounds = { x: 50, y: 60, width: 960, height: 760 };
+    f.advance(300);
+    assert.deepEqual(f.win.bounds, { x: 50, y: 60, width: 960, height: 760 }, "navigation leaves no stale position writer");
+    console.log(`PASS ${platform}: caret-origin bubble, fixed viewport, final placement, immediate input, manual moves, cancellation, reduced motion and navigation`);
+  }
   const main = fs.readFileSync(path.join(root, "src/main.js"), "utf8");
   assert.match(main, /Promise\.all\(\[hideWindow\(\), new Promise/);
   assert.match(main, /if \(focusRevision !== windowFocusRevision\) return/);
@@ -183,7 +226,75 @@ async function verifyBrowser() {
     await page.waitForFunction(() => window.mockCalls.filter(call => call.name === "setReducedMotion").at(-1)?.payload === false);
     assert.deepEqual(errors, []);
     console.log("PASS browser: all workspace entrances, narrow sizes, recording, stable title bar, rapid switches and live Reduce Motion changes");
+    await verifyBubble(browser, output);
   } finally { await browser.close(); }
+}
+
+async function verifyBubble(browser, output) {
+  const { pathToFileURL } = require("node:url");
+  const page = await browser.newPage({ viewport: { width: 340, height: 116 }, reducedMotion: "no-preference" });
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.addInitScript(() => {
+    window.dictationPreview = { ready: async () => ({ kind: "recording", title: "正在录音", detail: "", preview: false }),
+      onState: callback => { window.updateFixture = callback; }, onSpectrum() {}, command() {},
+      onDictationEntrance: callback => { window.bubbleFixture = callback; } };
+  });
+  await page.goto(pathToFileURL(path.join(root, "src/renderer/dictation-preview.html")).href);
+  await page.evaluate(() => { document.documentElement.style.background = "#547785"; });
+  for (const platform of ["win32", "darwin"]) {
+    await page.evaluate(value => { document.documentElement.dataset.platform = value; }, platform);
+    for (const origin of [{ x: 12, y: 0 }, { x: 320, y: 116 }]) {
+      await page.evaluate(origin => {
+        window.bubbleFixture({ origin, duration: 240 });
+        window.pausedBubble = document.querySelector(".shell").getAnimations()[0];
+        window.pausedBubble.pause(); window.pausedBubble.currentTime = 0;
+      }, origin);
+      const state = await page.evaluate(() => {
+        const shell = document.querySelector(".shell"), rect = shell.getBoundingClientRect(), style = getComputedStyle(shell);
+        return { origin: style.transformOrigin, width: rect.width, height: rect.height,
+          viewport: [innerWidth, innerHeight], radius: style.borderRadius };
+      });
+      assert.equal(state.origin, `${origin.x}px ${origin.y}px`);
+      assert.ok(state.width <= 13 && state.height <= 17, "first frame is a small bubble at the anchor, not the full popup");
+      assert.deepEqual(state.viewport, [340, 116]);
+      for (const time of [30, 90, 160, 230]) {
+        await page.evaluate(time => {
+          for (const animation of document.getAnimations().filter(a => a.effect.getTiming().iterations !== Infinity)) {
+            animation.pause(); animation.currentTime = time;
+          }
+          window.updateFixture({ kind: "recording", title: "", detail: "语音正在转写，气泡从输入位置轻轻展开。", preview: true });
+        }, time);
+        const midpoint = await page.locator(".shell").evaluate(node => {
+          const r = node.getBoundingClientRect();
+          return { width: r.width, height: r.height, radius: getComputedStyle(node).borderRadius };
+        });
+        assert.ok(midpoint.width > state.width && midpoint.width <= 340);
+        assert.ok(midpoint.height > state.height && midpoint.height <= 116);
+        await page.screenshot({ path: path.join(output, `bubble-${platform}-${origin.y ? "above" : "below"}-${time}.png`), animations: "allow" });
+        assert.equal(await page.evaluate(() => window.pausedBubble.currentTime), time, "the captured screenshot retains the requested animation frame");
+      }
+      await page.evaluate(() => window.dictationMotion.cancel());
+      assert.equal(await page.locator(".shell").evaluate(node => getComputedStyle(node).transform), "none");
+      assert.equal(await page.locator(".shell").evaluate(node => getComputedStyle(node).borderRadius), "18px");
+    }
+  }
+  await page.evaluate(() => window.bubbleFixture({ origin: { x: 12, y: 0 }, duration: 240 }));
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.waitForFunction(() => !document.body.classList.contains("dictation-entering"));
+  await page.evaluate(() => window.bubbleFixture({ origin: { x: 12, y: 0 }, duration: 240 }));
+  assert.equal(await page.locator(".shell").evaluate(node => node.getAnimations().length), 0);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.evaluate(() => {
+    window.bubbleFixture({ origin: { x: NaN, y: 0 } });
+    window.bubbleFixture({ origin: { x: 12, y: 0 }, duration: 240 });
+    window.bubbleFixture({ origin: { x: 320, y: 116 }, duration: 240 });
+  });
+  await page.waitForFunction(() => !document.body.classList.contains("dictation-entering"));
+  assert.equal(await page.locator(".shell").evaluate(node => node.getAnimations().length), 0);
+  assert.deepEqual(errors, []);
+  await page.close();
+  console.log("PASS bubble frames: upward/downward Windows/macOS presentation, rounded transparency, full text during entrance, repeated entry and live reduced motion");
 }
 
 async function verifyNative() {

@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Changed
+
+- Dictation enters as a small rounded bubble from the captured caret or input-field edge, then expands into the existing 340-by-116 popup over 240 ms. Prefer upward expansion near the display bottom; missing geometry uses a centered entrance. Only the short anchor-to-popup gap moves, while the viewport, recording and keyboard availability remain unchanged.
+- Share the bubble presentation across Windows and macOS, respect live Reduce Motion changes and cancel entrance state on hide/navigation. Repeated focus does not restart the animation; manual dragging immediately retains the user's position. macOS restores its native backdrop after the rounded surface expands; native macOS appearance still requires hardware validation.
+
 ## v0.4.21 - 2026-10-11
 
 ### Added

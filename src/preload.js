@@ -101,6 +101,7 @@ contextBridge.exposeInMainWorld("mimoInput", {
   onOpenMeeting: (callback) => ipcRenderer.on("open-meeting", callback),
   onOpenFile: (callback) => ipcRenderer.on("open-file", callback),
   onWindowMode: (callback) => ipcRenderer.on("window-mode", (_event, mode) => callback(mode)),
+  onDictationEntrance: (callback) => ipcRenderer.on("dictation:entrance", (_event, value) => callback(value)),
   onWindowBlur: (callback) => ipcRenderer.on("window-blur", callback),
   onPartialTranscript: (callback) => ipcRenderer.on("voice:partial-transcript", (_event, text) => callback(text)),
   // Stage 0B/2B/4A meeting API — isolated from voice recording IPC.

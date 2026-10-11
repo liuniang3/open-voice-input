@@ -58,7 +58,7 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
   ipcMain.handle("dictation:preview:ready", event => sender(event) ? state : null);
 
   return {
-    async show({ reposition = false } = {}) {
+    async show({ reposition = false, entrance = null } = {}) {
       if (disposed || failed) return false;
       if (!alive()) create();
       const current = ++revision;
@@ -66,7 +66,7 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
       enabled = true;
       if (!await ready || !alive() || failed || !enabled || revision !== current) return false;
       if (reposition || !win.isVisible()) win.setBounds(mainWindow.getBounds(), false);
-      publish(); motion.show(); mainWindow.hide(); return true;
+      publish(); motion.show({ bubble: reposition, entrance }); mainWindow.hide(); return true;
     },
     hide(onHidden) {
       enabled = false; revision++;
