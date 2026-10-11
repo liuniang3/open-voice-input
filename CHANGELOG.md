@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## v0.4.22 - 2026-10-12
+
 ### Added
 
 - Meeting and file summaries now share a topic-based article: a short overview followed by connected prose chapters. The model preserves important details and source evidence; chapters match the mindmap's top-level branches in order. New results have a separate cache identity, and older summaries remain readable.
@@ -24,7 +26,11 @@ All notable changes to this project are documented here.
 
 - Topic-summary upgrade: `72/72` shared regression scripts pass. Synthetic browser checks cover both platform styles at 720/1040/1440 pixels, zoom/pan, branch and keyboard expansion, chapter navigation, source seeking, safe text rendering and stale-session playback. Windows Electron checks load the local D3 bundle and play/seek a full realtime WAV through the range-enabled local protocol. Secret scanning passes; macOS capture/paste hardware validation remains separate.
 - Regressions cover Windows/macOS preparation, delayed first frames, repeated focus, cancellation, timeout fallback, late acknowledgements and live Reduce Motion. Actual Windows Electron tests verify prepared frames before native show under a simulated renderer delay, visible Home transitions, Escape during entrance, complete Stable-mode paste and background spectrum updates. Native macOS appearance still requires hardware validation.
-- Shared local regression suite passed: `69/69` scripts. Browser/native Electron presentation checks and sensitive-information checks passed using isolated synthetic data.
+- Windows x64, macOS Intel x64 and Apple Silicon arm64 platform CI passed, including the `72/72` shared regression scripts. Release builds repeat shared tests, native component builds and sensitive-information checks. Test fixtures contain synthetic data only; summary quality has not been evaluated against live model APIs in this update, and native macOS capture, permissions, paste and appearance still require hardware validation.
+
+### Release
+
+- Windows installer/portable and unsigned macOS Intel/Apple Silicon DMG/ZIP packages include update metadata, blockmaps and SHA-256 checksums. Publish the release only after all platform builds and uploads succeed. User credentials, local settings, recordings, transcripts and diagnostic screenshots are excluded; upgrades retain existing user configuration.
 
 ## v0.4.21 - 2026-10-11
 
