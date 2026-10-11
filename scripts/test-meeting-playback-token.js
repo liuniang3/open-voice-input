@@ -16,7 +16,7 @@ let passed = 0;
 async function test(name, run) { media.clearAllPlaybackTokens(); await run(); passed++; console.log(`ok - ${name}`); }
 
 async function fixture() {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "ovi-playback-safe-"));
+  const dir = fs.realpathSync.native(await fsp.mkdtemp(path.join(os.tmpdir(), "ovi-playback-safe-")));
   const sessionsRoot = path.join(dir, "meeting-sessions");
   const sessionId = "playback-test";
   const sessionDir = path.join(sessionsRoot, sessionId);

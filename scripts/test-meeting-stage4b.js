@@ -416,7 +416,7 @@ async function main() {
       const issued = issuePlaybackToken({ sessionsRoot, sessionId: sid, absPath: wav });
       assert.ok(issued.url.startsWith(`${SCHEME}://`));
       const resolved = resolvePlaybackToken(issued.token);
-      assert.equal(path.resolve(resolved.absPath), path.resolve(wav));
+      assert.equal(path.resolve(resolved.absPath), fs.realpathSync.native(wav));
       assert.throws(() => {
         issuePlaybackToken({
           sessionsRoot,
