@@ -379,7 +379,8 @@ async function main() {
     const summary = request => {
       const item = JSON.parse(request.messages[1].content).items[0];
       const claim = { text: item.text, evidence: [{ sourceId: item.id, quote: item.text }], uncertain: false };
-      return JSON.stringify({ title: "Recorded decision", mindmap: { ...claim, children: [] },
+      return JSON.stringify({ title: "Recorded decision", overview: claim,
+        mindmap: { ...claim, children: [{ ...claim, text: "正文", children: [] }] },
         sections: [{ heading: "正文", paragraphs: [claim], items: [] }] });
     };
     const x = await setup({ llmImpl: request => {

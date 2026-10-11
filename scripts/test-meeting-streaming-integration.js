@@ -46,7 +46,8 @@ function modelReply(input, { punctuate = false } = {}) {
     text: `The recorded discussion covered ${item.text.replace(/\s+/g, " ").trim()} as connected prose for the record.`,
     evidence: [evidence(item)], uncertain: Boolean(item.uncertain)
   };
-  return JSON.stringify({ title: "Integration meeting", mindmap: { ...claim, children: [] },
+  return JSON.stringify({ title: "Integration meeting", overview: claim,
+    mindmap: { ...claim, children: [{ ...claim, text: "正文", children: [] }] },
     sections: [{ heading: "正文", paragraphs: [paragraph], items: [] }] });
 }
 

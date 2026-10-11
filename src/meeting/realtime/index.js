@@ -874,7 +874,8 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         current.cleanupStatus = "completed";
         current.summary = null; current.summaryMarkdownPath = "";
       } else {
-        current.summary = { schema: result.schema, mindmap: result.mindmap, sections: result.sections,
+        current.summary = { schema: result.schema, overview: result.overview, sampleRate: result.sampleRate,
+          mindmap: result.mindmap, sections: result.sections,
           markdown: result.markdown, title: result.title };
         current.summaryMarkdownPath = await writeResult("summary", result.markdown);
       }

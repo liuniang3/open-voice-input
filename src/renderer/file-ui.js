@@ -257,6 +257,7 @@
       resultEmpty.textContent = message;
     }
     if (resultContent) {
+      window.SummaryReader?.dispose(resultContent);
       resultContent.hidden = true;
       while (resultContent.firstChild) resultContent.removeChild(resultContent.firstChild);
     }
@@ -756,6 +757,7 @@
         }
         if (e.resultContent) {
           e.resultContent.hidden = blocks.length === 0;
+          window.SummaryReader?.dispose(e.resultContent);
           ui.appendTranscriptBlocks?.(e.resultContent, blocks);
         }
         if (refreshRaw && $("fileResultPane")) $("fileResultPane").scrollTop = scroll;
@@ -771,7 +773,10 @@
         }
         if (e.resultContent) {
           e.resultContent.hidden = empty;
-          if (!empty) ui.renderSummaryDocument?.(e.resultContent, summary);
+          if (!empty) ui.renderSummaryDocument?.(e.resultContent, summary, document, {
+            sessionId, api: window.mimoInput,
+            isCurrent: () => state.selectedId === sessionId && state.resultTab === "summary"
+          });
         }
       }
     } catch (error) {
@@ -939,6 +944,7 @@
       }
     });
     window.addEventListener("beforeunload", () => {
+      window.SummaryReader?.dispose($("fileResultContent"));
       unsubscribeSummary?.();
       unsubscribeSummary = null;
       stopPolling();

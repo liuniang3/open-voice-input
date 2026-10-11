@@ -14,11 +14,12 @@ const test = async (name, run) => { await run(); console.log(`PASS ${name}`); pa
 function response(input) {
   const item = input.items[0];
   const claim = { text: item.text.slice(0, 50), evidence: [{ sourceId: item.id, quote: item.text.slice(0, 80) }], uncertain: false };
-  return { title: "Budget fixture", mindmap: { ...claim, children: [] },
+  return { title: "Budget fixture", overview: claim,
+    mindmap: { ...claim, children: [{ ...claim, text: "正文", children: [] }] },
     sections: [{ heading: "正文", paragraphs: [claim], items: [] }] };
 }
 
-async function fixture({ profile, segments = 65, chars = 110, limits = {} } = {}) {
+async function fixture({ profile, segments = 65, chars = 110, limits = {}, respond = response } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "ovi-summary-budget-"));
   const state = { sessionId: "fixture", status: "completed", recording: false, finalizationPending: false,
     sampleRate: 100, totalFrames: segments * 100, audioIdentity: "fixed", segments: Array.from({ length: segments }, (_, index) => ({
@@ -32,7 +33,7 @@ async function fixture({ profile, segments = 65, chars = 110, limits = {} } = {}
     calls.push(request);
     request.onProgress({ stage: "thinking", outputChars: 0 });
     if (failFirst) { failFirst = false; throw Object.assign(new Error("private gateway failure"), { code: "network_error" }); }
-    return response(request.input);
+    return respond(request.input);
   } };
   const create = extra => createMeetingPostprocessService({ sessionDir: directory, getState: () => state, llm,
     limits: { ...(budget?.limits || {}), ...limits, ...extra } });
@@ -62,6 +63,64 @@ async function main() {
     assert.ok(result.result.mindmap.provenance.every(item => item.source === "live"));
     assert.equal(f.calls.filter(call => call.task === "summary_map").flatMap(call => call.input.items).length, 100);
   });
+  await test("map and reduce retain caller context, overview and chapter topics with immutable source citations", async () => {
+    const headings = ["Funding", "Delivery", "Risks"];
+    const paragraphs = ["Funding remains capped at 120.", "Delivery still requires approval.", "Risks remain unresolved."];
+    const overviewText = "Funding, delivery and risks constrain the recorded plan.";
+    const context = "Organize Funding, Delivery and Risks in source order; preserve unresolved conditions.";
+    const f = await fixture({ segments: 60, respond: input => {
+      assert.equal(input.context, context);
+      const claims = headings.map((heading, index) => {
+        const item = input.items.find(item => item.topic === heading && item.text === paragraphs[index])
+          || input.items.find(item => item.text.startsWith(`${heading} `));
+        assert.ok(item, `the ${heading} source must reach this request`);
+        return { text: paragraphs[index], evidence: [{ sourceId: item.id, quote: item.text.slice(0, 80) }], uncertain: false };
+      });
+      const overview = { text: overviewText, evidence: claims.flatMap(claim => claim.evidence), uncertain: false };
+      return { title: "Recorded plan", overview,
+        mindmap: { ...claims[0], text: "Recorded plan",
+          children: headings.map((heading, index) => ({ ...claims[index], text: heading, children: [] })) },
+        sections: headings.map((heading, index) => ({ heading, paragraphs: [claims[index]], items: [] })) };
+    } });
+    f.state.segments.forEach((segment, index) => {
+      segment.text = `${paragraphs[index % paragraphs.length]} ${"Synthetic supporting detail. ".repeat(60)}`;
+    });
+    const before = JSON.stringify(f.state);
+    const result = await f.create().summarize({ context });
+    assert.equal(result.status, "completed");
+    assert.equal(result.result.schema, "meeting_summary_v3");
+    assert.ok(result.result.levels > 1);
+    assert.ok(f.calls.filter(call => call.task === "summary_map").length > 1);
+    const reductions = f.calls.filter(call => call.task === "summary_reduce");
+    assert.ok(reductions.length > 0);
+    for (const call of f.calls) {
+      assert.equal(call.input.context, context);
+      assert.equal(JSON.parse(call.messages[1].content).context, context);
+      assert.ok(JSON.stringify(call.messages).length <= DEFAULT_LIMITS.maxInputChars);
+    }
+    for (const call of reductions) {
+      assert.ok(call.input.items.every(item => item.source === "summary" && typeof item.topic === "string" && item.topic.length > 0));
+      assert.ok(call.input.items.some(item => item.text === overviewText && item.topic === "Recorded plan"));
+      headings.forEach((heading, index) => {
+        assert.ok(call.input.items.some(item => item.text === heading && item.topic === heading), `branch topic ${heading} retained`);
+        assert.ok(call.input.items.some(item => item.text === paragraphs[index] && item.topic === heading), `paragraph topic ${heading} retained`);
+      });
+    }
+    assert.equal(result.result.overview.text, overviewText);
+    assert.deepEqual(result.result.sections.map(section => section.heading), headings);
+    assert.deepEqual(result.result.mindmap.children.map(branch => branch.text), headings);
+    assert.deepEqual(result.result.sections.flatMap(section => section.paragraphs.map(paragraph => paragraph.text)), paragraphs);
+    for (const claim of [result.result.overview, result.result.mindmap, ...result.result.mindmap.children,
+      ...result.result.sections.flatMap(section => section.paragraphs)]) {
+      assert.ok(claim.provenance.length > 0);
+      for (const citation of claim.provenance) {
+        assert.equal(citation.source, "live");
+        const source = f.state.segments.find(segment => citation.sourceId === `live:${segment.index}:0`);
+        assert.ok(source && source.text.includes(citation.quote), "reduction resolves citations back to immutable original text");
+      }
+    }
+    assert.equal(JSON.stringify(f.state), before);
+  });
   await test("transport timeout and run budget changes do not invalidate completed paid tasks", async () => {
     const f = await fixture({ profile: { contextWindow: 272000, maxOutputTokens: 32768 } });
     const first = await f.create({ requestTimeoutMs: 100, maxRequestsPerRun: 100 }).summarize();
@@ -79,7 +138,7 @@ async function main() {
     assert.equal(f.calls.filter(call => call.task === "summary_map").length, mapCalls + 1);
     assert.ok(!JSON.stringify(resumed).includes("private gateway failure"));
   });
-  await test("legacy cache adoption retains a durable semantic alias across later transport changes", async () => {
+  await test("v3 cache adoption retains a durable semantic alias across later transport changes", async () => {
     const f = await fixture();
     const initial = await f.create({ requestTimeoutMs: 100 }).summarize();
     const directory = path.dirname(initial.resultPath);
@@ -89,7 +148,7 @@ async function main() {
         source: "live", text: item.text, startFrame: item.startFrame, endFrame: item.endFrame, uncertain: false })), gaps: [] },
       context: "", llm: { modelId: "unit", revision: "" },
       configuration: { source: "original", useMimoReview: false, reconciliationDigest: null,
-        presentation: "coherent-article-v2", asr: null } };
+        presentation: "topic-article-v3", asr: null } };
     const key = digest({ ...identity, limits: { ...DEFAULT_LIMITS, requestTimeoutMs: 100 } });
     const root = path.dirname(directory);
     const legacyDirectory = path.join(root, key);

@@ -133,7 +133,7 @@ async function readLatestSummaryResult(sessionDir, sessionId = null) {
     const resultPath = path.join(root, latest.key, "result.json");
     assertPathInsideRoot(sessionDir, resultPath);
     const result = JSON.parse(await fs.readFile(resultPath, "utf8"));
-    if (!result || !["meeting_summary_v1", "meeting_summary_v2"].includes(result.schema)) return null;
+    if (!result || !["meeting_summary_v1", "meeting_summary_v2", "meeting_summary_v3"].includes(result.schema)) return null;
     if (sessionId != null && result.sessionId !== sessionId) return null;
     if (latest.resultDigest && resultDigestOf(result) !== latest.resultDigest) return null;
     return { result, resultPath, markdownPath: path.join(root, latest.key, "meeting.summary.md") };
@@ -142,7 +142,12 @@ async function readLatestSummaryResult(sessionDir, sessionId = null) {
   }
 }
 
-function claimDto(node, depth, remaining) {
+function sectionIdDto(value) {
+  return typeof value === "string" && value.length <= 200 && value === value.trim()
+    && /^section-[1-9]\d*$/.test(value) ? value : null;
+}
+
+function claimDto(node, depth, remaining, inheritedSectionId = null, tree = false) {
   if (!node || typeof node !== "object" || Array.isArray(node) || typeof node.text !== "string") return null;
   if (depth > MAX_DTO_DEPTH || remaining.count <= 0) return null;
   remaining.count -= 1;
@@ -151,15 +156,17 @@ function claimDto(node, depth, remaining) {
     text: node.text.slice(0, 4000),
     uncertain: node.uncertain === true,
     provenance: provenance.map(item => ({
-      sourceId: String(item?.sourceId || "").slice(0, 200),
-      quote: String(item?.quote || "").slice(0, 2000),
+      sourceId: typeof item?.sourceId === "string" ? item.sourceId.slice(0, 200) : "",
+      quote: typeof item?.quote === "string" ? item.quote.slice(0, 2000) : "",
       source: ["live", "mimo", "summary"].includes(item?.source) ? item.source : "live",
       startFrame: Number.isFinite(item?.startFrame) ? item.startFrame : null,
       endFrame: Number.isFinite(item?.endFrame) ? item.endFrame : null
     }))
   };
-  if (Array.isArray(node.children)) {
-    dto.children = node.children.slice(0, 200).map(child => claimDto(child, depth + 1, remaining)).filter(Boolean);
+  const sectionId = inheritedSectionId || sectionIdDto(node.sectionId);
+  if (tree && sectionId) dto.sectionId = sectionId;
+  if (tree && Array.isArray(node.children)) {
+    dto.children = node.children.slice(0, 100).map(child => claimDto(child, depth + 1, remaining, sectionId, true)).filter(Boolean);
   }
   return dto;
 }
@@ -192,14 +199,20 @@ function toFileSummaryDto(value = {}) {
   if (["connecting", "thinking", "receiving", "waiting", "retrying", "validating", "validation_retry", "completed", "idle"].includes(value.progress?.stage)) {
     dto.progress.stage = value.progress.stage;
   }
-  if (summary && typeof summary === "object") {
+  if (summary && typeof summary === "object" && !Array.isArray(summary)) {
     dto.summary = {
-      schema: summary.schema === "meeting_summary_v2" ? summary.schema : "meeting_summary_v1",
+      schema: ["meeting_summary_v2", "meeting_summary_v3"].includes(summary.schema) ? summary.schema : "meeting_summary_v1",
       title: typeof summary.title === "string" ? summary.title.slice(0, 300) : "",
       markdown: typeof summary.markdown === "string" ? summary.markdown.slice(0, 200000) : "",
-      mindmap: claimDto(summary.mindmap, 0, remaining),
-      sections: Array.isArray(summary.sections) ? summary.sections.slice(0, 100).map(section => ({
-        heading: String(section?.heading || "").slice(0, 200),
+      ...(summary.overview ? { overview: claimDto(summary.overview, 0, remaining) } : {}),
+      ...(Number.isSafeInteger(summary.sampleRate) && summary.sampleRate > 0 && summary.sampleRate <= 768000
+        ? { sampleRate: summary.sampleRate } : {}),
+      mindmap: claimDto(summary.mindmap, 0, remaining, null, true),
+      sections: Array.isArray(summary.sections) ? summary.sections.slice(0, 100)
+        .filter(section => section && typeof section === "object" && !Array.isArray(section) && typeof section.heading === "string")
+        .map(section => ({
+        ...(sectionIdDto(section.id) ? { id: section.id } : {}),
+        heading: section.heading.slice(0, 200),
         paragraphs: Array.isArray(section?.paragraphs)
           ? section.paragraphs.slice(0, 100).map(item => claimDto(item, 0, remaining)).filter(Boolean) : [],
         items: Array.isArray(section?.items)
@@ -276,7 +289,7 @@ function createFileSummaryService({
       useMimoReview,
       title,
       summaryMarkdownPath: outcome?.paths?.summaryMarkdownPath || "",
-      summary: outcome?.summary ? { title, ...outcome.summary } : null
+      summary: outcome?.result ? { ...outcome.summary, ...outcome.result, title } : outcome?.summary || null
     };
     lastDto = toFileSummaryDto(base);
     return lastDto;
@@ -333,6 +346,8 @@ function createFileSummaryService({
               schema: stored.result.schema,
               title: stored.result.title || "",
               markdown: stored.result.markdown || "",
+              overview: stored.result.overview,
+              sampleRate: stored.result.sampleRate,
               mindmap: stored.result.mindmap,
               sections: stored.result.sections,
               incomplete: stored.result.incomplete === true,

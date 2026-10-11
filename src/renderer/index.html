@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="./workspace-sidebars.css" />
     <link rel="stylesheet" href="./supplier-manager.css" />
     <link rel="stylesheet" href="./settings-workspace.css" />
+    <link rel="stylesheet" href="./summary-reader.css" />
   </head>
   <body>
     <main class="shell">
@@ -962,6 +963,7 @@
           </div>
           <section id="liveSummarySection" class="live-summary" aria-labelledby="liveSummaryHeading" hidden>
             <h2 id="liveSummaryHeading">会议摘要</h2>
+            <div id="liveSummaryReader" class="live-summary-reader" hidden></div>
             <div class="live-summary-layout">
               <section aria-labelledby="liveMindmapHeading"><h3 id="liveMindmapHeading">会议脉络</h3><div id="liveMindmap" class="live-mindmap"></div></section>
               <section aria-labelledby="liveDetailHeading"><h3 id="liveDetailHeading">整理正文</h3><div id="liveSummaryDetail" class="live-summary-detail"></div></section>
@@ -1180,6 +1182,8 @@
     <script src="../audio-utils.js"></script>
     <script src="../asr-provider-info.js"></script>
     <script src="../asr-defaults.js"></script>
+    <script src="../../node_modules/d3-hierarchy/dist/d3-hierarchy.min.js"></script>
+    <script src="./summary-reader.js"></script>
     <script src="./meeting-ui.js"></script>
     <script src="./text-supplier-ui.js"></script>
     <script src="./text-supplier-manager.js"></script>

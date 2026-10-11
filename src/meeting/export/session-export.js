@@ -32,7 +32,7 @@ const DOCX_STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   </w:docDefaults>
   <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
   <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:pPr><w:keepNext/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style>
 </w:styles>`;
 
 function xmlEscape(value) {
@@ -44,11 +44,13 @@ function xmlEscape(value) {
     .replace(/'/g, "&apos;");
 }
 
-function buildDocxDocument(title, text) {
+function buildDocxDocument(title, text, headings = []) {
   const lines = String(text || "").split(/\r?\n/);
+  const headingSet = new Set(headings);
   const paragraphs = lines
     .map((line, index) => {
-      const style = index === 0 ? '<w:pPr><w:pStyle w:val="Title"/></w:pPr>' : "";
+      const style = headingSet.has(line) ? '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
+        : index === 0 ? '<w:pPr><w:pStyle w:val="Title"/></w:pPr>' : "";
       return `<w:p>${style}<w:r><w:t xml:space="preserve">${xmlEscape(line || " ")}</w:t></w:r></w:p>`;
     })
     .join("");
@@ -57,7 +59,7 @@ function buildDocxDocument(title, text) {
   <w:body>
     <w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>${xmlEscape(title)}</w:t></w:r></w:p>
     ${paragraphs}
-    <w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>
+    <w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>
   </w:body>
 </w:document>`;
 }
@@ -146,11 +148,11 @@ function buildZip(entries) {
   return Buffer.concat([...localParts, central, end]);
 }
 
-function buildDocx({ title, text }) {
+function buildDocx({ title, text, headings = [] }) {
   return buildZip([
     { name: "[Content_Types].xml", data: DOCX_CONTENT_TYPES },
     { name: "_rels/.rels", data: DOCX_ROOT_RELS },
-    { name: "word/document.xml", data: buildDocxDocument(title, text) },
+    { name: "word/document.xml", data: buildDocxDocument(title, text, headings) },
     { name: "word/_rels/document.xml.rels", data: DOCX_DOCUMENT_RELS },
     { name: "word/styles.xml", data: DOCX_STYLES },
     { name: "docProps/core.xml", data: buildDocxCoreProperties(title) }
@@ -262,20 +264,28 @@ function isSharedSummary(summary) {
 // their machine-readable JSON block so older exports stay reproducible.
 function renderSharedSummaryLines(summary, headingPrefix = "") {
   const out = [];
+  const sections = Array.isArray(summary.sections) ? summary.sections : [];
+  const chapterIds = new Set(summary.schema === "meeting_summary_v3" ? sections
+    .filter(section => typeof section?.id === "string" && section.id.length <= 200 && section.id === section.id.trim()
+      && /^section-[1-9]\d*$/.test(section.id))
+    .map(section => section.id) : []);
   const title = String(summary.title || "").trim();
   if (title) out.push(`${headingPrefix}${title}`);
+  const overview = sharedSummaryClaimText(summary.overview);
+  if (overview) out.push("", `${headingPrefix}概述`, "", overview, "");
   const mindmap = summary.mindmap && typeof summary.mindmap === "object" ? summary.mindmap : null;
   if (mindmap) {
     out.push(`${headingPrefix}脉络`);
     const walk = (node, depth) => {
       if (!node || typeof node !== "object" || depth > 12) return;
       const label = sharedSummaryClaimText(node);
-      if (label) out.push(`${"  ".repeat(depth)}- ${label}`);
+      const linkedLabel = headingPrefix && chapterIds.has(node.sectionId)
+        ? `[${label.replace(/[\\[\]]/g, "\\$&")}](#${node.sectionId})` : label;
+      if (label) out.push(`${"  ".repeat(depth)}- ${linkedLabel}`);
       for (const child of (Array.isArray(node.children) ? node.children : [])) walk(child, depth + 1);
     };
     walk(mindmap, 0);
   }
-  const sections = Array.isArray(summary.sections) ? summary.sections : [];
   if (summary.schema === "meeting_summary_v2") {
     out.push("", `${headingPrefix}整理正文`);
     for (const section of sections) {
@@ -289,6 +299,7 @@ function renderSharedSummaryLines(summary, headingPrefix = "") {
   for (const section of sections) {
     if (!section || typeof section.heading !== "string") continue;
     out.push("");
+    if (headingPrefix && chapterIds.has(section.id)) out.push(`<a id="${section.id}"></a>`, "");
     out.push(`${headingPrefix}${section.heading}`);
     for (const paragraph of (Array.isArray(section.paragraphs) ? section.paragraphs : [])) {
       const text = sharedSummaryClaimText(paragraph);
@@ -559,7 +570,11 @@ async function writeExportFiles({
   if (fmt === "docx" || fmt === "word") {
     const title = sanitizeSessionTitle(session?.title || session?.id || "语音转写");
     const content = buildTxt({ transcript, corrected, summary, speakerMap, scope: sc });
-    await fsp.writeFile(outPath, buildDocx({ title, text: content }));
+    const headings = (sc === "all" || sc === "summary") && isSharedSummary(summary)
+      ? [String(summary.title || "").trim(), "概述", "脉络", "整理正文",
+        ...(summary.schema === "meeting_summary_v2" ? [] : (summary.sections || []).map(section => section?.heading))]
+        .filter(heading => typeof heading === "string" && heading.trim()) : [];
+    await fsp.writeFile(outPath, buildDocx({ title, text: content, headings }));
     report.files.push(path.basename(outPath));
     return report;
   }

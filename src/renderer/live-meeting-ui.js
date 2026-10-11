@@ -339,9 +339,25 @@
     function renderSummary() {
       const summary = dto.summary;
       $("liveSummarySection").hidden = !summary;
-      const signature = JSON.stringify(summary || null);
+      const signature = JSON.stringify([dto.sessionId, summary || null]);
       if (signature === summarySignature) return;
       summarySignature = signature;
+      const readerContainer = $("liveSummaryReader");
+      if (readerContainer) {
+        const topicReader = summary?.schema === "meeting_summary_v3" && win.SummaryReader;
+        readerContainer.hidden = !topicReader;
+        $("liveSummarySection").classList.toggle("has-topic-reader", Boolean(topicReader));
+        const legacy = $("liveMindmap").parentElement?.parentElement;
+        if (legacy) legacy.hidden = Boolean(topicReader);
+        if (topicReader) {
+          const sessionId = dto.sessionId;
+          win.SummaryReader.render(readerContainer, summary, { sessionId, api: win.mimoInput,
+            isCurrent: () => opened && dto.sessionId === sessionId });
+          $("liveSummaryHeading").textContent = "内容整理";
+          return;
+        }
+        win.SummaryReader?.dispose(readerContainer);
+      }
       $("liveMindmap").replaceChildren();
       $("liveSummaryDetail").replaceChildren();
       $("liveDetailHeading").textContent = summary?.schema === "meeting_summary_v2" ? "整理正文" : "详细纪要";
@@ -744,6 +760,8 @@
     }
 
     function close() {
+      win.SummaryReader?.dispose($("liveSummaryReader"));
+      summarySignature = "";
       opened = false;
       generation += 1;
       revision += 1;

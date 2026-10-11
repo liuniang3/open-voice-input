@@ -29,4 +29,10 @@
 
 ## Other runtime dependencies
 
+### d3-hierarchy
+
+- Package: [d3-hierarchy](https://github.com/d3/d3-hierarchy) **3.1.2**, ISC license.
+- Used locally for the shared interactive summary mindmap tree layout; no remote assets or provider requests.
+- The package's complete `LICENSE` and browser bundle are shipped inside the application.
+
 See `package.json` / `package-lock.json` for additional open-source packages (e.g. Electron, `ws`).

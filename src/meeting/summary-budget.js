@@ -49,7 +49,7 @@ function summaryBudget(profile = {}) {
 
 function summaryInput(task, items, context, limits, sourceIncomplete, missingRangeCount) {
   return { items, outputSchema: task, sourceIncomplete, missingRangeCount,
-    instruction: "Produce detailed notes as coherent prose paragraphs, but compress repeated material so subsequent reduction converges.",
+    instruction: "Produce a short overview and thematic chapters of coherent prose, with one matching mindmap branch per chapter. Preserve important details and supplied topic context; compress repeated material so subsequent reduction converges.",
     context, maxOutputChars: limits.maxOutputChars };
 }
 

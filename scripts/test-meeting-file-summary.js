@@ -61,7 +61,8 @@ function summaryReply(input) {
   };
   return {
     title: "File meeting",
-    mindmap: { ...claim, children: [] },
+    overview: claim,
+    mindmap: { ...claim, children: [{ ...claim, text: "正文", children: [] }] },
     sections: [{ heading: "正文", paragraphs: [paragraph], items: [] }]
   };
 }
@@ -239,7 +240,7 @@ async function main() {
     const completed = await f.makeService().summarize({ useMimoReview: false });
     assert.equal(completed.status, "completed");
     const stored = await readLatestSummaryResult(f.sessionDir);
-    assert.ok(stored && stored.result.schema === "meeting_summary_v2");
+    assert.ok(stored && stored.result.schema === "meeting_summary_v3");
     assert.equal(f.calls.review.length, 0);
     const historyService = createFileSummaryService({
       sessionDir: f.sessionDir,

@@ -24,8 +24,31 @@ function summary(input) {
       + "The group kept the recorded wording and left open points marked as such.",
     evidence: [evidence(item)], uncertain: Boolean(item.uncertain)
   };
-  return { title: "Meeting", mindmap: { ...claim, children: [] },
+  return { title: "Meeting", overview: claim,
+    mindmap: { ...claim, children: [{ ...claim, text: "正文", children: [] }] },
     sections: [{ heading: "正文", paragraphs: [paragraph], items: [] }] };
+}
+function topicSummary(input) {
+  const headings = ["Budget", "Delivery"];
+  const claims = headings.map((_, index) => {
+    const item = input.items[index % input.items.length];
+    return { text: item.text.slice(0, 80), evidence: [evidence(item)], uncertain: index === 1 };
+  });
+  const overview = { text: "The budget and delivery date remain subject to the recorded constraints.",
+    evidence: claims.flatMap(claim => claim.evidence), uncertain: true };
+  return { title: "Recorded plan", overview,
+    mindmap: { ...overview, text: "Recorded plan", children: headings.map((heading, index) => ({
+      ...claims[index], text: heading, children: [{ ...claims[index], children: [{ ...claims[index], children: [] }] }]
+    })) },
+    sections: headings.map((heading, index) => ({ heading, paragraphs: [claims[index]], items: [] })) };
+}
+function chapterSummary(input, count) {
+  const value = summary(input);
+  const claim = { text: "Recorded constraint.", uncertain: false,
+    evidence: [{ ...value.overview.evidence[0], quote: value.overview.evidence[0].quote.slice(0, 16) }] };
+  value.sections = Array.from({ length: count }, (_, index) => ({ heading: `Chapter ${index + 1}`, paragraphs: [claim], items: [] }));
+  value.mindmap.children = value.sections.map(section => ({ ...claim, text: section.heading, children: [] }));
+  return value;
 }
 async function fixture(options = {}) {
   const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "meeting-postprocess-test-"));
@@ -196,14 +219,126 @@ async function main() {
     const f = await fixture();
     const result = await f.service.summarize({ source: "original" });
     assert.equal(result.status, "completed"); assert.equal(f.calls.asr.length, 0);
-    assert.equal(result.result.schema, "meeting_summary_v2");
+    assert.equal(result.result.schema, "meeting_summary_v3");
+    assert.equal(result.result.sampleRate, f.state.sampleRate);
+    assert.equal(result.result.overview.text, summary(f.calls.llm[0].input).overview.text);
+    assert.ok(result.result.overview.provenance[0].sourceId.startsWith("live:"));
     assert.equal(result.result.sections.length, 1);
     assert.equal(result.result.sections[0].heading, "正文");
     assert.deepEqual(result.result.sections[0].items, []);
     assert.ok(result.result.sections[0].paragraphs[0].provenance[0].sourceId.startsWith("live:"));
-    assert.equal(result.result.mindmap.children.length, 0);
+    assert.equal(result.result.sections[0].id, "section-1");
+    assert.equal(result.result.mindmap.children.length, 1);
+    assert.equal(result.result.mindmap.children[0].text, result.result.sections[0].heading);
+    assert.equal(result.result.mindmap.children[0].sectionId, "section-1");
     const resumed = await f.create().summarize();
     assert.equal(resumed.status, "completed"); assert.equal(f.calls.llm.length, 1);
+  });
+  await test("v3 preserves the overview, chapter order, nested branches and original evidence across resume", async () => {
+    const f = await fixture();
+    let expected;
+    f.llm.complete = async request => {
+      f.calls.llm.push(request);
+      expected = topicSummary(request.input);
+      assert.ok(request.input.outputSchema.overview);
+      assert.ok(request.input.outputSchema.mindmap.children.length > 0);
+      assert.equal(Object.hasOwn(request.input.outputSchema.sections[0], "id"), false);
+      assert.equal(Object.hasOwn(request.input.outputSchema.mindmap.children[0], "sectionId"), false);
+      return expected;
+    };
+    const before = JSON.stringify(f.state);
+    const result = await f.service.summarize();
+    assert.equal(result.status, "completed");
+    const value = result.result;
+    assert.equal(value.schema, "meeting_summary_v3");
+    assert.equal(value.sampleRate, 100);
+    assert.equal(value.overview.text, expected.overview.text);
+    assert.equal(value.overview.uncertain, true);
+    assert.deepEqual(value.overview.provenance.map(({ sourceId, quote }) => ({ sourceId, quote })), expected.overview.evidence);
+    assert.deepEqual(value.sections.map(section => section.heading), ["Budget", "Delivery"]);
+    assert.deepEqual(value.sections.map(section => section.id), ["section-1", "section-2"]);
+    assert.deepEqual(value.mindmap.children.map(branch => branch.text), value.sections.map(section => section.heading));
+    function checkClaim(actual, claim) {
+      assert.equal(actual.text, claim.text);
+      assert.equal(actual.uncertain, claim.uncertain);
+      assert.deepEqual(actual.provenance.map(({ sourceId, quote }) => ({ sourceId, quote })), claim.evidence);
+      for (const citation of actual.provenance) {
+        const source = f.state.segments.find(segment => citation.sourceId === `live:${segment.index}:0`);
+        assert.ok(source && source.text.includes(citation.quote));
+        assert.equal(citation.startFrame, source.startFrame);
+        assert.equal(citation.endFrame, source.endFrame);
+      }
+    }
+    value.sections.forEach((section, index) => {
+      assert.deepEqual(section.items, []);
+      assert.equal(section.paragraphs.length, expected.sections[index].paragraphs.length);
+      section.paragraphs.forEach((paragraph, offset) => checkClaim(paragraph, expected.sections[index].paragraphs[offset]));
+      function checkBranch(branch, expectedBranch) {
+        checkClaim(branch, expectedBranch);
+        assert.equal(branch.sectionId, section.id);
+        assert.equal(branch.children.length, expectedBranch.children.length);
+        branch.children.forEach((child, offset) => checkBranch(child, expectedBranch.children[offset]));
+      }
+      checkBranch(value.mindmap.children[index], expected.mindmap.children[index]);
+    });
+    assert.deepEqual(JSON.parse(await fs.readFile(result.resultPath, "utf8")), value);
+    const resumed = await f.create().summarize({ retryFailed: true });
+    assert.equal(resumed.resultPath, result.resultPath);
+    assert.deepEqual(resumed.result, value);
+    assert.equal(f.calls.llm.length, 1);
+    assert.equal(JSON.stringify(f.state), before);
+  });
+  await test("duplicate, mismatched and reordered chapters fail closed without overwriting published v3 results", async () => {
+    const f = await fixture();
+    f.llm.complete = async request => topicSummary(request.input);
+    const valid = await f.service.summarize();
+    assert.equal(valid.status, "completed");
+    const pointer = path.join(f.sessionDir, "realtime", "postprocess", "summary-latest.json");
+    const beforeResult = await fs.readFile(valid.resultPath, "utf8");
+    const beforePointer = await fs.readFile(pointer, "utf8");
+    const beforeState = JSON.stringify(f.state);
+    const changes = [
+      ["duplicate headings", value => {
+        value.sections[1].heading = value.sections[0].heading;
+        value.mindmap.children[1].text = value.mindmap.children[0].text;
+      }],
+      ["mismatched label", value => { value.mindmap.children[0].text = "Unrelated chapter"; }],
+      ["reordered branches", value => { value.mindmap.children.reverse(); }],
+      ["missing branch", value => { value.mindmap.children.pop(); }],
+      ["extra branch", value => { value.mindmap.children.push({ ...value.mindmap.children[0], text: "Extra chapter" }); }],
+      ["no chapters", value => { value.sections = []; value.mindmap.children = []; }],
+      ["31 chapters", (value, input) => { Object.assign(value, chapterSummary(input, 31)); }]
+    ];
+    for (const [name, change] of changes) {
+      let calls = 0;
+      const failed = await f.create({ llm: { modelId: `invalid-${name}`, complete: async request => {
+        calls++;
+        const value = topicSummary(request.input);
+        change(value, request.input);
+        return value;
+      } } }).summarize();
+      assert.equal(failed.status, "needs_retry", name);
+      assert.equal(failed.error.code, "postprocess_schema_invalid", name);
+      assert.equal(failed.resultPath, null, name);
+      assert.equal(failed.result, undefined, name);
+      assert.equal(calls, 2, `${name}: only one bounded format retry`);
+      assert.equal(await fs.readFile(valid.resultPath, "utf8"), beforeResult, name);
+      assert.equal(await fs.readFile(pointer, "utf8"), beforePointer, name);
+      assert.equal(JSON.stringify(f.state), beforeState, name);
+    }
+  });
+  await test("v3 accepts the 30-chapter boundary and assigns every chapter link locally", async () => {
+    const f = await fixture({ llm: { complete: async request => chapterSummary(request.input, 30) } });
+    const result = await f.service.summarize();
+    assert.equal(result.status, "completed");
+    assert.equal(result.result.sections.length, 30);
+    assert.equal(result.result.mindmap.children.length, 30);
+    result.result.sections.forEach((section, index) => {
+      assert.equal(section.id, `section-${index + 1}`);
+      assert.equal(section.heading, `Chapter ${index + 1}`);
+      assert.equal(result.result.mindmap.children[index].text, section.heading);
+      assert.equal(result.result.mindmap.children[index].sectionId, section.id);
+    });
   });
   await test("article validation rejects minutes-style bullet output without publishing it", async () => {
     const f = await fixture();
@@ -280,10 +415,20 @@ async function main() {
   });
   await test("schema and structure errors remain distinct and bounded after format regeneration", async () => {
     for (const [change, code] of [
+      [value => { delete value.overview; }, "postprocess_schema_invalid"],
+      [value => { delete value.overview.evidence; }, "postprocess_schema_invalid"],
+      [value => { value.overview.uncertain = "false"; }, "postprocess_schema_invalid"],
       [value => { delete value.mindmap.children; }, "postprocess_schema_invalid"],
+      [value => { delete value.mindmap.children[0].evidence; }, "postprocess_schema_invalid"],
+      [value => { value.sections[0].id = "model-chapter"; }, "postprocess_schema_invalid"],
+      [value => { value.mindmap.children[0].sectionId = "model-chapter"; }, "postprocess_schema_invalid"],
       [value => { value.extra = "PRIVATE_OUTPUT"; }, "postprocess_schema_invalid"],
       [value => { value.title = "t".repeat(301); }, "postprocess_structure_limit"],
+      [value => { value.mindmap.text = "t".repeat(161); }, "postprocess_structure_limit"],
+      [value => { value.sections[0].heading = "h".repeat(161); }, "postprocess_structure_limit"],
+      [value => { value.overview.text = "p".repeat(3601); }, "postprocess_structure_limit"],
       [value => { value.sections[0].paragraphs[0].text = "p".repeat(3601); }, "postprocess_structure_limit"],
+      [value => { value.overview.evidence[0].sourceId = "invented"; }, "postprocess_evidence_invalid"],
       [value => { value.mindmap.evidence[0].sourceId = "invented"; }, "postprocess_evidence_invalid"]
     ]) {
       const f = await fixture();

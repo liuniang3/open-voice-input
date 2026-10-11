@@ -522,25 +522,34 @@ function liveIpcError(error) {
   return { ok: false, error: { code, message: messages[code] || "会议操作失败，请检查模型配置、系统权限和本地文件后重试。" } };
 }
 
-function liveClaimDto(node) {
+function liveSectionIdDto(value) {
+  return typeof value === "string" && value.length <= 200 && value === value.trim()
+    && /^section-[1-9]\d*$/.test(value) ? value : null;
+}
+
+function liveClaimDto(node, remaining = { count: 1000 }) {
   if (!node || typeof node !== "object" || Array.isArray(node) || typeof node.text !== "string") return null;
+  if (remaining.count <= 0) return null;
+  remaining.count -= 1;
   return {
-    text: node.text, uncertain: node.uncertain === true,
-    provenance: Array.isArray(node.provenance) ? node.provenance.slice(0, 256).map(item =>
+    text: node.text.slice(0, 4000), uncertain: node.uncertain === true,
+    provenance: Array.isArray(node.provenance) ? node.provenance.slice(0, 32).map(item =>
       Object.fromEntries(Object.entries(pickMeetingFields(item, ["sourceId", "quote", "source", "startFrame", "endFrame", "charStart", "charEnd"]))
-        .filter(([, field]) => typeof field === "string" || typeof field === "number" && Number.isFinite(field)))) : []
+        .filter(([, field]) => typeof field === "string" || typeof field === "number" && Number.isFinite(field))
+        .map(([key, field]) => [key, typeof field === "string" ? field.slice(0, key === "quote" ? 2000 : 200) : field]))) : []
   };
 }
 
-function liveMindmapDto(root) {
-  let remaining = 1000;
-  const visit = (node, depth = 0) => {
-    if (depth > 32 || remaining-- <= 0) return null;
-    const claim = liveClaimDto(node);
+function liveMindmapDto(root, remaining = { count: 1000 }) {
+  const visit = (node, depth = 0, inheritedSectionId = null) => {
+    if (depth > 32 || remaining.count <= 0) return null;
+    const claim = liveClaimDto(node, remaining);
     if (!claim) return null;
+    const sectionId = inheritedSectionId || liveSectionIdDto(node.sectionId);
     return {
       ...claim,
-      children: Array.isArray(node.children) ? node.children.slice(0, 1000).map(child => visit(child, depth + 1)).filter(Boolean) : []
+      ...(sectionId ? { sectionId } : {}),
+      children: Array.isArray(node.children) ? node.children.slice(0, 1000).map(child => visit(child, depth + 1, sectionId)).filter(Boolean) : []
     };
   };
   return visit(root);
@@ -573,18 +582,25 @@ function liveDto(value = {}) {
         : field === "failureCode" ? typeof item === "string" && /^postprocess_[a-z_]+$/.test(item)
         : typeof item === "number" && Number.isFinite(item) && item >= 0));
   }
-  dto.summary = value.summary ? {
-    ...(value.summary.schema === "meeting_summary_v2" ? { schema: "meeting_summary_v2" } : {}),
+  const summaryRemaining = { count: 1000 };
+  dto.summary = value.summary && typeof value.summary === "object" && !Array.isArray(value.summary) ? {
+    ...(["meeting_summary_v1", "meeting_summary_v2", "meeting_summary_v3"].includes(value.summary.schema)
+      ? { schema: value.summary.schema } : {}),
     ...Object.fromEntries(Object.entries(pickMeetingFields(value.summary, ["title", "markdown"]))
-      .filter(([, item]) => typeof item === "string")),
-    mindmap: liveMindmapDto(value.summary.mindmap),
+      .filter(([, item]) => typeof item === "string")
+      .map(([key, item]) => [key, item.slice(0, key === "title" ? 300 : 200000)])),
+    ...(value.summary.overview ? { overview: liveClaimDto(value.summary.overview, summaryRemaining) } : {}),
+    ...(Number.isSafeInteger(value.summary.sampleRate) && value.summary.sampleRate > 0 && value.summary.sampleRate <= 768000
+      ? { sampleRate: value.summary.sampleRate } : {}),
+    mindmap: liveMindmapDto(value.summary.mindmap, summaryRemaining),
     ...(Array.isArray(value.summary.sections) ? {
       sections: value.summary.sections.slice(0, 1000)
         .filter(section => section && typeof section === "object" && !Array.isArray(section) && typeof section.heading === "string")
-        .map(section => ({ heading: section.heading,
-          items: Array.isArray(section.items) ? section.items.slice(0, 1000).map(liveClaimDto).filter(Boolean) : [],
+        .map(section => ({ heading: section.heading.slice(0, 200),
+          ...(liveSectionIdDto(section.id) ? { id: section.id } : {}),
+          items: Array.isArray(section.items) ? section.items.slice(0, 1000).map(item => liveClaimDto(item, summaryRemaining)).filter(Boolean) : [],
           ...(Array.isArray(section.paragraphs) ? {
-            paragraphs: section.paragraphs.slice(0, 1000).map(liveClaimDto).filter(Boolean)
+            paragraphs: section.paragraphs.slice(0, 1000).map(item => liveClaimDto(item, summaryRemaining)).filter(Boolean)
           } : {}) }))
     } : {})
   } : null;
@@ -3121,18 +3137,12 @@ ipcMain.handle("file:export:save", async (_event, payload) => {
     // Prefer the validated shared postprocess summary; legacy stage3a artifacts
     // stay readable as a fallback for old histories.
     let summary = null;
-    const { readLatestSummaryResult } = require("./meeting/processing/file-summary");
+    const { readLatestSummaryResult, toFileSummaryDto } = require("./meeting/processing/file-summary");
     const shared = await readLatestSummaryResult(current.sessionDir, sessionId).catch(() => null);
     if (shared?.result) {
       summary = {
-        title: shared.result.title || "",
-        markdown: shared.result.markdown || "",
-        mindmap: shared.result.mindmap || null,
-        sections: Array.isArray(shared.result.sections) ? shared.result.sections : [],
-        incomplete: shared.result.incomplete === true,
-        uncertain: shared.result.uncertain === true,
-        schema: shared.result.schema || null,
-        source: shared.result.source || null,
+        ...toFileSummaryDto({ summary: shared.result }).summary,
+        source: typeof shared.result.source === "string" ? shared.result.source.slice(0, 200) : null,
         useMimoReview: shared.result.useMimoReview === true
       };
     }
@@ -3268,30 +3278,29 @@ ipcMain.handle("meeting:playback:token", async (_event, payload) => {
           : ["microphone", "system"];
     let t = null;
     let wavPath = null;
+    let issued = null;
+    const sessionsRoot = meetingPaths.getMeetingSessionsRoot(app.getPath("userData"));
     for (const cand of prefer) {
-      const p = path.join(current.sessionDir, "archive", `${cand}.mono.wav`);
-      try {
-        await fs.access(p);
-        t = cand;
-        wavPath = p;
-        break;
-      } catch {
-        /* try next */
+      for (const p of [path.join(current.sessionDir, "archive", `${cand}.mono.wav`),
+        path.join(current.sessionDir, "realtime", `${cand}-complete.wav`)]) {
+        try {
+          issued = meetingMediaToken.issuePlaybackToken({ sessionsRoot, sessionId, absPath: p });
+          t = cand;
+          wavPath = p;
+          break;
+        } catch {
+          /* try the next allowlisted complete audio file */
+        }
       }
+      if (issued) break;
     }
     if (!wavPath || !t) {
       return { ok: false, error: { code: "archive_missing", message: "no archive wav" } };
     }
-    const sessionsRoot = meetingPaths.getMeetingSessionsRoot(app.getPath("userData"));
-    const issued = meetingMediaToken.issuePlaybackToken({
-      sessionsRoot,
-      sessionId,
-      absPath: wavPath
-    });
     let durationMs = null;
     try {
       const sc = JSON.parse(await fs.readFile(`${wavPath}.sidecar.json`, "utf8"));
-      durationMs = sc.durationMs ?? null;
+      durationMs = typeof sc.durationMs === "number" && Number.isFinite(sc.durationMs) && sc.durationMs >= 0 ? sc.durationMs : null;
     } catch {
       durationMs = null;
     }
@@ -3311,29 +3320,36 @@ function attachMeetingPlaybackProtocolHandler() {
   const scheme = meetingMediaToken.SCHEME;
   try {
     protocol.handle(scheme, async (request) => {
+      let fd = null;
       try {
         const u = new URL(request.url);
         const token = (u.pathname || "").replace(/^\//, "") || u.hostname;
-        const entry = meetingMediaToken.resolvePlaybackToken(token);
-        const st = await fs.stat(entry.absPath);
-        const size = st.size;
+        const entry = meetingMediaToken.openPlaybackToken(token);
+        fd = entry.fd;
+        const size = entry.stat.size;
         const method = String(request.method || "GET").toUpperCase();
         const rangeHeader = request.headers?.get?.("range") || request.headers?.get?.("Range") || null;
         const built = buildPlaybackHeaders({ method, size, rangeHeader, contentType: "audio/wav" });
         if (built.status === 416) {
+          fssync.closeSync(fd); fd = null;
           return new Response(null, { status: 416, headers: built.headers });
         }
         if (built.isHead || method === "HEAD") {
+          fssync.closeSync(fd); fd = null;
           return new Response(null, { status: built.status, headers: built.headers });
         }
         const stream = fssync.createReadStream(entry.absPath, {
+          fd,
+          autoClose: true,
           start: built.start,
           end: built.end,
           highWaterMark: 64 * 1024
         });
+        fd = null;
         const webStream = Readable.toWeb(stream);
         return new Response(webStream, { status: built.status, headers: built.headers });
       } catch {
+        if (fd !== null) fssync.closeSync(fd);
         return new Response("denied", {
           status: 403,
           headers: { "Content-Type": "text/plain; charset=utf-8" }

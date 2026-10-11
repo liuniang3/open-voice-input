@@ -753,10 +753,13 @@ function appendSummarySections(container, sections) {
  * only carry bullet items, Markdown, or the legacy stage3a flat fields still
  * render. Only safe text nodes are created; model text is never marked up.
  */
-function renderSummaryDocument(container, summary, doc) {
+function renderSummaryDocument(container, summary, doc, options = {}) {
   if (!container) return;
   const d = doc || (typeof document !== "undefined" ? document : null);
   if (!d) return;
+  const reader = d.defaultView?.SummaryReader;
+  if (summary?.schema === "meeting_summary_v3" && reader) return reader.render(container, summary, options);
+  reader?.dispose(container);
   container.replaceChildren();
   const create = (tag, className, text) => {
     const node = d.createElement(tag);
@@ -907,6 +910,7 @@ function summaryToPlainText(summary) {
     return text ? `${text}${claim.uncertain === true ? "（待确认）" : ""}` : "";
   };
   if (summary.title) lines.push(String(summary.title));
+  if (summary.overview?.text) lines.push("", "内容概览", claimText(summary.overview));
   const mindmapLines = [];
   (function walk(node, depth) {
     if (!node || typeof node !== "object" || depth > 12) return;

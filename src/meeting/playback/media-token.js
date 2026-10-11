@@ -1,15 +1,54 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const fs = require("node:fs");
 const path = require("node:path");
-const { assertPathInsideRoot, getMeetingSessionsRoot } = require("../paths");
+const { assertPathInsideRoot, normalizePathForCompare, getMeetingSessionsRoot } = require("../paths");
 
 const SCHEME = "mimo-meeting";
 const TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
 const MAX_TOKENS = 64;
 
-/** @type {Map<string, { absPath: string, sessionId: string, expiresAt: number }>} */
 const tokens = new Map();
+const REALTIME_WAV_NAMES = new Set(["microphone-complete.wav", "system-complete.wav"]);
+
+function denied() {
+  return Object.assign(new Error("playback denied"), { code: "playback_denied" });
+}
+
+function validatePlaybackPath({ sessionsRoot, sessionId, absPath }) {
+  try {
+    if (typeof sessionsRoot !== "string" || !path.isAbsolute(sessionsRoot)
+      || typeof sessionId !== "string" || sessionId.length > 256 || sessionId !== sessionId.trim() || !/^[a-zA-Z0-9._-]+$/.test(sessionId)
+      || [".", ".."].includes(sessionId) || typeof absPath !== "string" || !path.isAbsolute(absPath)) throw denied();
+    const root = path.resolve(sessionsRoot);
+    const sessionDir = path.join(root, sessionId);
+    // Validate the original spelling before resolve can erase traversal components.
+    assertPathInsideRoot(root, sessionDir);
+    assertPathInsideRoot(sessionDir, absPath);
+    const relative = path.relative(sessionDir, path.resolve(absPath));
+    const parts = relative.split(path.sep);
+    const archive = parts[0] === "archive" && parts.length >= 2 && /\.wav$/i.test(parts.at(-1));
+    const realtime = parts.length === 2 && parts[0] === "realtime" && REALTIME_WAV_NAMES.has(parts[1]);
+    if ((!archive && !realtime) || parts.some(part => !part || part === "." || part === ".." || /[:\0]/.test(part))) throw denied();
+
+    const canonicalRoot = fs.realpathSync.native(root);
+    let candidate = path.join(canonicalRoot, sessionId);
+    // Reject links and junctions below the trusted root, including in-root aliases.
+    for (const part of [null, ...parts]) {
+      if (part !== null) candidate = path.join(candidate, part);
+      if (fs.lstatSync(candidate).isSymbolicLink()
+        || normalizePathForCompare(fs.realpathSync.native(candidate)) !== normalizePathForCompare(candidate)) throw denied();
+    }
+    assertPathInsideRoot(canonicalRoot, candidate);
+    const stat = fs.lstatSync(candidate, { bigint: true });
+    if (!stat.isFile()) throw denied();
+    return { absPath: candidate, sessionsRoot: canonicalRoot, sessionId,
+      identity: `${stat.dev}:${stat.ino}:${stat.birthtimeNs}` };
+  } catch {
+    throw denied();
+  }
+}
 
 function pruneTokens(now = Date.now()) {
   for (const [k, v] of tokens) {
@@ -22,30 +61,16 @@ function pruneTokens(now = Date.now()) {
 }
 
 function issuePlaybackToken({ sessionsRoot, sessionId, absPath }) {
-  const root = path.resolve(sessionsRoot);
-  const resolved = path.resolve(absPath);
-  assertPathInsideRoot(root, resolved);
-  const sessionDir = path.join(root, String(sessionId));
-  assertPathInsideRoot(sessionDir, resolved);
-  // Only allow files under session/archive/
-  const archiveDir = path.join(sessionDir, "archive");
-  assertPathInsideRoot(archiveDir, resolved);
-  if (!/\.wav$/i.test(resolved)) {
-    const error = new Error("playback only allows wav under archive");
-    error.code = "playback_denied";
-    throw error;
-  }
+  const entry = validatePlaybackPath({ sessionsRoot, sessionId, absPath });
+  const expiresAt = Date.now() + TOKEN_TTL_MS;
   pruneTokens();
   const token = crypto.randomBytes(24).toString("hex");
-  tokens.set(token, {
-    absPath: resolved,
-    sessionId: String(sessionId),
-    expiresAt: Date.now() + TOKEN_TTL_MS
-  });
+  tokens.set(token, { ...entry, expiresAt });
+  pruneTokens();
   return {
     token,
     url: `${SCHEME}://play/${token}`,
-    expiresAt: Date.now() + TOKEN_TTL_MS
+    expiresAt
   };
 }
 
@@ -63,7 +88,32 @@ function resolvePlaybackToken(token) {
     error.code = "playback_token_expired";
     throw error;
   }
-  return entry;
+  try {
+    const checked = validatePlaybackPath(entry);
+    if (checked.absPath !== entry.absPath || checked.identity !== entry.identity) throw denied();
+  } catch {
+    tokens.delete(String(token));
+    throw denied();
+  }
+  return { ...entry };
+}
+
+function openPlaybackToken(token) {
+  const entry = resolvePlaybackToken(token);
+  let fd;
+  try {
+    fd = fs.openSync(entry.absPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+    const identity = fs.fstatSync(fd, { bigint: true });
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || `${identity.dev}:${identity.ino}:${identity.birthtimeNs}` !== entry.identity) throw denied();
+    // The protocol streams this descriptor; a later path swap cannot redirect it.
+    resolvePlaybackToken(token);
+    return { ...entry, fd, stat };
+  } catch {
+    if (fd !== undefined) fs.closeSync(fd);
+    tokens.delete(String(token));
+    throw denied();
+  }
 }
 
 function revokePlaybackToken(token) {
@@ -83,6 +133,7 @@ module.exports = {
   TOKEN_TTL_MS,
   issuePlaybackToken,
   resolvePlaybackToken,
+  openPlaybackToken,
   revokePlaybackToken,
   clearAllPlaybackTokens,
   playbackUrlFromToken,
