@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v0.4.21 - 2026-10-11
 
 ### Added
 
@@ -10,7 +10,13 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Resolve cold Chromium accessibility geometry within the bounded native query. Preserve the original paste target even when an accessibility provider times out; use the display fallback when no reliable input geometry is available.
 - Resolve deeply nested Windows accessibility trees such as the Codex chat composer instead of rejecting the focused input before reaching its host window. Include filled/empty rich-editor regressions and check the visible popup's final position through the actual recording flow. Placement logs contain only the positioning method and timing, never field text or target identifiers.
+
+### Validation
+
+- Shared local regression suite passed: `69/69` scripts. Windows native/Electron checks cover ordinary fields, deeply nested filled/empty rich editors, final popup placement, unchanged paste targets and cancellation. The real Codex composer returned valid input-field geometry without reading its contents.
+- Windows x64, macOS Intel x64 and Apple Silicon arm64 platform CI passed. Release builds repeat the shared tests and sensitive-information checks; macOS native positioning, permissions, recording and paste still require hardware validation.
 
 ## v0.4.20 - 2026-10-11
 
