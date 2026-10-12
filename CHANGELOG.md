@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## v0.4.23 - 2026-10-12
+
 ### Fixed
 
 - Preserve completed Chat/Responses output when a network chunk also contains a partial trailing usage event. Reject actual premature EOF, malformed pre-completion data and explicit output truncation.
@@ -13,9 +15,16 @@ All notable changes to this project are documented here.
 ### Changed
 
 - Use the OpenAI JavaScript SDK for shared language-supplier streaming, retaining custom endpoints, independent credentials and application-owned idle deadlines, cancellation and bounded retry. Normalize headers case-insensitively; SDK retry and logging are disabled.
+- Explicitly isolate SDK requests from process-level OpenAI keys, organization, project, admin and webhook settings. Configure Windows release builds with Node.js 22 to match the SDK runtime requirement and desktop CI.
 - Ask summary models for coherent article chapters, subtopics and source IDs. Build fixed IDs, chapter/map links and immutable source excerpts locally; accept safely omitted leaf defaults and validated echoed metadata. Invalid source IDs, unsafe keys and true truncation still fail closed. Existing summary formats and exports remain readable.
 - Compute request output budgets from current content without a fixed 2048-token cap. Routine DeepSeek/MiMo summaries default to non-thinking; GPT defaults to low reasoning when no model reasoning was configured. Explicit reasoning settings remain effective. Unsupported JSON mode and explicit lower gateway output limits each get one bounded adjustment on the same supplier/model.
 - Add compatibility presets for MiMo V2.6 Flash and GPT 6.1 Sol. Preserve manual/provider capacity overrides and refresh stale generic catalog entries.
+
+### Validation
+
+- `73/73` shared regression scripts and `18` summary stability checks pass, including tests inside the Windows Electron runtime. Windows x64, Intel macOS x64 and Apple Silicon macOS arm64 CI pass, including native component builds and unsigned macOS packaging. Release builds repeat these checks; native macOS capture, permissions and paste still require separate hardware validation.
+- Synthetic live API evaluation completes nine model/input scenarios across DeepSeek V4.1 Flash, MiMo V2.6 Flash and GPT 6.1 Sol. Each model retains all 24 project IDs, cache values and response targets in the dense fixture. One invalid source ID in the long DeepSeek fixture requires a bounded regeneration. These checks do not establish general semantic accuracy, and model/gateway latency still varies.
+- Credentials, local configuration, real recordings/transcripts, diagnostic screenshots and provider response bodies are excluded from commits and release packages. Existing user settings and original audio remain local.
 
 ## v0.4.22 - 2026-10-12
 
