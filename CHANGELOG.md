@@ -6,7 +6,7 @@ All notable changes to this project are documented here.
 
 ### Changed
 
-- Place file transcription model settings next to the start action, use a sliders icon for file and meeting model settings, and keep related controls together at narrower window sizes.
+- Place file and realtime meeting transcription model settings to the left of their start actions, use a sliders icon, and keep related controls together at narrower window sizes.
 
 ## v0.4.23 - 2026-10-12
 

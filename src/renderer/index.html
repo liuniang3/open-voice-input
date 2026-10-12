@@ -783,8 +783,8 @@
                 <span id="fileProcessProgress" class="file-muted" aria-live="polite">—</span>
               </div>
               <div class="file-action-group">
-                <button type="button" id="fileProcessStartBtn" class="primary" disabled>开始转写</button>
                 <button id="fileSetupToggle" type="button" class="file-model-settings-toggle" aria-expanded="true" aria-controls="fileSetupSidebar" title="配置文件转写的 ASR 供应商和模型"><span class="ui-icon icon-model-settings" aria-hidden="true"></span>转录模型设置</button>
+                <button type="button" id="fileProcessStartBtn" class="primary" disabled>开始转写</button>
                 <button type="button" id="fileProcessRetryBtn" class="icon-btn" title="重试转写" aria-label="重试转写" disabled><span class="ui-icon icon-refresh" aria-hidden="true"></span></button>
                 <button type="button" id="fileProcessCancelBtn" class="icon-btn" title="取消转写" aria-label="取消转写" disabled><span class="ui-icon icon-close" aria-hidden="true"></span></button>
               </div>
@@ -908,7 +908,6 @@
           <header class="live-heading">
             <div class="live-sidebar-tools" role="group" aria-label="会议侧栏">
               <button id="liveHistoryToggle" class="live-history-toggle" type="button" aria-expanded="false" aria-controls="liveHistoryBrowser">历史记录 <span id="liveHistoryCount">0</span></button>
-              <button id="liveSetupToggle" type="button" aria-expanded="true" aria-controls="liveSetupSidebar"><span class="ui-icon icon-model-settings" aria-hidden="true"></span>转录模型设置</button>
             </div>
             <div class="live-heading-title"><span class="live-eyebrow">会议实时转录</span><h2 id="liveSessionTitle">实时会议</h2></div>
             <div class="live-window-tools" role="group" aria-label="窗口控制">
@@ -917,7 +916,10 @@
             </div>
           </header>
           <div class="live-transport">
-            <button id="liveStart" type="button" class="primary" disabled>开始实时转录</button>
+            <div class="live-start-actions" role="group" aria-label="实时转录设置与开始">
+              <button id="liveSetupToggle" type="button" aria-expanded="true" aria-controls="liveSetupSidebar" title="配置会议转录的 ASR 供应商和模型"><span class="ui-icon icon-model-settings" aria-hidden="true"></span>转录模型设置</button>
+              <button id="liveStart" type="button" class="primary" disabled>开始实时转录</button>
+            </div>
             <button id="livePause" type="button" disabled hidden>暂停</button>
             <button id="liveStop" type="button" class="live-stop" disabled>停止并保存</button>
             <span id="liveStatus" class="live-status-light" role="status" data-kind="idle" title="等待连接" aria-label="等待连接"></span>

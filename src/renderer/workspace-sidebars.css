@@ -45,6 +45,8 @@ body.workspace-sidebar-resizing, body.workspace-sidebar-resizing * { cursor: ew-
 #liveAsrConfigStatus { margin: 0; overflow-wrap: anywhere; }
 [data-sidebar-workspace] [data-ready="false"] { color: #a0372d; }
 #liveSetupToggle { display: inline-flex; align-items: center; gap: 6px; }
+#liveSetupToggle[aria-expanded="true"] { color: #107e78; background: rgba(16, 126, 120, .08); border-color: rgba(16, 126, 120, .25); }
+.live-start-actions { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 6px; }
 .live-workspace .live-heading { justify-content: flex-start; }
 .live-heading-title { display: none; }
 .live-sidebar-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -54,7 +56,7 @@ body.workspace-sidebar-resizing, body.workspace-sidebar-resizing * { cursor: ew-
 .workspace-sidebar-backdrop { display: none; }
 
 .live-floating .live-workspace { grid-template-columns: minmax(0, 1fr); padding: 0; gap: 0; }
-.live-floating :is(.workspace-sidebar, .workspace-sidebar-backdrop, .live-sidebar-tools) { display: none !important; }
+.live-floating :is(.workspace-sidebar, .workspace-sidebar-backdrop, .live-sidebar-tools, .live-start-actions) { display: none !important; }
 .live-floating .live-heading-title { display: block; flex: 1; overflow: hidden; }
 .live-floating .live-main { grid-column: 1; position: relative; padding: 6px 10px 10px; gap: 6px; overflow: hidden; }
 .live-minimal .live-meeting > .live-main { display: flex; padding: 6px; }
