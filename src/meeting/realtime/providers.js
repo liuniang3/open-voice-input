@@ -9,6 +9,7 @@ const { isSupportedAliMeetingModel } = require("../../providers/asr/ali-meeting-
 const { buildTextCleanupMessages, parseAndValidateCleanupResponse } = require("../../providers/cleaner/text-cleanup-method");
 const { resolveProviderConnection } = require("../../settings/provider-connections");
 const { createTextSupplierChat, resolveTextLlmProfile } = require("../../providers/text-supplier-llm");
+const { requestSummary } = require("../../providers/summary-request-policy");
 const DEFAULT_LIVE_MODEL = "qwen-audio-3.0-asr-flash-streaming";
 const MIMO_BATCH_MODEL = "mimo-v2.5-asr";
 
@@ -46,8 +47,8 @@ function languageModel(profile) {
   if (profile?.provider === "text-supplier") {
     // Named supplier pair: own endpoint, key, API style and compat headers.
     const chat = createTextSupplierChat(profile);
-    return async ({ messages, signal, maxTokens = 8192, stream = false, onProgress }) => {
-      const response = await chat(messages, { signal, maxTokens, stream, onProgress });
+    return async ({ task, messages, signal, maxTokens = 8192, stream = false, onProgress }) => {
+      const response = await chat(messages, { task, signal, maxTokens, stream, onProgress });
       if (response.finishReason && response.finishReason !== "stop") throw Object.assign(new Error("Incomplete model response"), { code: "analysis_response_incomplete" });
       return response.content;
     };
@@ -56,12 +57,12 @@ function languageModel(profile) {
       ? createOpenCodeGoClient({
           ...profile,
           model: profile.modelId,
-          sessionId: createOpenCodeGoSessionId("meeting-live")
+          sessionId: createOpenCodeGoSessionId("meeting-live"), streamTransport: "sdk"
         })
-      : createOpenAiCompatibleClient({ ...profile, model: profile.modelId,
+      : createOpenAiCompatibleClient({ ...profile, model: profile.modelId, streamTransport: "sdk",
           ...(profile.provider === "mimo" ? { headerName: "api-key", headerValuePrefix: "" } : {}) });
-  return async ({ messages, signal, maxTokens = 8192, stream = false, onProgress }) => {
-    const response = await client.requestChat(messages, { signal, maxTokens, stream, onProgress,
+  return async ({ task, messages, signal, maxTokens = 8192, stream = false, onProgress }) => {
+    const response = await requestSummary(options => client.requestChat(messages, options), profile, { task, signal, maxTokens, stream, onProgress,
       extraBody: stream && profile.reasoning ? { reasoning_effort: profile.reasoning } : {} });
     if (response.finishReason && response.finishReason !== "stop") throw Object.assign(new Error("Incomplete model response"), { code: "analysis_response_incomplete" });
     return response.content;

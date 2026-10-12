@@ -25,7 +25,8 @@ function createOpenCodeGoClient({
   model,
   requestTimeoutMs = 60000,
   sessionId = null,
-  fetchImpl = null
+  fetchImpl = null,
+  streamTransport = "native"
 } = {}) {
   const client = createOpenAiCompatibleClient({
     apiKey,
@@ -33,7 +34,7 @@ function createOpenCodeGoClient({
     model: () => normalizeOpenCodeGoModel(resolveMaybeFunction(model)),
     apiStyle: "chat-completions",
     requestTimeoutMs,
-    fetchImpl
+    fetchImpl, streamTransport
   });
 
   async function requestChat(messages, options = {}) {

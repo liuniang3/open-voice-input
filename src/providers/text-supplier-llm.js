@@ -16,6 +16,7 @@ const {
 const { expandSupplierHeaders } = require("./provider-model-catalog");
 const { createOpenAiCompatibleClient } = require("./openai-compatible-client");
 const { resolveModelCapability } = require("../settings/model-capabilities");
+const { requestSummary } = require("./summary-request-policy");
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
@@ -82,7 +83,7 @@ function resolveTextLlmProfile(settings, { slot, supplierId, modelId, requestTim
 // Chat call for a resolved supplier profile. maxTokens is capped by the
 // catalog's output limit; headers merge profile compat headers with per-call
 // additions (auto session tokens already expanded in the profile).
-function createTextSupplierChat(profile, { fetchImpl = null, sleepImpl, random } = {}) {
+function createTextSupplierChat(profile, { fetchImpl = null, sleepImpl, random, streamTransport = "sdk" } = {}) {
   if (!profile || profile.provider !== "text-supplier") {
     throw Object.assign(new Error("无效的文本供应商配置。"), { code: "supplier_invalid" });
   }
@@ -94,11 +95,12 @@ function createTextSupplierChat(profile, { fetchImpl = null, sleepImpl, random }
     headerName: profile.authStyle === "api-key" ? "api-key" : "Authorization",
     headerValuePrefix: profile.authStyle === "api-key" ? "" : "Bearer ",
     requestTimeoutMs: profile.requestTimeoutMs,
-    fetchImpl, sleepImpl, random
+    fetchImpl, sleepImpl, random, streamTransport
   });
   return async (messages, options = {}) => {
     const requested = positiveInteger(options.maxTokens, profile.maxOutputTokens);
-    return client.requestChat(messages, {
+    return requestSummary(request => client.requestChat(messages, request), profile, {
+      task: options.task,
       signal: options.signal,
       maxTokens: Math.min(requested, profile.maxOutputTokens),
       stream: options.stream,

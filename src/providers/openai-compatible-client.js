@@ -1,6 +1,7 @@
 const { normalizeApiStyle } = require("../settings/provider-connections");
 const { createSseDecoder, createStreamAccumulator, modelStreamError } = require("./llm-stream");
 const { abortError, abortable, retryAfterMs, withRetries } = require("./request-retry");
+const { classifyRequestError } = require("./model-request-error");
 
 function normalizeBaseUrl(url, fallback) {
   const normalized = String(url || fallback || "").replace(/\/+$/, "");
@@ -30,7 +31,8 @@ function createOpenAiCompatibleClient({
   extraHeaders = null,
   fetchImpl = null,
   sleepImpl,
-  random
+  random,
+  streamTransport = "native"
 }) {
   const fetchFn = fetchImpl || globalThis.fetch.bind(globalThis);
 
@@ -221,7 +223,11 @@ function createOpenAiCompatibleClient({
         : { model: resolveModel(), messages,
             ...(maxTokens == null ? {} : { max_completion_tokens: maxTokens }),
             ...extraBody, stream: true };
-      const response = await abortable(fetchFn(`${resolveBaseUrl()}/${style === "responses" ? "responses" : "chat/completions"}`, {
+      const sdkResult = streamTransport === "sdk" ? await abortable(require("./model-sdk-stream").requestSdkStream({
+        apiKey: key, baseUrl: resolveBaseUrl(), style, body, headers, signal: controller.signal, fetchImpl: fetchFn,
+        onBytes: () => armDeadline("stream_idle_timeout", idleLimit)
+      }), controller.signal) : null;
+      const response = sdkResult?.response || await abortable(fetchFn(`${resolveBaseUrl()}/${style === "responses" ? "responses" : "chat/completions"}`, {
         method: "POST", headers, body: JSON.stringify(body), signal: controller.signal
       }), controller.signal);
       armDeadline("stream_idle_timeout", idleLimit);
@@ -233,16 +239,18 @@ function createOpenAiCompatibleClient({
         if (response.status === 400 || response.status === 413) {
           details = String(await abortable(response.text(), controller.signal)).slice(0, 64000);
         }
-        const code = /context.{0,30}(length|window|limit)|maximum.{0,30}tokens|too many tokens/i.test(details)
-          ? "request_context_limit" : "http_error";
-        throw Object.assign(new Error(`Model API returned HTTP ${response.status}.`), {
-          code, status: response.status, retryAfterMs: retryAfterMs(response.headers)
-        });
+        throw Object.assign(classifyRequestError(details, response.status), { retryAfterMs: retryAfterMs(response.headers) });
       }
       const accumulator = createStreamAccumulator(style, { onProgress: value => { armWarning(); progress(value); } });
-      const parser = createSseDecoder((event, done) => accumulator.accept(event, done));
+      const parser = createSseDecoder((event, done) => { accumulator.accept(event, done); return !accumulator.terminal; });
       let parsed;
-      if (response.body?.getReader) {
+      if (sdkResult?.events) {
+        for await (const event of sdkResult.events) {
+          accumulator.accept(event, false);
+          if (accumulator.terminal) break;
+        }
+        parsed = accumulator.result(parseCompletedResponse);
+      } else if (response.body?.getReader) {
         reader = response.body.getReader();
         let mode = /text\/event-stream/i.test(response.headers?.get?.("content-type") || "") ? "sse" : "";
         let prefix = Buffer.alloc(0), json = "";
@@ -267,7 +275,10 @@ function createOpenAiCompatibleClient({
           if (json.length > 8 * 1024 * 1024) throw Object.assign(new Error("Response exceeds local limit"), { code: "stream_size_limit" });
           if (mode === "sse" && accumulator.terminal) break;
         }
-        if (mode === "sse") { parser.finish(); parsed = accumulator.result(parseCompletedResponse); }
+        if (mode === "sse") {
+          if (!accumulator.terminal) parser.finish();
+          parsed = accumulator.result(parseCompletedResponse);
+        }
         else {
           json += decoder.decode();
           parsed = style === "responses" ? parseResponsesBody(json) : parseChatCompletionBody(json);
@@ -291,6 +302,7 @@ function createOpenAiCompatibleClient({
     } catch (error) {
       if (signal?.aborted) throw abortError();
       if (timeoutCode) throw Object.assign(new Error(timeoutCode), { code: timeoutCode });
+      if (streamTransport === "sdk") error = require("./model-sdk-stream").sanitizeSdkError(error);
       if (error instanceof SyntaxError) {
         throw Object.assign(new Error("Model response was not valid JSON."), { code: "stream_invalid_json" });
       }

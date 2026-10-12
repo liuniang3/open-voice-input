@@ -21,7 +21,7 @@ assert.deepEqual(
     reasoning: "",
     timeoutMs: 300000,
     capabilitySource: "official",
-    capabilityRevision: 3
+    capabilityRevision: 4
   }
 );
 assert.equal(resolveModelCapability("vendor/glm-5.2").contextWindow, 1000000);
@@ -49,7 +49,7 @@ for (const model of [
 }
 assert.deepEqual(
   resolveModelCapability("new-model-without-preset"),
-  { ...GENERIC_MODEL_CAPABILITY, capabilityRevision: 3 }
+  { ...GENERIC_MODEL_CAPABILITY, capabilityRevision: 4 }
 );
 
 const providerCapability = resolveModelCapability("new-provider-model", {

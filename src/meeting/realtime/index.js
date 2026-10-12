@@ -831,8 +831,8 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       llm: { modelId, managesTransport: true, revision: modelProfile.supplierId
         ? digest(JSON.stringify([modelProfile.provider, modelProfile.baseUrl, modelProfile.supplierId, modelProfile.apiStyle, modelProfile.reasoning]))
         : digest(JSON.stringify([modelProfile.provider, modelProfile.baseUrl, modelProfile.apiStyle, modelProfile.reasoning])),
-        complete: ({ messages, signal, onProgress }) => call({ messages, signal, onProgress,
-          stream: true, maxTokens: budget.maxOutputTokens }) },
+        complete: ({ task, messages, signal, onProgress, maxTokens }) => call({ task, messages, signal, onProgress,
+          stream: true, maxTokens: Math.min(maxTokens || budget.maxOutputTokens, budget.maxOutputTokens) }) },
       limits: { ...budget.limits, maxRequestsPerRun: 1000, requestTimeoutMs: providerRequestTimeoutMs },
       onUpdate: (update) => {
         current.postprocessStatus = update.status;

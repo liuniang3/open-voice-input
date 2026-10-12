@@ -60,6 +60,7 @@
     "ali-oss": "6.23.0",
     "d3-hierarchy": "3.1.2",
     "electron-updater": "6.8.9",
+    "openai": "7.32.0",
     "ws": "8.21.0"
   },
   "build": {

@@ -142,7 +142,8 @@ async function main() {
     const result = await f.makeService({ modelProfile: { provider: "text-supplier", supplierId: "unit", baseUrl: "https://unit.example/v1",
       contextWindow: 272000, maxOutputTokens: 32768, requestTimeoutMs: 300000 } }).summarize();
     assert.equal(result.status, "completed"); assert.equal(f.calls.llm.length, 1);
-    assert.equal(f.calls.llm[0].stream, true); assert.equal(f.calls.llm[0].maxTokens, 32768);
+    assert.equal(f.calls.llm[0].stream, true);
+    assert.ok(f.calls.llm[0].maxTokens >= 8192 && f.calls.llm[0].maxTokens <= 32768);
     assert.equal(typeof f.calls.llm[0].onProgress, "function");
     await assertPreserved(f);
   });

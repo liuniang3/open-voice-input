@@ -198,14 +198,14 @@ async function main() {
     const small = summaryBudget({ contextWindow: 4096, maxOutputTokens: 1024 });
     assert.ok(small.limits.contextChars <= small.limits.maxInputChars / 4);
     const outputLimited = summaryBudget({ contextWindow: 1000000, maxOutputTokens: 4096 });
-    assert.equal(outputLimited.limits.inputTokenBudget, 4096 * 6);
+    assert.equal(outputLimited.limits.inputTokenBudget, 4096 * 12);
   });
   await test("large-context models are no longer capped at the former 32K ceiling", () => {
     const deepseek = summaryBudget({ modelId: "deepseek-v4.1-flash", contextWindow: 1000000, maxOutputTokens: 384000 });
     assert.equal(deepseek.maxOutputTokens, 250000, "context reserve should be the active ceiling");
     assert.ok(deepseek.maxOutputTokens > 32768);
     assert.ok(deepseek.maxOutputTokens <= MAX_SUMMARY_OUTPUT_TOKENS);
-    assert.equal(deepseek.limits.maxOutputChars, 500000);
+    assert.equal(deepseek.limits.maxOutputChars, 1000000);
 
     const gpt = summaryBudget({ modelId: "gpt-5.6-sol", contextWindow: 272000, maxOutputTokens: 32768 });
     assert.equal(gpt.maxOutputTokens, 32768, "smaller model limits remain unchanged");

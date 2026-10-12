@@ -21,11 +21,11 @@ function modelStreamError(event) {
 
 function createSseDecoder(onEvent, maxEventChars = 8 * 1024 * 1024) {
   const decoder = new TextDecoder();
-  let pending = "", lines = [], size = 0;
+  let pending = "", lines = [], size = 0, stopped = false;
   function flush() {
     if (lines.length) {
       const payload = lines.join("\n");
-      if (payload.trim() === "[DONE]") onEvent(null, true);
+      if (payload.trim() === "[DONE]") stopped = onEvent(null, true) === false;
       else {
         let value;
         try { value = JSON.parse(payload); }
@@ -34,10 +34,12 @@ function createSseDecoder(onEvent, maxEventChars = 8 * 1024 * 1024) {
           let values;
           try { values = lines.map(line => JSON.parse(line)); }
           catch { throw streamFault("stream_invalid_json"); }
-          for (const value of values) onEvent(value, false);
+          for (const value of values) {
+            if (onEvent(value, false) === false) { stopped = true; break; }
+          }
           lines = []; size = 0; return;
         }
-        onEvent(value, false);
+        stopped = onEvent(value, false) === false;
       }
     }
     lines = []; size = 0;
@@ -51,17 +53,18 @@ function createSseDecoder(onEvent, maxEventChars = 8 * 1024 * 1024) {
   }
   function consume(final = false) {
     let position;
-    while ((position = pending.indexOf("\n")) >= 0) {
+    while (!stopped && (position = pending.indexOf("\n")) >= 0) {
       const value = pending.slice(0, position).replace(/\r$/, "");
       pending = pending.slice(position + 1);
       line(value);
     }
+    if (stopped) { pending = ""; lines = []; size = 0; return; }
     if (pending.length + size > maxEventChars) throw streamFault("stream_size_limit");
     if (final) { if (pending) line(pending.replace(/\r$/, "")); pending = ""; flush(); }
   }
   return {
-    push(bytes) { pending += decoder.decode(bytes, { stream: true }); consume(); },
-    finish() { pending += decoder.decode(); consume(true); }
+    push(bytes) { if (!stopped) { pending += decoder.decode(bytes, { stream: true }); consume(); } },
+    finish() { if (!stopped) { pending += decoder.decode(); consume(true); } }
   };
 }
 

@@ -241,9 +241,9 @@ async function main() {
       f.calls.llm.push(request);
       expected = topicSummary(request.input);
       assert.ok(request.input.outputSchema.overview);
-      assert.ok(request.input.outputSchema.mindmap.children.length > 0);
+      assert.ok(request.input.outputSchema.sections[0].topics.length > 0);
       assert.equal(Object.hasOwn(request.input.outputSchema.sections[0], "id"), false);
-      assert.equal(Object.hasOwn(request.input.outputSchema.mindmap.children[0], "sectionId"), false);
+      assert.equal(Object.hasOwn(request.input.outputSchema.sections[0].topics[0], "sectionId"), false);
       return expected;
     };
     const before = JSON.stringify(f.state);
@@ -372,7 +372,7 @@ async function main() {
       assert.equal(JSON.stringify(f.state), original);
       assert.equal(f.calls.asr.length, 0); assert.equal(f.calls.reads.length, 0);
       assert.match(f.calls.llm[0].messages[0].content, /3600/);
-      assert.match(f.calls.llm[0].messages[0].content, /including leaves/);
+      assert.match(f.calls.llm[0].messages[0].content, /omitted on leaves/);
       const repeat = await f.create().summarize({ retryFailed: true });
       assert.equal(repeat.resultPath, result.resultPath); assert.equal(f.calls.llm.length, 1);
     }

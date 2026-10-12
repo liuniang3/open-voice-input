@@ -1,6 +1,6 @@
 "use strict";
 
-const CAPABILITY_PRESET_REVISION = 3;
+const CAPABILITY_PRESET_REVISION = 4;
 
 const GENERIC_MODEL_CAPABILITY = Object.freeze({
   contextWindow: 256000,
@@ -11,6 +11,18 @@ const GENERIC_MODEL_CAPABILITY = Object.freeze({
 });
 
 const MODEL_CAPABILITY_PRESETS = Object.freeze([
+  {
+    // Compatibility catalog: https://models.dev/api.json (2026-10-12).
+    // Gateways can enforce lower limits; provider/manual values take priority.
+    pattern: /(?:^|\/)mimo-v2\.6-flash(?:$|[-_:])/i,
+    capability: { contextWindow: 1048576, maxOutput: 131072, reasoning: "",
+      timeoutMs: 300000, capabilitySource: "compatibility" }
+  },
+  {
+    pattern: /(?:^|\/)gpt-6\.1-sol(?:$|[-_:])/i,
+    capability: { contextWindow: 1050000, maxOutput: 128000, reasoning: "",
+      timeoutMs: 300000, capabilitySource: "compatibility" }
+  },
   {
     pattern: /^(?:opencode-go\/)?(?:deepseek-v4-pro|deepseek-v4-flash|deepseek-v4\.1-flash|deepseek-v4-flash-vision-exp|deepseek-flash)$/i,
     capability: {

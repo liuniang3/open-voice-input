@@ -35,11 +35,14 @@ function summaryBudget(profile = {}) {
   )));
   // An enormous context does not imply enormous output: detailed prose +
   // citations still need to fit. Oversized inputs use hierarchical compression.
-  const inputTokenBudget = Math.floor(Math.min(contextWindow * 0.8 - maxOutputTokens, maxOutputTokens * 6));
+  const inputTokenBudget = Math.floor(Math.min(contextWindow * 0.8 - maxOutputTokens, maxOutputTokens * 12));
   const maxInputChars = Math.max(4000, Math.min(MAX_SUMMARY_INPUT_CHARS, inputTokenBudget * 3));
   return { maxOutputTokens, limits: {
     maxInputChars,
-    maxOutputChars: Math.max(1000, Math.min(MAX_SUMMARY_OUTPUT_CHARS, maxOutputTokens * 2)),
+    // UTF-8/JSON character counts are not model token counts. This separate
+    // memory guard must not reject a completed, token-compliant response.
+    maxOutputChars: MAX_SUMMARY_OUTPUT_CHARS,
+    maxOutputTokens,
     inputTokenBudget,
     fragmentChars: Math.min(2200, Math.floor(maxInputChars / 8)),
     contextChars: Math.min(2000, Math.floor(maxInputChars / 4)),
@@ -47,9 +50,14 @@ function summaryBudget(profile = {}) {
   } };
 }
 
+function summaryTaskTokens(input, ceiling = 8192) {
+  const content = (input?.items || []).map(item => ({ text: item.text, topic: item.topic }));
+  return Math.min(ceiling, Math.max(8192, estimateTokens(content) * 2 + 4096));
+}
+
 function summaryInput(task, items, context, limits, sourceIncomplete, missingRangeCount) {
   return { items, outputSchema: task, sourceIncomplete, missingRangeCount,
-    instruction: "Produce a short overview and thematic chapters of coherent prose, with one matching mindmap branch per chapter. Preserve important details and supplied topic context; compress repeated material so subsequent reduction converges.",
+    instruction: "Produce a short overview and thematic chapters of coherent prose with relevant subtopics and sourceIds. Preserve important details and supplied topic context; consolidate repeated material so subsequent reduction converges.",
     context, maxOutputChars: limits.maxOutputChars };
 }
 
@@ -58,6 +66,7 @@ module.exports = {
   MAX_SUMMARY_OUTPUT_CHARS,
   MAX_SUMMARY_OUTPUT_TOKENS,
   estimateTokens,
+  summaryTaskTokens,
   summaryBudget,
   summaryInput
 };

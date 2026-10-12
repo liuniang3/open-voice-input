@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Fixed
+
+- Preserve completed Chat/Responses output when a network chunk also contains a partial trailing usage event. Reject actual premature EOF, malformed pre-completion data and explicit output truncation.
+- Remove the invalid two-characters-per-token summary ceiling. Keep model token capacity, per-request output reservation and the independent local response-size guard separate.
+- Distinguish provider context, output and format errors. Explicit capacity failures split only the rejected summary batch; durable child plans resume successful work without repeating it.
+
+### Changed
+
+- Use the OpenAI JavaScript SDK for shared language-supplier streaming, retaining custom endpoints, independent credentials and application-owned idle deadlines, cancellation and bounded retry. Normalize headers case-insensitively; SDK retry and logging are disabled.
+- Ask summary models for coherent article chapters, subtopics and source IDs. Build fixed IDs, chapter/map links and immutable source excerpts locally; accept safely omitted leaf defaults and validated echoed metadata. Invalid source IDs, unsafe keys and true truncation still fail closed. Existing summary formats and exports remain readable.
+- Compute request output budgets from current content without a fixed 2048-token cap. Routine DeepSeek/MiMo summaries default to non-thinking; GPT defaults to low reasoning when no model reasoning was configured. Explicit reasoning settings remain effective. Unsupported JSON mode and explicit lower gateway output limits each get one bounded adjustment on the same supplier/model.
+- Add compatibility presets for MiMo V2.6 Flash and GPT 6.1 Sol. Preserve manual/provider capacity overrides and refresh stale generic catalog entries.
+
 ## v0.4.22 - 2026-10-12
 
 ### Added

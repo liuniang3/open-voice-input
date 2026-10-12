@@ -29,6 +29,13 @@
 
 ## Other runtime dependencies
 
+### OpenAI JavaScript SDK
+
+- Package: [openai-node](https://github.com/openai/openai-node) **7.32.0**, Apache-2.0 license.
+- Used in the main process for Chat Completions and Responses streaming from the selected custom language supplier. Application retry/deadline logic remains the single owner of recovery.
+- SDK logging is disabled. Credentials and provider responses stay in memory; no diagnostic response bodies are distributed.
+- The package license is shipped with its runtime module.
+
 ### d3-hierarchy
 
 - Package: [d3-hierarchy](https://github.com/d3/d3-hierarchy) **3.1.2**, ISC license.

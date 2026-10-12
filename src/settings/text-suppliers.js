@@ -199,7 +199,7 @@ function normalizeCatalogEntry(raw) {
       continue;
     }
     capabilities[model] = {
-      ...resolveModelCapability(model, capability),
+      ...resolveModelCapability(model, capability?.capabilitySource === "generic" ? null : capability),
       capabilityManaged: true
     };
   }

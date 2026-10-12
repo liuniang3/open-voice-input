@@ -80,6 +80,12 @@ For the second-stage rewrite step, a small chat model is usually enough. GPT-5.4
 
 **Media import limits:** first audio track only; not all codecs/containers are verified; long real-world videos are not claimed tested. The Windows installer/portable build includes **one** FFmpeg binary (~80 MB extra). FFmpeg is **FFmpeg 6.1.1** (gyan.dev essentials GPL build) via build-time `ffmpeg-static@5.3.0` — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [docs/FFMPEG_MEDIA_IMPORT.md](docs/FFMPEG_MEDIA_IMPORT.md).
 
+### Summary Requests And Recovery
+
+Meeting and file summaries share streamed Chat Completions / Responses requests through the OpenAI JavaScript SDK, using the selected supplier's custom endpoint and credentials. The application owns cancellation, connection/idle deadlines and up to five network retries. A retry restarts the current request; it does not resume already generated tokens.
+
+Models return coherent chapters, subtopics and source IDs. Local code builds fixed IDs, chapter links and immutable source excerpts. Configured output capacity is separate from the content-sized request budget and the response-size safety guard. Routine DeepSeek/MiMo summaries disable thinking by default, while GPT uses low reasoning; configured reasoning takes priority. Explicit capacity failures split the rejected batch and persist child plans, retaining completed work. These safeguards do not guarantee semantic accuracy; original audio and transcripts remain intact.
+
 ## Audio Size And Provider Limits
 
 The following segmentation and in-memory caching notes describe **short dictation**. Live meetings persist retry checkpoints and complete native/WAV archives. Optional full-audio review covers the entire recording through bounded requests; provider limits never shorten local audio. The current meeting MiMo review adapter limits each request to 30 seconds and 2 MiB, choosing a quiet boundary where possible.
