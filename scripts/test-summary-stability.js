@@ -109,6 +109,27 @@ async function main() {
       assert.equal(released, true);
     }
   });
+  await test("SDK requests never inherit another account's environment credentials or routing", async () => {
+    const values = { OPENAI_API_KEY: "environment-only-key", OPENAI_ADMIN_KEY: "environment-only-admin",
+      OPENAI_ORG_ID: "environment-only-org", OPENAI_PROJECT_ID: "environment-only-project",
+      OPENAI_BASE_URL: "https://other-account.invalid/v1" };
+    const previous = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
+    try {
+      Object.assign(process.env, values);
+      await client(async (url, init) => {
+        const headers = new Headers(init.headers);
+        assert.equal(url, "https://fixture.invalid/custom/v1/chat/completions");
+        assert.equal(headers.get("authorization"), "Bearer fixture");
+        assert.equal(headers.has("openai-organization"), false);
+        assert.equal(headers.has("openai-project"), false);
+        return response(chat("valid", "stop"));
+      }, { streamTransport: "sdk" }).requestChat([], { stream: true });
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    }
+  });
   await test("compact results build chapter links and immutable provenance locally, then resume free", async () => {
     const f = await fixture(request => ({ ...compact(request.input), sourceIncomplete: false, missingRangeCount: 0 }));
     const before = JSON.stringify(f.state);

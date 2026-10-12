@@ -15,6 +15,7 @@ function sanitizeSdkError(error) {
 // SDK handles the wire protocol; all provider error bodies stay in memory.
 async function requestSdkStream({ apiKey, baseUrl, style, body, headers, signal, fetchImpl, onBytes }) {
   const sdk = new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: 0, logLevel: "off",
+    organization: null, project: null, adminAPIKey: null, webhookSecret: null,
     defaultHeaders: { Authorization: null },
     fetch: async (url, init) => {
       const response = await fetchImpl(String(url), { ...init, headers: Object.fromEntries(new Headers(init.headers)) });
