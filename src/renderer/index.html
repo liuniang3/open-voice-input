@@ -763,7 +763,6 @@
         <div class="file-main">
           <div class="file-workspace-toolbar" role="group" aria-label="文件工作区">
             <button id="fileHistoryToggle" type="button" aria-expanded="false" aria-controls="fileHistorySidebar"><span class="ui-icon icon-panels" aria-hidden="true"></span>历史记录</button>
-            <button id="fileSetupToggle" type="button" aria-expanded="true" aria-controls="fileSetupSidebar"><span class="ui-icon icon-chevron sidebar-toggle-icon" aria-hidden="true"></span>转录模型设置</button>
             <button type="button" id="fileChooseBtn" class="primary" title="选择音频或视频文件">选择文件</button>
           </div>
           <header class="file-current-heading">
@@ -785,6 +784,7 @@
               </div>
               <div class="file-action-group">
                 <button type="button" id="fileProcessStartBtn" class="primary" disabled>开始转写</button>
+                <button id="fileSetupToggle" type="button" class="file-model-settings-toggle" aria-expanded="true" aria-controls="fileSetupSidebar" title="配置文件转写的 ASR 供应商和模型"><span class="ui-icon icon-model-settings" aria-hidden="true"></span>转录模型设置</button>
                 <button type="button" id="fileProcessRetryBtn" class="icon-btn" title="重试转写" aria-label="重试转写" disabled><span class="ui-icon icon-refresh" aria-hidden="true"></span></button>
                 <button type="button" id="fileProcessCancelBtn" class="icon-btn" title="取消转写" aria-label="取消转写" disabled><span class="ui-icon icon-close" aria-hidden="true"></span></button>
               </div>
@@ -908,7 +908,7 @@
           <header class="live-heading">
             <div class="live-sidebar-tools" role="group" aria-label="会议侧栏">
               <button id="liveHistoryToggle" class="live-history-toggle" type="button" aria-expanded="false" aria-controls="liveHistoryBrowser">历史记录 <span id="liveHistoryCount">0</span></button>
-              <button id="liveSetupToggle" type="button" aria-expanded="true" aria-controls="liveSetupSidebar"><span class="ui-icon icon-chevron sidebar-toggle-icon" aria-hidden="true"></span>转录模型设置</button>
+              <button id="liveSetupToggle" type="button" aria-expanded="true" aria-controls="liveSetupSidebar"><span class="ui-icon icon-model-settings" aria-hidden="true"></span>转录模型设置</button>
             </div>
             <div class="live-heading-title"><span class="live-eyebrow">会议实时转录</span><h2 id="liveSessionTitle">实时会议</h2></div>
             <div class="live-window-tools" role="group" aria-label="窗口控制">
