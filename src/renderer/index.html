@@ -667,6 +667,14 @@
             </div>
           </div>
           <div id="settingsUpdatesPanel" class="settings-tab-panel update-panel" role="tabpanel" aria-labelledby="settingsTabUpdates" data-settings-panel="updates" hidden>
+            <section class="settings-group startup-group" aria-labelledby="startupTitle">
+              <h3 id="startupTitle">启动</h3>
+              <label class="switch-field">
+                <input id="startupEnabledInput" type="checkbox" disabled aria-describedby="startupStatus" />
+                <span>开机自启</span>
+              </label>
+              <p id="startupStatus" class="settings-note" role="status" aria-live="polite">正在读取系统登录项…</p>
+            </section>
             <section class="settings-group update-group">
               <div class="update-title-row">
                 <div>

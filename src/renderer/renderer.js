@@ -106,6 +106,10 @@ const updateDownloadBtn = document.getElementById("updateDownloadBtn");
 const updateInstallBtn = document.getElementById("updateInstallBtn");
 const updateAutoCheckInput = document.getElementById("updateAutoCheckInput");
 const updatePlatformNote = document.getElementById("updatePlatformNote");
+const startupEnabledInput = document.getElementById("startupEnabledInput");
+const startupStatus = document.getElementById("startupStatus");
+let startupRequestId = 0;
+let startupSaving = false;
 const settingsTabButtons = [...document.querySelectorAll("[data-settings-tab]")];
 const settingsTabPanels = [...document.querySelectorAll("[data-settings-panel]")];
 const secretToggleButtons = [...document.querySelectorAll("[data-secret-toggle]")];
@@ -467,6 +471,7 @@ let appSettings = {};
 let appUpdateState = null;
 let autoSendAfterTranscript = false;
 let currentWindowMode = "compact";
+let windowModeRevision = 0;
 let activeHotkeyCapture = null;
 let recordingTranscriptionMode = "stable";
 let recordingShortContext = "";
@@ -1175,9 +1180,53 @@ function setSettingsTab(tabName, { requestId } = {}) {
     historyLoad = voiceHistoryUi.open(appSettings, { requestId });
   } else voiceHistoryUi?.close();
   window.SettingsWorkspace.renderRecognitionSettings(document, appSettings.transcriptionMode);
-  if (activeSettingsTab === "updates") void refreshUpdateStatus();
+  if (activeSettingsTab === "updates") {
+    void refreshUpdateStatus();
+    void refreshStartupStatus();
+  }
   return historyLoad;
 }
+
+function renderStartupStatus(value) {
+  if (!startupEnabledInput || !startupStatus) return;
+  const valid = value && typeof value.supported === "boolean";
+  if (typeof value?.enabled === "boolean") startupEnabledInput.checked = value.enabled || value.state === "requires-approval";
+  startupEnabledInput.indeterminate = value?.state === "requires-approval";
+  startupEnabledInput.disabled = startupSaving || !valid || !value.supported || typeof value.enabled !== "boolean";
+  startupStatus.dataset.kind = valid && value.ok === false ? "error" : value?.state || "unavailable";
+  startupStatus.textContent = valid ? value.message : "此运行环境暂不支持开机自启。";
+}
+
+async function refreshStartupStatus() {
+  if (startupSaving) return;
+  const requestId = ++startupRequestId;
+  startupEnabledInput.disabled = true;
+  try {
+    const value = await window.mimoInput.getStartupStatus?.();
+    if (requestId === startupRequestId && !startupSaving) renderStartupStatus(value);
+  } catch {
+    if (requestId === startupRequestId && !startupSaving) renderStartupStatus({ ok: false, supported: true, enabled: null,
+      message: "无法读取开机自启状态，请重新打开此页面。" });
+  }
+}
+
+startupEnabledInput?.addEventListener("change", async () => {
+  const enabled = startupEnabledInput.checked;
+  ++startupRequestId;
+  startupSaving = true;
+  startupEnabledInput.disabled = true;
+  startupStatus.textContent = "正在更新系统登录项…";
+  let value;
+  try {
+    value = await window.mimoInput.setStartupEnabled(enabled);
+  } catch {
+    value = { ok: false, supported: true, enabled: !enabled, message: "开机自启设置未能保存，请重试。" };
+  } finally {
+    startupSaving = false;
+    if (!value || typeof value.enabled !== "boolean") startupEnabledInput.checked = !enabled;
+    renderStartupStatus(value);
+  }
+});
 
 function formatUpdateRate(value) {
   const bytes = Math.max(0, Number(value) || 0);
@@ -2461,6 +2510,7 @@ async function setTranscriptionMode(mode, { silent = false } = {}) {
 }
 
 function applyWindowMode(mode) {
+  ++windowModeRevision;
   if (mode !== "recording") window.dictationMotion?.cancel();
   if (mode !== "settings") endHotkeyCapture();
   cancelAnimationFrame(recordingScrollFrame);
@@ -4565,6 +4615,10 @@ window.addEventListener("beforeunload", () => {
 });
 syncMotionPreference();
 
-applyWindowMode("home");
-refreshStatus().then(() => refreshMicrophones()).catch(() => {});
+applyWindowMode("compact");
+const initialWindowRevision = windowModeRevision;
+refreshStatus().then(status => {
+  if (windowModeRevision === initialWindowRevision) applyWindowMode(status.windowMode || "home");
+  return refreshMicrophones();
+}).catch(() => {});
 setButtons("ready");

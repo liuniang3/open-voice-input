@@ -14,6 +14,11 @@ body.settings-open .settings-tab-content { min-width: 0; padding: 0 6px 28px 24p
 .settings-workspace :is(input, select, textarea) { min-width: 0; max-width: 100%; }
 .settings-workspace .switch-field { display: flex; align-items: center; gap: 9px; font-size: 13px; line-height: 1.5; }
 .settings-workspace .switch-field input[type="checkbox"] { flex: 0 0 16px; width: 16px; height: 16px; min-height: 16px; margin: 0; accent-color: #16867f; }
+.startup-group { padding-bottom: 18px; }
+.startup-group h3 { margin: 0 0 12px; font-size: 15px; }
+.startup-group .settings-note { margin: 8px 0 0; }
+#startupStatus[data-kind="error"] { color: #b9403b; }
+#startupStatus[data-kind="requires-approval"] { color: #8a5e18; }
 .settings-workspace .provider-connection-group { padding-top: 0; border-bottom: 0; }
 .settings-workspace .provider-connection-group .section-title > strong { font-size: 13px; color: var(--ovi-muted); }
 #voiceConnectionSelection { padding-bottom: 16px; border: 0; }

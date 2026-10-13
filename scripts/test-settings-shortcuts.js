@@ -326,7 +326,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function mainHarness(platform = "darwin") {
+function mainHarness(platform = "darwin", extraStubs = {}) {
   const handlers = new Map();
   const appEvents = new Map();
   const events = [];
@@ -420,10 +420,12 @@ function mainHarness(platform = "darwin") {
       sanitizeIpcError: (error) => ({ ok: false, error: { code: error.code || "error", message: "safe" } }),
       mediaToken: { SCHEME: "meeting-media" }, paths: require("../src/meeting/paths") },
     "./meeting/realtime": { createRealtimeMeetingService: (options) => { controls.options = options; return live; } },
-    "./platform/macos": mac
+    "./platform/macos": mac,
+    "./platform/login-startup": require("../src/platform/login-startup")
   };
   const context = vm.createContext({ require: (id) => {
     if (id === "./platform/macos") controls.macLoaded += 1;
+    if (Object.hasOwn(extraStubs, id)) return extraStubs[id];
     if (Object.hasOwn(stubs, id)) return stubs[id];
     if (id.startsWith("node:")) return require(id);
     return {};
@@ -432,7 +434,7 @@ function mainHarness(platform = "darwin") {
   vm.runInContext(source, context);
   vm.runInContext("mainWindow = testWindow; windowMotion = createWindowMotion({ window: mainWindow, platform: process.platform }); configurePermissions();", context);
   const event = { sender: webContents, senderFrame: { url: localUrl } };
-  return { controls, events, appEvents, context, webContents,
+  return { controls, events, appEvents, context, webContents, app,
     run: (code) => vm.runInContext(code, context),
     invoke: (name, payload, sender = event) => handlers.get(name)(sender, payload) };
 }
@@ -660,5 +662,8 @@ async function integrationTests() {
   console.log("ok - preload live bridge exposes unsubscribe without leaking Electron events");
 }
 
-integrationTests().then(() => console.log("settings/shortcut/integration tests passed"))
-  .catch((error) => { console.error(error); process.exitCode = 1; });
+module.exports = { mainHarness };
+if (require.main === module) {
+  integrationTests().then(() => console.log("settings/shortcut/integration tests passed"))
+    .catch((error) => { console.error(error); process.exitCode = 1; });
+}

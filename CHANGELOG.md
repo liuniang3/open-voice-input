@@ -4,6 +4,10 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Added
+
+- Add opt-in launch at login in Settings > About & Updates for Windows installed/portable builds and macOS system login items. Login launches keep the main window hidden while tray and shortcuts initialize; the switch reflects system state and macOS approval requirements. Source launches do not register startup entries.
+
 ### Changed
 
 - Place file and realtime meeting transcription model settings to the left of their start actions, use a sliders icon, and keep related controls together at narrower window sizes.

@@ -159,6 +159,10 @@ OVI_MEETING_ANALYSIS_API_KEY
 
 ## Run
 
+Installed and portable builds offer **Settings > About & Updates > Startup > Launch at login**, off by default. Login launches initialize tray/menu-bar controls and shortcuts without opening the main window or recording audio. The switch reads the system login item; disabling it in Task Manager or System Settings is respected.
+
+Windows portable builds register the original `.exe`, not the temporary extracted executable. Toggle startup off and on after moving the file. macOS uses system login items; allow the app in **System Settings > General > Login Items** when approval is requested, and place the `.app` in Applications first. Source/VBS development launches do not register login items; use a packaged build to test startup.
+
 For a release build, launch the installed shortcut or the portable `.exe` directly.
 
 When running from source, double-click without a console window:

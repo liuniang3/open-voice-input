@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("mimoInput", {
   getStatus: () => ipcRenderer.invoke("app:status"),
+  getStartupStatus: () => ipcRenderer.invoke("app:startup:status"),
+  setStartupEnabled: (enabled) => ipcRenderer.invoke("app:startup:set", enabled),
   getUpdateStatus: () => ipcRenderer.invoke("app:update:status"),
   checkForUpdates: () => ipcRenderer.invoke("app:update:check"),
   downloadUpdate: () => ipcRenderer.invoke("app:update:download"),

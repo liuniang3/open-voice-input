@@ -58,6 +58,14 @@ const { createTransparentPreview } = require("./meeting/transparent-preview");
 const { createWindowMotion, prepareDictationBubble } = require("./window-motion");
 const { createDictationPreview } = require("./dictation-preview");
 const { readInputContext, dictationBounds, dictationPlacement } = require("./dictation-placement");
+const { createLoginStartup } = require("./platform/login-startup");
+
+let loginStartup;
+let initialPresentationPending = true;
+function getLoginStartup() {
+  loginStartup ||= createLoginStartup({ app, platform: process.platform, execPath: process.execPath, env: process.env });
+  return loginStartup;
+}
 
 let meetingImportJobs = null;
 function getMeetingImportJobs() {
@@ -838,6 +846,7 @@ if (!singleInstanceLock) {
       showSettings();
       return;
     }
+    if (commandLine.includes("--autostart")) return;
     logEvent("single-instance: show existing");
     showWindowOnly();
   });
@@ -2089,6 +2098,15 @@ public static class Win32 {
 
 ipcMain.handle("settings:get", async () => settings);
 ipcMain.handle("settings:save", async (_event, nextSettings) => saveSettings(nextSettings));
+ipcMain.handle("app:startup:status", async (event) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };
+  return getLoginStartup().readStatus();
+});
+ipcMain.handle("app:startup:set", async (event, enabled) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };
+  if (typeof enabled !== "boolean") return { ok: false };
+  return getLoginStartup().setEnabled(enabled);
+});
 ipcMain.handle("app:update:status", async () => getUpdateService().status());
 ipcMain.handle("app:update:check", async () => getUpdateService().check());
 ipcMain.handle("app:update:download", async () => getUpdateService().download());
@@ -2165,6 +2183,7 @@ ipcMain.handle("onboarding:microphone-probe", async (event, active) => {
   ipcMain.handle("window:meeting", async () => showMeetingWorkspace());
   ipcMain.handle("window:file", async () => showFileTranscriptionWorkspace());
 ipcMain.handle("app:status", async () => ({
+  windowMode,
   hasApiKey: Boolean(resolveApiKey()),
   hasSavedApiKey: Boolean(settings.asrApiKey),
   hasEnvApiKey: Boolean(
@@ -3381,6 +3400,8 @@ try {
 }
 
 app.whenReady().then(async () => {
+  if (!singleInstanceLock) return;
+  const openedAtLogin = getLoginStartup().wasOpenedAtLogin(process.argv);
   logEvent("app: ready");
   attachMeetingPlaybackProtocolHandler();
   await loadSettings();
@@ -3402,9 +3423,10 @@ app.whenReady().then(async () => {
   setWindowMode("compact");
   if (process.argv.includes("--settings")) {
     showSettings();
-  } else {
+  } else if (!openedAtLogin) {
     showHome();
   }
+  initialPresentationPending = false;
   logEvent("app: initialized");
   configureUpdateSchedule();
 });
@@ -3521,7 +3543,7 @@ process.on("unhandledRejection", (reason) => {
 });
 
 app.on("activate", () => {
-  if (meetingQuitCleanupStarted) return;
+  if (meetingQuitCleanupStarted || initialPresentationPending) return;
   if (!mainWindow || mainWindow.isDestroyed()) createWindow();
   if (realtimeMeeting?.status().recording || captureOwner === "live") showMeetingWorkspace();
   else showWindowOnly();
