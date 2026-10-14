@@ -170,6 +170,18 @@ test("meeting start validates interval bounds and forwards valid independent int
 });
 
 for (const platform of ["win32", "darwin"]) {
+  test(`${platform}: tray and page both start after historical ASR failure`, async () => {
+    for (const route of ["page", "tray"]) {
+      const h = mainHarness(platform);
+      h.run("getRealtimeMeeting();");
+      Object.assign(h.controls.state, { sessionId: "previous", status: "needs_retry", recording: false,
+        pendingSegments: 2, failedSegments: 1, error: { code: "live_asr_failed", message: "Previous ASR failed" } });
+      if (route === "page") assert.equal((await h.invoke("meeting:live:start", { modelId: "mimo-v2.5-asr" })).ok, true);
+      else { h.run("showAndStartLiveMeeting();"); await new Promise(setImmediate); }
+      assert.equal(h.controls.startCount, 1);
+      assert.equal(h.controls.retryInput, undefined, "new capture never requests retry of prior audio");
+    }
+  });
   test(`${platform}: start floats automatically and presentation changes never restart capture`, async () => {
     const h = mainHarness(platform);
     h.run(`Object.assign(testWindow, {

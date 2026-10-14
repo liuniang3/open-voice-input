@@ -926,7 +926,7 @@
           <div class="live-transport">
             <div class="live-start-actions" role="group" aria-label="实时转录设置与开始">
               <button id="liveSetupToggle" type="button" aria-expanded="true" aria-controls="liveSetupSidebar" title="配置会议转录的 ASR 供应商和模型"><span class="ui-icon icon-model-settings" aria-hidden="true"></span>转录模型设置</button>
-              <button id="liveStart" type="button" class="primary" disabled>开始实时转录</button>
+              <button id="liveStart" type="button" class="primary" aria-describedby="liveStartHint" disabled>开始实时转录</button>
             </div>
             <button id="livePause" type="button" disabled hidden>暂停</button>
             <button id="liveStop" type="button" class="live-stop" disabled>停止并保存</button>
@@ -939,6 +939,7 @@
             <span id="liveSaved" data-kind="idle">每 30 秒自动保存 · 尚未保存</span>
           </div>
           <div class="live-recovery">
+            <p id="liveStartHint" class="live-start-hint" role="status" hidden></p>
             <p id="liveError" class="live-error" role="alert" hidden></p>
             <button id="liveRefresh" type="button">刷新状态</button>
             <button id="liveRetry" type="button" disabled>重试未完成片段</button>

@@ -330,6 +330,36 @@ test("stop tracks ASR drain; retry only after stop; stop failure remains recover
   assert.match(f.$("liveStop").textContent, /重试停止/);
 });
 
+test("recoverable history does not disable a new meeting; unsafe finalization still blocks it", async () => {
+  for (const status of ["needs_retry", "interrupted", "failed", "completed"]) {
+    const f = fixture();
+    f.setStatus(completed({ status, pendingSegments: 2, failedSegments: 1,
+      error: { code: "live_asr_failed", message: "上次转写失败，录音已保存。" } }));
+    await f.ui.open();
+    assert.equal(f.$("liveStart").disabled, false, `${status} history should allow another meeting`);
+    assert.equal(f.$("liveStartHint").hidden, true);
+    assert.equal(f.$("liveRetry").disabled, false, "old segments can still be explicitly retried");
+    assert.equal(f.count("meetingLiveRetry"), 0);
+    await f.click("liveStart");
+    assert.equal(f.count("meetingLiveStart"), 1);
+    assert.equal(f.count("meetingLiveRetry"), 0, "starting never retries historical audio implicitly");
+    f.ui.destroy();
+  }
+  for (const extra of [{ status: "stopping" }, { finalizationPending: true },
+    { error: { code: "live_save_failed", message: "保存失败" } }, { cleanupStatus: "running" },
+    { postprocessStatus: "summarizing" }]) {
+    const f = fixture();
+    f.setStatus(completed(extra));
+    await f.ui.open();
+    assert.equal(f.$("liveStart").disabled, true, JSON.stringify(extra));
+    assert.ok(f.$("liveStart").title, "disabled start must explain why");
+    if (extra.status !== "stopping") assert.equal(f.$("liveStartHint").hidden, false);
+    await f.click("liveStart");
+    assert.equal(f.count("meetingLiveStart"), 0);
+    f.ui.destroy();
+  }
+});
+
 test("history browser opens a local session without starting capture or ASR", async () => {
   const f = fixture();
   f.setStatus({ status: "idle", recording: false, recoverableSessions: [{
@@ -914,7 +944,43 @@ async function verifyBrowser(page, screenshotDirectory) {
   return { viewports, screenshots, errors, result: "real rendered mock UI passed" };
 }
 
-module.exports = { verifyBrowser, prepareBrowser, fixture, tick, deferred, completed };
+async function verifyStartBrowser(browser, screenshotDirectory) {
+  for (const platform of ["Win32", "MacIntel"]) {
+    const context = await browser.newContext({ viewport: { width: 1040, height: 780 } });
+    try {
+      await context.addInitScript(platform => Object.defineProperty(navigator, "platform", { get: () => platform }), platform);
+      const page = await context.newPage();
+      const errors = await prepareBrowser(page);
+      await page.evaluate(async () => {
+        window.mockPush({ status: "needs_retry", recording: false, paused: false,
+          sessionId: "old-interrupted-meeting", rawText: "上次录音保留的转录内容。", pendingSegments: 2, failedSegments: 1,
+          error: { code: "live_asr_failed", message: "上次转写失败，音频已保留。" } });
+        window.applyWindowMode("meeting"); await window.MeetingLiveUi.open();
+      });
+      assert.equal(await page.locator("#liveStart").isEnabled(), true, `${platform} can start despite historical gaps`);
+      assert.equal(await page.locator("#liveRetry").isEnabled(), true);
+      assert.equal(await page.locator("#liveStartHint").isVisible(), false);
+      if (screenshotDirectory) await page.screenshot({ path: path.join(screenshotDirectory, `meeting-start-history-${platform}.png`) });
+      await page.locator("#liveStart").click();
+      await page.waitForFunction(() => !document.getElementById("liveStop").disabled);
+      assert.equal(await page.evaluate(() => window.mockCalls.filter(call => call.name === "meetingLiveStart").length), 1);
+      assert.equal(await page.evaluate(() => window.mockCalls.filter(call => call.name === "meetingLiveRetry").length), 0);
+      await page.evaluate(() => window.mockPush({ status: "needs_retry", recording: false, paused: false,
+        finalizationPending: true, window: { floating: false }, error: null }));
+      assert.equal(await page.locator("#liveStart").isDisabled(), true);
+      assert.match(await page.locator("#liveStartHint").innerText(), /归档/);
+      assert.equal(await page.locator("#liveStartHint").isVisible(), true);
+      await page.setViewportSize({ width: 640, height: 520 });
+      await page.locator("#liveStartHint").scrollIntoViewIfNeeded();
+      assert.equal(await page.locator("#liveMeetingPanel").evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);
+      if (screenshotDirectory) await page.screenshot({ path: path.join(screenshotDirectory, `meeting-start-blocked-${platform}.png`) });
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  }
+  console.log("Browser: Windows/macOS page starts from retryable history and explains blocked finalization without overflow.");
+}
+
+module.exports = { verifyBrowser, verifyStartBrowser, prepareBrowser, fixture, tick, deferred, completed };
 if (require.main === module) (async () => {
   await run();
   if (process.exitCode || !process.argv.includes("--browser")) return;
@@ -922,7 +988,9 @@ if (require.main === module) (async () => {
   const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || "playwright");
   const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || "chrome", headless: true });
   try {
-    const screenshots = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "meeting-live-ui-"));
+    const screenshots = path.join(root, "output/playwright/meeting-start");
+    fs.mkdirSync(screenshots, { recursive: true });
+    await verifyStartBrowser(browser, screenshots);
     console.log(JSON.stringify(await verifyBrowser(await browser.newPage(), screenshots), null, 2));
   } finally { await browser.close(); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

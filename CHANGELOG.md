@@ -8,6 +8,10 @@ All notable changes to this project are documented here.
 
 - Add opt-in launch at login in Settings > About & Updates for Windows installed/portable builds and macOS system login items. Login launches keep the main window hidden while tray and shortcuts initialize; the switch reflects system state and macOS approval requirements. Source launches do not register startup entries.
 
+### Fixed
+
+- Keep the realtime meeting Start action available when an inactive historical session has failed or pending ASR segments, matching the tray entry. Historical audio and retry checkpoints remain intact; active capture, unfinished audio finalization, failed Markdown saves and ongoing postprocessing still block a new meeting. Show the reason when the page cannot start recording.
+
 ### Changed
 
 - Place file and realtime meeting transcription model settings to the left of their start actions, use a sliders icon, and keep related controls together at narrower window sizes.

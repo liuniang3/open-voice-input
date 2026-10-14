@@ -38,6 +38,7 @@ body.meeting-mode .topbar h1 { font-size: 19px; overflow-wrap: anywhere; }
   letter-spacing: 0;
 }
 .live-meeting button { min-height: 36px; border-radius: 6px; white-space: normal; }
+.live-start-hint { flex: 0 0 100%; min-width: 0; margin: 0; color: var(--ovi-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .live-meeting button:not(.primary) { background: rgba(255, 255, 255, .66); border-color: var(--ovi-border); }
 .live-meeting button:not(:disabled):hover { box-shadow: 0 2px 8px rgba(31, 71, 83, .1); }
 .live-meeting :is(input, select) { border-color: var(--ovi-border); background-color: rgba(255, 255, 255, .76); }

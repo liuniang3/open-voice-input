@@ -571,8 +571,20 @@
       const failed = count(dto.failedSegments);
       const locked = isActive || busy.size > 0 || isCleaning || !settingsReady;
       const can = (method) => typeof api[method] === "function";
-      $("liveStart").disabled = !loaded || locked || !can("meetingLiveStart") || !supportedModel(selectedModel())
-        || pending > 0 || failed > 0 || dto.finalizationPending || dto.error?.code === "live_save_failed";
+      // Retry counts belong to the selected history; they do not own the capture device.
+      const startReason = !can("meetingLiveStart") ? "会议启动接口不可用，请重新打开应用。"
+        : !loaded ? "正在读取会议状态；若长时间未完成，请刷新状态。"
+          : !settingsReady ? "会议配置尚未加载，请重新打开会议页面。"
+            : isActive ? "请先停止并保存当前录音。"
+              : busy.size > 0 ? "请等待当前操作完成。"
+                : isCleaning ? "请等待摘要或整理任务完成。"
+                  : dto.finalizationPending ? "录音尚未完成归档，请先重试未完成片段。"
+                    : dto.error?.code === "live_save_failed" ? "文稿保存失败，请先检查保存位置并重试。"
+                      : !supportedModel(selectedModel()) ? "请选择支持会议转录的 ASR 模型。" : "";
+      $("liveStart").disabled = Boolean(startReason);
+      $("liveStart").title = startReason || "开始新的会议转录";
+      $("liveStartHint").textContent = startReason;
+      $("liveStartHint").hidden = !startReason || isActive || windowFlags.floating;
       // Stopping remains available during a slow ASR retry or status request.
       const stopFailed = dto.error?.code === "live_stop_failed" && (dto.recording || isPaused);
       $("liveStop").disabled = !(dto.recording || isPaused) || (dto.status === "stopping" && !stopFailed) || busy.has("stop") || !can("meetingLiveStop");

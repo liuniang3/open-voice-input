@@ -43,6 +43,32 @@ async function setup(overrides = {}) {
 async function main() {
   let count = 0;
   const test = async (name, fn) => { await fn(); console.log(`ok - ${name}`); count++; };
+  await test("new recording preserves failed historical audio and retry checkpoints", async () => {
+    const x = await setup({ maxAttempts: 1, retryDelayMs: 1, transcribeImpl: async () => { throw new Error("fixture ASR unavailable"); } });
+    try {
+      await x.api.start({ captureMode: "microphone" });
+      await x.add("microphone", RATE + 200);
+      await x.api.stop(); await x.api.waitForIdle();
+      const previous = x.api.status();
+      assert.equal(previous.status, "needs_retry");
+      assert.ok(previous.failedSegments > 0);
+      const checkpointPath = path.join(x.store.sessionsRoot, previous.sessionId, "realtime/state.json");
+      const checkpoint = await fs.readFile(checkpointPath);
+      const audio = await fs.readFile(previous.audioPaths[0]);
+      const nativeAudio = await fs.readFile(path.join(x.store.sessionsRoot, previous.sessionId, "audio/microphone/000001.l0.pcm"));
+      await x.api.start({ captureMode: "microphone", title: "Next meeting" });
+      assert.notEqual(x.api.status().sessionId, previous.sessionId);
+      assert.equal(x.api.status().recording, true);
+      assert.equal(x.api.status().failedSegments, 0);
+      assert.deepEqual(await fs.readFile(checkpointPath), checkpoint);
+      assert.deepEqual(await fs.readFile(previous.audioPaths[0]), audio);
+      assert.deepEqual(await fs.readFile(path.join(x.store.sessionsRoot, previous.sessionId, "audio/microphone/000001.l0.pcm")), nativeAudio);
+      await x.api.stop(); await x.api.waitForIdle();
+      await x.api.openHistory({ sessionId: previous.sessionId });
+      assert.equal(x.api.status().sessionId, previous.sessionId);
+      assert.ok(x.api.status().failedSegments > 0, "historical retry remains available");
+    } finally { await x.api.shutdown(); }
+  });
   await test("continuous archive, ordered segments, tail, separate cleanup", async () => {
     const x = await setup();
     try {
