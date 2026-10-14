@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## v0.4.24 - 2026-10-14
+
 ### Added
 
 - Add opt-in launch at login in Settings > About & Updates for Windows installed/portable builds and macOS system login items. Login launches keep the main window hidden while tray and shortcuts initialize; the switch reflects system state and macOS approval requirements. Source launches do not register startup entries.
@@ -15,6 +17,11 @@ All notable changes to this project are documented here.
 ### Changed
 
 - Place file and realtime meeting transcription model settings to the left of their start actions, use a sliders icon, and keep related controls together at narrower window sizes.
+
+### Validation
+
+- `74/74` shared regression scripts pass. Windows x64, Intel macOS x64 and Apple Silicon macOS arm64 CI pass, including native component builds and unsigned macOS packaging. Regressions cover historical ASR failures, audio finalization safeguards, login startup, system-state readback and isolated recording settings. Native macOS recording, permissions, paste and login behavior still require hardware validation.
+- Release builds repeat the shared tests and sensitive-information checks. Credentials, local configuration, real recordings/transcripts and diagnostic screenshots are excluded from commits and release packages; existing user settings and historical retry checkpoints remain local.
 
 ## v0.4.23 - 2026-10-12
 
