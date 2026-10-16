@@ -26,6 +26,7 @@ async function unitTests() {
     isDestroyed() { return this.destroyed; }
     isVisible() { return this.visible; }
     show() { this.visible = true; }
+    showInactive() { this.visible = true; }
     hide() { this.visible = false; }
     setOpacity(value) { this.opacity = value; }
     setBounds(value) { this.bounds = value; }
@@ -83,6 +84,32 @@ async function unitTests() {
   assert.equal(win.destroyed, true); assert.equal(ipcMain.eventNames().length, 0); assert.equal(handlers.size, 0);
   assert.equal(await preview.show(), false);
 
+  const originalLoad = Window.prototype.loadFile;
+  for (const outcome of ["cancel", "load-failure"]) {
+    let finishLoad, rejectLoad;
+    Window.prototype.loadFile = () => new Promise((resolve, reject) => { finishLoad = resolve; rejectLoad = reject; });
+    const cold = createDictationPreview({ ...options, platform: "win32" });
+    cold.setReducedMotion(false);
+    const shown = cold.show({ reposition: true });
+    const warming = windows.at(-1);
+    assert.equal(warming.opacity, 0);
+    assert.equal(cold.isVisible(), false, "first-paint initialization cannot be focused as a usable popup");
+    if (outcome === "cancel") {
+      let hiddenCallback = false;
+      const hidden = cold.hide(() => { hiddenCallback = true; });
+      finishLoad();
+      assert.equal(await shown, false);
+      assert.equal(await hidden, true);
+      assert.equal(hiddenCallback, true, "late page load must not cancel the close callback");
+    } else {
+      rejectLoad(new Error("fixture page unavailable"));
+      assert.equal(await shown, false);
+    }
+    assert.equal(warming.visible, false, "cancelled or failed cold load leaves no native overlay");
+    cold.dispose();
+  }
+  Window.prototype.loadFile = originalLoad;
+
   const previewSource = fs.readFileSync(path.join(root, "src/dictation-preview.js"), "utf8");
   assert.doesNotMatch(previewSource, /applyWindowsDictationGlass|SetWindowCompositionAttribute|setShape|setOpacity\(0\.[0-9]+\)/,
     "the display must not reintroduce native rectangular blur or fade the entire window to simulate glass");
@@ -137,6 +164,28 @@ async function verifyNative() {
         asrProfiles: { "mimo-v2.5-asr": { provider: "mimo", mode: "batch" } } });
       globalThis.fixtureApp.showHome();
     });
+    await page.evaluate(() => window.mimoInput.setReducedMotion(false));
+    await application.evaluate(() => {
+      globalThis.fixtureColdPreparation = [];
+      const preview = globalThis.fixtureApp.preview(), originalShow = preview.show.bind(preview);
+      preview.show = (...args) => {
+        const cold = !preview.getWindow();
+        const result = originalShow(...args);
+        if (cold) {
+          const popup = preview.getWindow(), execute = popup.webContents.executeJavaScript.bind(popup.webContents);
+          popup.webContents.executeJavaScript = (...parameters) => {
+            const pending = execute(...parameters);
+            if (!parameters[0].includes("dictationMotion?.prepare(")) return pending;
+            return pending.then(async ready => {
+              const width = await execute('document.querySelector(".shell").getBoundingClientRect().width');
+              globalThis.fixtureColdPreparation.push({ ready, width });
+              return ready;
+            });
+          };
+        }
+        return result;
+      };
+    });
     await application.evaluate(() => {
       const wc = globalThis.fixtureApp.main().webContents;
       wc.sendInputEvent({ type: "keyDown", keyCode: "M", modifiers: ["control", "alt"] });
@@ -150,6 +199,14 @@ async function verifyNative() {
     }
     const popup = application.windows().find(w => w.url().endsWith("dictation-preview.html"));
     assert.ok(popup, "the actual application uses the isolated transparent display");
+    const coldFrames = await application.evaluate(() => globalThis.fixtureColdPreparation);
+    assert.equal(coldFrames.length, 1);
+    assert.equal(coldFrames[0].ready, true, "first invocation prepares the bubble instead of timing out before its first native paint");
+    assert.ok(coldFrames[0].width <= 13, "first invocation is prepared as a small bubble");
+    assert.deepEqual(await popup.locator(".status-panel").evaluate(node => ({
+      opacity: getComputedStyle(node).opacity, animation: getComputedStyle(node).animationName
+    })), { opacity: "1", animation: "none" }, "completed bubble never restarts the status fade");
+    console.log("PASS cold native bubble preparation and stable text opacity after expansion");
     await popup.waitForFunction(() => document.getElementById("recordingSpectrum").hidden === false);
     await popup.evaluate(() => {
       window.receivedSpectrum = [];

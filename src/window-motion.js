@@ -187,6 +187,13 @@ function createWindowMotion({ window: win, platform = process.platform,
   }
 
   return { show, hide, setReducedMotion, dispose,
+    primeHiddenSurface() {
+      if (!alive() || win.isVisible() || transition || !writeOpacity(0)) return false;
+      // Windows does not reliably paint a new transparent HWND until its first show.
+      // Initialize its compositor without exposing content or taking keyboard focus.
+      try { win.showInactive(); return true; }
+      catch { win.hide(); writeOpacity(1); return false; }
+    },
     hideImmediately() { cancelTransition(); if (alive()) { win.hide(); writeOpacity(1); } },
     isBubbleEntering: () => Boolean(transition?.entrance),
     finishEntrance: () => {

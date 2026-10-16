@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Fixed
+
+- Keep dictation text stable when the caret-origin bubble finishes. Remove the competing status-panel entrance animation that restarted at 35% opacity after the bubble expanded on Windows and macOS.
+- Initialize a new Windows transparent dictation surface invisibly without taking focus, so its first bubble frame can paint before reveal instead of reaching the preparation timeout. Cancellation during page loading preserves the close callback; failed loads leave no invisible overlay.
+
+### Validation
+
+- Actual Windows desktop recordings cover cold and repeated invocation, Home transitions and cancellation. Native Electron regressions cover first-frame preparation, settled text opacity, transparency, rounded corners, hidden-recorder spectrum, complete paste and cancellation. Recordings and frame captures stay in ignored local diagnostic output; macOS native appearance still requires a hardware check.
+
 ## v0.4.24 - 2026-10-14
 
 ### Added

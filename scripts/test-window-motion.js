@@ -20,6 +20,7 @@ function fixture(platform = "win32", { unsupportedOpacity = false, prepareBubble
     isDestroyed() { return this.destroyed; },
     isVisible() { return this.visible; },
     show() { calls.push("show"); this.visible = true; },
+    showInactive() { calls.push("showInactive"); this.visible = true; },
     hide() { calls.push("hide"); this.visible = false; },
     setOpacity(value) { if (unsupportedOpacity) throw new Error("unsupported"); this.opacity = value; }
   };
@@ -40,6 +41,22 @@ function fixture(platform = "win32", { unsupportedOpacity = false, prepareBubble
 }
 
 async function run() {
+  {
+    const f = fixture("win32");
+    assert.equal(f.motion.primeHiddenSurface(), true);
+    assert.equal(f.win.opacity, 0, "initial compositor activation must remain invisible");
+    assert.deepEqual(f.calls, ["showInactive"], "warming does not take keyboard focus");
+    assert.equal(f.motion.primeHiddenSurface(), false, "do not warm an already shown surface");
+    f.motion.setReducedMotion(false);
+    const hidden = f.motion.hide();
+    f.advance(32);
+    assert.equal(f.win.opacity, 0, "cancelling during warmup never reveals an unprepared surface");
+    f.advance(200);
+    assert.equal(await hidden, true);
+    assert.equal(f.win.visible, false);
+    assert.equal(f.win.opacity, 1);
+    console.log("PASS invisible native compositor initialization and cancellation without focus or a flash");
+  }
   for (const platform of ["win32", "darwin"]) {
     const f = fixture(platform);
     f.motion.show();
@@ -251,9 +268,14 @@ async function verifyBrowser() {
           topbarTransform: getComputedStyle(document.querySelector(".topbar")).transform,
           focused: document.activeElement?.id };
       }, { mode, selector });
-      assert.equal(state.name, mode === "recording" ? "recording-enter" : "workspace-enter");
-      assert.ok(state.duration <= 180);
-      assert.ok(state.opacity > 0 && state.opacity < 1);
+      if (mode === "recording") {
+        assert.equal(state.name, undefined, "dictation content must not fade separately from its bubble");
+        assert.equal(state.opacity, 1);
+      } else {
+        assert.equal(state.name, "workspace-enter");
+        assert.ok(state.duration <= 180);
+        assert.ok(state.opacity > 0 && state.opacity < 1);
+      }
       assert.equal(state.topbarTransform, "none", "content animation must not move native drag regions");
       await page.screenshot({ path: path.join(output, `${mode}-${width}-midpoint.png`) });
       await page.evaluate(() => {
@@ -335,6 +357,11 @@ async function verifyBubble(browser, output) {
       await page.evaluate(() => window.dictationMotion.cancel());
       assert.equal(await page.locator(".shell").evaluate(node => getComputedStyle(node).transform), "none");
       assert.equal(await page.locator(".shell").evaluate(node => getComputedStyle(node).borderRadius), "18px");
+      assert.deepEqual(await page.locator(".status-panel").evaluate(node => ({
+        opacity: getComputedStyle(node).opacity, animation: getComputedStyle(node).animationName,
+        transform: getComputedStyle(node).transform
+      })), { opacity: "1", animation: "none", transform: "none" },
+      "finishing or cancelling a bubble must not dim and move the text for a second entrance");
     }
   }
   await page.evaluate(() => window.bubbleFixture({ origin: { x: 12, y: 0 }, duration: 240 }));

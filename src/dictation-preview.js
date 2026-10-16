@@ -9,7 +9,7 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
   if (platform !== "win32") return null;
   const page = path.join(__dirname, "renderer/dictation-preview.html"), url = pathToFileURL(page).href;
   let win = null, motion = null, ready = null, reducedMotion = true;
-  let enabled = false, disposed = false, failed = false, revision = 0;
+  let enabled = false, disposed = false, failed = false, warming = false, revision = 0;
   let state = { kind: "recording", title: "正在录音", detail: "", preview: false };
   const alive = () => !disposed && win && !win.isDestroyed();
   const sender = event => alive() && event.sender === win.webContents && event.sender.getURL() === url
@@ -24,6 +24,7 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
         contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } });
     motion = createWindowMotion({ window: win, prepareBubble: value => prepareDictationBubble(win, value) });
     motion.setReducedMotion(reducedMotion);
+    warming = motion.primeHiddenSurface();
     ready = win.loadFile(page).then(() => true).catch(() => false);
     // Per-pixel alpha is the only backdrop on Windows. Native Acrylic/accent
     // paints a rectangle outside the CSS radius and can turn opaque on blur.
@@ -64,7 +65,12 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
       const current = ++revision;
       if (!enabled) state = { kind: "recording", title: "正在录音", detail: "", preview: false };
       enabled = true;
-      if (!await ready || !alive() || failed || !enabled || revision !== current) return false;
+      const loaded = await ready;
+      if (!loaded || !alive() || failed || !enabled || revision !== current) {
+        if (!loaded && alive() && warming) { motion.hideImmediately(); warming = false; }
+        return false;
+      }
+      if (warming) { motion.hideImmediately(); warming = false; }
       if (reposition) motion.hideImmediately();
       if (reposition || !win.isVisible()) win.setBounds(mainWindow.getBounds(), false);
       publish(); mainWindow.hide();
@@ -72,12 +78,12 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
       return shown && alive() && enabled && revision === current;
     },
     hide(onHidden) {
-      enabled = false; revision++;
+      enabled = false; warming = false; revision++;
       return motion ? motion.hide(onHidden) : Promise.resolve(false);
     },
     getWindow: () => alive() ? win : null,
     isActive: () => alive() && enabled,
-    isVisible: () => alive() && enabled && win.isVisible(),
+    isVisible: () => alive() && enabled && !warming && win.isVisible(),
     setReducedMotion: value => { reducedMotion = value; motion?.setReducedMotion(value); },
     dispose() {
       if (disposed) return;
