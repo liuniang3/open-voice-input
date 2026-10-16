@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Avoid raising a hidden main window during dictation preparation. Real Codex-composer desktop recordings revealed that Windows `moveTop()` briefly exposed the previous Home/onboarding page before the recording bubble appeared.
 - Keep dictation text stable when the caret-origin bubble finishes. Remove the competing status-panel entrance animation that restarted at 35% opacity after the bubble expanded on Windows and macOS.
 - Initialize a new Windows transparent dictation surface invisibly without taking focus, so its first bubble frame can paint before reveal instead of reaching the preparation timeout. Cancellation during page loading preserves the close callback; failed loads leave no invisible overlay.
 

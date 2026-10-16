@@ -1372,7 +1372,9 @@ function prepareWindowForDisplay(win = mainWindow, mode = windowMode) {
   win.setFocusable(true);
   setWindowAlwaysOnTop(win, mode === "meeting" ? liveWindowFlags.alwaysOnTop : !["settings", "file", "home"].includes(mode));
   if (!win.isVisible() && !(win === mainWindow && mode === "meeting" && liveWindowRestore)) win.center();
-  win.moveTop();
+  // On Windows, moveTop can reveal a hidden HWND with its previous page still painted.
+  // Hidden windows are raised by focusWindow only after their display is ready.
+  if (win.isVisible()) win.moveTop();
 }
 
 function hideWindow(win = mainWindow, { resetMode = true } = {}) {

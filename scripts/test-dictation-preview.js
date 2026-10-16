@@ -167,6 +167,12 @@ async function verifyNative() {
     await page.evaluate(() => window.mimoInput.setReducedMotion(false));
     await application.evaluate(() => {
       globalThis.fixtureColdPreparation = [];
+      globalThis.fixtureHiddenMainRaises = [];
+      const main = globalThis.fixtureApp.main(), moveTop = main.moveTop.bind(main);
+      main.moveTop = () => {
+        if (!main.isVisible()) globalThis.fixtureHiddenMainRaises.push(globalThis.fixtureApp.state().windowMode);
+        return moveTop();
+      };
       const preview = globalThis.fixtureApp.preview(), originalShow = preview.show.bind(preview);
       preview.show = (...args) => {
         const cold = !preview.getWindow();
@@ -203,6 +209,8 @@ async function verifyNative() {
     assert.equal(coldFrames.length, 1);
     assert.equal(coldFrames[0].ready, true, "first invocation prepares the bubble instead of timing out before its first native paint");
     assert.ok(coldFrames[0].width <= 13, "first invocation is prepared as a small bubble");
+    assert.deepEqual(await application.evaluate(() => globalThis.fixtureHiddenMainRaises), [],
+      "preparing the cold popup never raises the hidden main window with its stale Home pixels");
     assert.deepEqual(await popup.locator(".status-panel").evaluate(node => ({
       opacity: getComputedStyle(node).opacity, animation: getComputedStyle(node).animationName
     })), { opacity: "1", animation: "none" }, "completed bubble never restarts the status fade");
