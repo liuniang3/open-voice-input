@@ -297,6 +297,7 @@ test("settings UI separates ASR and language connections with model-only vendor 
   assert.match(js, /testProviderConnection\(\{ provider, scope: "asr" \}\)/);
   assert.doesNotMatch(saveJs, /asrBaseUrl:\s*|asrApiKey:\s*|meetingQwenBaseUrl:\s*|meetingQwenApiKey:\s*/);
   assert.match(html, /id="meetingHotkeyInput"/);
+  assert.match(html, /id="historyHotkeyInput"/);
   assert.match(html, /id="meetingBtn"[\s\S]*会议实时转录/);
   assert.doesNotMatch(html, /id="liveHistoryTab"|id="liveMeetingTab"/);
   assert.match(html, /id="legacyMeetingHistoryPanel"[^>]*inert[^>]*hidden/);
@@ -395,7 +396,7 @@ function mainHarness(platform = "darwin", extraStubs = {}) {
   const mac = { requestMicrophoneAccess: async () => controls.permissions.microphone === "granted",
     requestScreenAccess: async () => { controls.screenRequested = true; controls.permissions.screen = "granted"; return true; },
     getPermissionStatus: () => controls.permissions, openPermissionSettings: async () => {},
-    getForegroundApp: () => "123", pasteToApp: async (pid) => { controls.pasted = pid; } };
+    getForegroundApp: () => "123", pasteToApp: async (pid) => { controls.pasted = pid; }, typeTextToApp: async (pid, text) => { controls.typed = { pid, text }; } };
   const stubs = {
     electron, "node:os": { platform: () => platform },
     "node:child_process": new Proxy({}, { get: () => () => { throw new Error("native processes forbidden in test"); } }),
@@ -460,7 +461,7 @@ async function integrationTests() {
     assert.equal(placed.run("targetWindowHandle"), "123");
     assert.deepEqual(placed.controls.bounds, moved, "manual popup placement survives repeated invocation");
   }
-  console.log("ok - native input context precedes focus, anchored fixed geometry and paste target survives reentry");
+  console.log("ok - native input context precedes focus, anchored fixed geometry and input target survives reentry");
   for (const platform of ["win32", "darwin"]) {
     for (const destination of ["compact", "settings"]) {
       const pending = mainHarness(platform);
@@ -590,8 +591,9 @@ async function integrationTests() {
   assert.equal((await mac.invoke("meeting:live:start")).error.code, "screen_permission");
   assert.equal((await mac.invoke("meeting:live:start", { captureMode: "microphone" })).ok, true);
   mac.run("targetWindowHandle = getForegroundWindowHandle()");
-  await mac.run("sendPasteKeystroke()");
-  assert.equal(mac.controls.pasted, "123");
+  await mac.run("sendTextKeystrokes(\"测试文本\")");
+  assert.deepEqual(mac.controls.typed, { pid: "123", text: "测试文本" });
+  assert.equal(mac.controls.pasted, undefined, "voice injection no longer uses clipboard paste");
   const hotkey = mainHarness();
   hotkey.run("runHotkeyAction('meeting'); runHotkeyAction('meeting')");
   await new Promise(setImmediate);

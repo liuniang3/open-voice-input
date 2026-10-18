@@ -193,6 +193,7 @@ const RESIZABLE_WINDOW_MODES = new Set(["settings", "result", "meeting", "file",
 const DEFAULT_SETTINGS = {
   hotkey: "CommandOrControl+Alt+M",
   meetingHotkey: "CommandOrControl+Alt+Shift+M",
+  historyHotkey: "",
   model: "mimo-v2.5",
   apiKey: "",
   baseUrl: "",
@@ -901,12 +902,17 @@ async function saveSettings(nextSettings) {
   const next = ensureTextSuppliers(ensureConnectionProfiles({ ...settings, ...nextSettings,
     asrConnections: mergeAsrConnections(settings.asrConnections, nextSettings?.asrConnections),
     meetingRealtimeDestination: settings.meetingRealtimeDestination }));
-  const shortCheck = validateHotkey(next.hotkey, { otherHotkeys: [next.meetingHotkey] });
+  const shortCheck = validateHotkey(next.hotkey, { otherHotkeys: [next.meetingHotkey, next.historyHotkey] });
   if (!shortCheck.ok) throw new Error(`短语音快捷键：${shortCheck.message}`);
-  const meetingCheck = validateHotkey(next.meetingHotkey, { otherHotkeys: [next.hotkey] });
+  const meetingCheck = validateHotkey(next.meetingHotkey, { otherHotkeys: [next.hotkey, next.historyHotkey] });
   if (!meetingCheck.ok) throw new Error(`实时会议快捷键：${meetingCheck.message}`);
+  const historyCheck = next.historyHotkey?.trim()
+    ? validateHotkey(next.historyHotkey, { otherHotkeys: [next.hotkey, next.meetingHotkey] })
+    : { ok: true, accelerator: "" };
+  if (!historyCheck.ok) throw new Error(`识别历史快捷键：${historyCheck.message}`);
   next.hotkey = shortCheck.accelerator;
   next.meetingHotkey = meetingCheck.accelerator;
+  next.historyHotkey = historyCheck.accelerator;
   settings = next;
   settings.transcriptionMode = normalizeTranscriptionMode(settings.transcriptionMode);
   settings.asrMode = normalizeAsrMode(settings.asrMode);
@@ -918,11 +924,13 @@ async function saveSettings(nextSettings) {
 }
 
 async function checkHotkeyAvailability(payload = {}) {
-  const kind = payload.kind === "meeting" ? "meeting" : "short";
-  const field = kind === "meeting" ? "meetingHotkey" : "hotkey";
-  const otherField = kind === "meeting" ? "hotkey" : "meetingHotkey";
+  const kind = ["meeting", "history"].includes(payload.kind) ? payload.kind : "short";
+  if (kind === "history" && !String(payload.accelerator || "").trim()) return { ok: true, accelerator: "", message: "未设置" };
+  const field = kind === "meeting" ? "meetingHotkey" : kind === "history" ? "historyHotkey" : "hotkey";
+  const otherFields = kind === "short" ? [settings.meetingHotkey, settings.historyHotkey]
+    : kind === "meeting" ? [settings.hotkey, settings.historyHotkey] : [settings.hotkey, settings.meetingHotkey];
   const staticCheck = validateHotkey(payload.accelerator, {
-    otherHotkeys: [settings[otherField]]
+    otherHotkeys: otherFields
   });
   if (!staticCheck.ok) return staticCheck;
 
@@ -938,7 +946,7 @@ async function checkHotkeyAvailability(payload = {}) {
     if (registered) globalShortcut.unregister(staticCheck.accelerator);
   }
   return validateHotkey(staticCheck.accelerator, {
-    otherHotkeys: [settings[otherField]],
+    otherHotkeys: otherFields,
     registrationFailed: !registered
   });
 }
@@ -1479,9 +1487,11 @@ function configureUpdateSchedule() {
 function hotkeyCandidates() {
   const shortHotkey = normalizeAccelerator(settings.hotkey?.trim() || DEFAULT_SETTINGS.hotkey, os.platform()) || DEFAULT_SETTINGS.hotkey;
   const meetingHotkey = normalizeAccelerator(settings.meetingHotkey?.trim() || DEFAULT_SETTINGS.meetingHotkey, os.platform()) || DEFAULT_SETTINGS.meetingHotkey;
+  const historyHotkey = normalizeAccelerator(settings.historyHotkey?.trim() || "", os.platform());
   const list = [];
   if (shortHotkey) list.push({ accelerator: shortHotkey, action: "short" });
   if (meetingHotkey && meetingHotkey !== shortHotkey) list.push({ accelerator: meetingHotkey, action: "meeting" });
+  if (historyHotkey && !list.some(item => item.accelerator === historyHotkey)) list.push({ accelerator: historyHotkey, action: "history" });
   return list;
 }
 
@@ -1698,6 +1708,10 @@ function runHotkeyAction(action) {
     showAndStartLiveMeeting();
     return;
   }
+  if (action === "history") {
+    showSettings("history");
+    return;
+  }
   if (windowMode === "settings") {
     logEvent("hotkey: ignored while editing settings", action || "short");
     return;
@@ -1892,14 +1906,12 @@ function createTray() {
   tray = new Tray(image);
   tray.setToolTip(APP_DISPLAY_NAME);
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "主页", click: showWindowOnly },
     { label: "设置", click: showSettings },
+    { label: "识别输入历史", click: () => showSettings("history") },
     { label: "检查更新", click: showUpdateSettings },
     { label: "文件转写", click: showFileTranscriptionWorkspace },
     { label: "开始实时会议转写", click: showAndStartLiveMeeting },
-    { label: "开始录音", click: showAndStart },
     { label: "重试上一次转写", click: retryLastVoiceRequest },
-    { label: "隐藏", click: () => hideWindow() },
     { type: "separator" },
     { label: "退出", click: () => app.quit() }
   ]));
@@ -2028,37 +2040,14 @@ function stopRealtimeAsr() {
   return closing;
 }
 
-function sendPasteKeystroke() {
-  if (os.platform() === "darwin") return getMacUtilities().pasteToApp(targetWindowHandle);
+function sendTextKeystrokes(text) {
+  if (os.platform() === "darwin") return getMacUtilities().typeTextToApp(targetWindowHandle, text);
   if (os.platform() !== "win32") return Promise.reject(liveError("permission_unavailable"));
-  const escapedHandle = String(targetWindowHandle || "").replace(/'/g, "''");
-  const script = `
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public static class Win32 {
-  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-}
-"@
-$handle = '${escapedHandle}'
-if ($handle) {
-  [Win32]::SetForegroundWindow([IntPtr]::new([Int64]$handle)) | Out-Null
-  Start-Sleep -Milliseconds 180
-}
-[System.Windows.Forms.SendKeys]::SendWait('^v')
-`;
-  return new Promise((resolve, reject) => {
-    execFile("powershell.exe", ["-NoProfile", "-STA", "-Command", script], { windowsHide: true }, (error) => {
-      if (error) reject(error);
-      else resolve();
-    });
-  });
+  return require("./platform/windows-text-input").typeTextToWindow(targetWindowHandle, text);
 }
 
 async function injectText(text) {
-  clipboard.writeText(text);
-  // Fade and focus-settling run together, never adding animation time to paste.
+  // Fade and focus-settling run together, never adding animation time to direct input.
   await Promise.all([hideWindow(), new Promise((resolve) => setTimeout(resolve, 260))]);
   try {
     const mac = getMacUtilities();
@@ -2066,7 +2055,7 @@ async function injectText(text) {
       const access = mac.getPermissionStatus().accessibility;
       if (access !== true && access !== "granted") throw liveError("accessibility_permission");
     }
-    await sendPasteKeystroke();
+    await sendTextKeystrokes(text);
     return { ok: true };
   } catch (error) {
     if (os.platform() === "darwin") await showCaptureError(liveError("accessibility_permission")).catch(() => {});
@@ -2265,7 +2254,7 @@ ipcMain.handle("provider:list-models", async (event, payload = {}) => {
 ipcMain.handle("input:inject", async (event, text, metadata) => {
   if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };
   const result = await injectText(String(text || ""));
-  await recordVoiceUsage(String(text || ""), metadata);
+  if (result.ok) await recordVoiceUsage(String(text || ""), metadata);
   return result;
 });
 ipcMain.handle("clipboard:write-text", async (event, text, metadata) => {

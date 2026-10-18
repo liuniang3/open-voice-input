@@ -93,6 +93,9 @@ const hotkeyStatus = document.getElementById("hotkeyStatus");
 const meetingHotkeyInput = document.getElementById("meetingHotkeyInput");
 const meetingHotkeyHint = document.getElementById("meetingHotkeyHint");
 const meetingHotkeyStatus = document.getElementById("meetingHotkeyStatus");
+const historyHotkeyInput = document.getElementById("historyHotkeyInput");
+const historyHotkeyHint = document.getElementById("historyHotkeyHint");
+const historyHotkeyStatus = document.getElementById("historyHotkeyStatus");
 const stableModeBtn = document.getElementById("stableModeBtn");
 const fastModeBtn = document.getElementById("fastModeBtn");
 const testConnectionBtn = document.getElementById("testConnectionBtn");
@@ -2079,15 +2082,16 @@ async function copyResult({ silent = false } = {}) {
 async function sendResult({ hideAfterSend = false } = {}) {
   const text = resultText.value.trim();
   if (!text) return;
-  setStatus("transcribing", "正在写入", "正在粘贴到上一个焦点应用。");
+  setStatus("transcribing", "正在写入", "正在直接输入到上一个焦点应用。");
   try {
     const response = await window.mimoInput.injectText(text, { requestId: voiceUsageRequestId });
-    if (response?.ok === false) throw new Error("结果已复制，但无法粘贴；请检查辅助功能权限或焦点应用。");
+    if (response?.ok === false) throw new Error("直接输入失败。文本保留在结果窗口，请检查目标输入框、应用权限，并确认修饰键已松开；如有部分内容已输入，请勿重复提交全文。");
     setStatus("ready", "已发送", "按快捷键开始下一次录音。");
     if (hideAfterSend) {
       await window.mimoInput.hide();
     }
   } catch (error) {
+    await window.mimoInput.openResultWindow().catch(() => {});
     setStatus("error", "写入失败", error.message || String(error));
   } finally {
     setButtons("ready");
@@ -2253,8 +2257,16 @@ function handleHotkeyCaptureKeydown(event, kind) {
   }
 
   if (event.key === "Backspace" || event.key === "Delete") {
+    if (kind !== "history") {
+      capture.statusElement.textContent = "快捷键不能为空，请按新的组合键。";
+      return;
+    }
+    const originalValue = capture.originalValue;
+    const statusElement = capture.statusElement;
     capture.input.value = "";
-    capture.statusElement.textContent = "快捷键不能为空，请按新的组合键。";
+    endHotkeyCapture({ resume: false });
+    capture.input.blur();
+    saveHotkeySetting(kind, "", originalValue, statusElement);
     return;
   }
 
@@ -2275,18 +2287,24 @@ async function saveHotkeySetting(kind, hotkey, originalValue, statusElement) {
     statusElement.textContent = "正在检查是否冲突…";
     const check = await window.mimoInput.checkHotkey({ kind, accelerator: hotkey });
     if (!check?.ok) {
-      const input = kind === "meeting" ? meetingHotkeyInput : hotkeyInput;
+      const input = kind === "meeting" ? meetingHotkeyInput : kind === "history" ? historyHotkeyInput : hotkeyInput;
       input.value = originalValue;
       statusElement.textContent = check?.message || "该快捷键不可用。";
       setStatus("warning", "快捷键不可用", statusElement.textContent);
       return;
     }
     const normalized = check.accelerator || hotkey;
-    const settingKey = kind === "meeting" ? "meetingHotkey" : "hotkey";
+    const settingKey = kind === "meeting" ? "meetingHotkey" : kind === "history" ? "historyHotkey" : "hotkey";
     appSettings = await window.mimoInput.saveSettings({ [settingKey]: normalized });
     if (kind === "meeting") meetingHotkeyInput.value = normalized;
+    else if (kind === "history") historyHotkeyInput.value = normalized;
     else hotkeyInput.value = normalized;
     await window.mimoInput.endHotkeyCapture();
+    if (!normalized && kind === "history") {
+      statusElement.textContent = "未设置 · 可从托盘菜单打开";
+      setStatus("ready", "历史快捷键已关闭", "仍可从托盘菜单打开识别输入历史。");
+      return;
+    }
     const status = await refreshStatus();
     if (status.registeredHotkeys?.includes(normalized)) {
       statusElement.textContent = `可用 · ${normalized}`;
@@ -2310,8 +2328,10 @@ function fillSettingsForm() {
   loadCleanerProfileDraft(appSettings.cleanerModel || appSettings.model || "mimo-v2.5");
   hotkeyInput.value = appSettings.hotkey || "CommandOrControl+Alt+M";
   meetingHotkeyInput.value = appSettings.meetingHotkey || "CommandOrControl+Alt+Shift+M";
+  historyHotkeyInput.value = appSettings.historyHotkey || "";
   hotkeyStatus.textContent = "";
   meetingHotkeyStatus.textContent = "";
+  historyHotkeyStatus.textContent = "";
   setTranscriptionMode(normalizeTranscriptionMode(appSettings.transcriptionMode), { silent: true });
   const meetingLiveModel = isSupportedMeetingLiveModel(appSettings.meetingRealtimeModel)
     ? appSettings.meetingRealtimeModel
@@ -2590,14 +2610,20 @@ async function saveAllSettings() {
   cacheMeetingFunProfileDraft(meetingFunModel);
   const voiceHotkey = hotkeyInput.value.trim() || "CommandOrControl+Alt+M";
   const longHotkey = meetingHotkeyInput.value.trim() || "CommandOrControl+Alt+Shift+M";
-  const [voiceCheck, meetingCheck] = await Promise.all([
+  const historyHotkey = historyHotkeyInput.value.trim();
+  const [voiceCheck, meetingCheck, historyCheck] = await Promise.all([
     window.mimoInput.checkHotkey({ kind: "short", accelerator: voiceHotkey }),
-    window.mimoInput.checkHotkey({ kind: "meeting", accelerator: longHotkey })
+    window.mimoInput.checkHotkey({ kind: "meeting", accelerator: longHotkey }),
+    historyHotkey ? window.mimoInput.checkHotkey({ kind: "history", accelerator: historyHotkey }) : { ok: true, accelerator: "" }
   ]);
   if (!voiceCheck?.ok) throw new Error(`短语音快捷键：${voiceCheck?.message || "不可用"}`);
   if (!meetingCheck?.ok) throw new Error(`长内容快捷键：${meetingCheck?.message || "不可用"}`);
+  if (!historyCheck?.ok) throw new Error(`识别历史快捷键：${historyCheck?.message || "不可用"}`);
   const nextSettings = {
     asrConnections: collectAsrConnections(),
+    hotkey: voiceCheck.accelerator || voiceHotkey,
+    meetingHotkey: meetingCheck.accelerator || longHotkey,
+    historyHotkey: historyCheck.accelerator || historyHotkey,
     openaiModelCatalog: openAiCatalogModels(),
     openaiModelCapabilities: appSettings.openaiModelCapabilities || {},
     openaiModelCatalogUpdatedAt: appSettings.openaiModelCatalogUpdatedAt || "",
@@ -2615,8 +2641,6 @@ async function saveAllSettings() {
     cleanerProviderFamily: appSettings.cleanerProviderFamily || cleanerProviderSelect.value,
     cleanerModel: appSettings.cleanerModel || "",
     cleanerProfiles: appSettings.cleanerProfiles || {},
-    hotkey: voiceCheck.accelerator || voiceHotkey,
-    meetingHotkey: meetingCheck.accelerator || longHotkey,
     microphoneDeviceId: microphoneSelect.value,
     transcriptionMode: normalizeTranscriptionMode(appSettings.transcriptionMode),
     meetingMicrophoneDeviceId:
@@ -2956,6 +2980,10 @@ meetingHotkeyInput.addEventListener("focus", () => beginHotkeyCapture("meeting",
 meetingHotkeyInput.addEventListener("click", () => beginHotkeyCapture("meeting", meetingHotkeyInput, meetingHotkeyHint, meetingHotkeyStatus));
 meetingHotkeyInput.addEventListener("blur", () => endHotkeyCapture());
 meetingHotkeyInput.addEventListener("beforeinput", (event) => event.preventDefault());
+historyHotkeyInput.addEventListener("focus", () => beginHotkeyCapture("history", historyHotkeyInput, historyHotkeyHint, historyHotkeyStatus));
+historyHotkeyInput.addEventListener("click", () => beginHotkeyCapture("history", historyHotkeyInput, historyHotkeyHint, historyHotkeyStatus));
+historyHotkeyInput.addEventListener("blur", () => endHotkeyCapture());
+historyHotkeyInput.addEventListener("beforeinput", (event) => event.preventDefault());
 
 window.addEventListener("keydown", (event) => {
   if (textSupplierManager?.isOpen()) return;

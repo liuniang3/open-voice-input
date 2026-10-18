@@ -42,6 +42,27 @@ function createMacOSUtilities({ electron, execFileImpl = execFile, execFileSyncI
     });
   }
 
+  async function typeTextToApp(pid, text) {
+    supported();
+    if (!/^[1-9]\d{0,9}$/.test(String(pid)) || Number(pid) > 2147483647) {
+      throw Object.assign(new Error("Invalid target application PID"), { code: "invalid_pid" });
+    }
+    if (typeof text !== "string" || text.length > 250000) {
+      throw Object.assign(new Error("Invalid direct input text"), { code: "invalid_text" });
+    }
+    if (!api().systemPreferences.isTrustedAccessibilityClient(false)) {
+      throw Object.assign(new Error("Allow Accessibility access for Open Voice Input in System Settings"), { code: "accessibility_denied" });
+    }
+    return new Promise((resolve, reject) => {
+      const child = execFileImpl(binary(), ["--type-text", String(pid)], {
+        timeout: 120000, maxBuffer: 4096, windowsHide: true
+      }, error => error
+        ? reject(Object.assign(new Error("Could not type into the target application; check Accessibility access"), { code: "type_failed" }))
+        : resolve(true));
+      child.stdin?.end(text, "utf8");
+    });
+  }
+
   async function requestMicrophoneAccess() {
     supported();
     return api().systemPreferences.askForMediaAccess("microphone");
@@ -78,7 +99,7 @@ function createMacOSUtilities({ electron, execFileImpl = execFile, execFileSyncI
     if (!Object.hasOwn(panes, kind)) throw Object.assign(new Error("Unknown permission kind"), { code: "invalid_permission" });
     await api().shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${panes[kind]}`);
   }
-  return { getForegroundApp, pasteToApp, requestMicrophoneAccess, requestScreenAccess, getPermissionStatus, openPermissionSettings };
+  return { getForegroundApp, pasteToApp, typeTextToApp, requestMicrophoneAccess, requestScreenAccess, getPermissionStatus, openPermissionSettings };
 }
 
 module.exports = { ...createMacOSUtilities(), createMacOSUtilities };

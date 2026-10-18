@@ -6,13 +6,20 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Fix Windows direct dictation input: use the complete native INPUT union (40 bytes on x64), verify foreground ownership and stop on native failure. Text travels through UTF-8 stdin, newline input uses Shift+Enter, and failures reopen the result instead of claiming a clipboard copy or recording successful usage. Real textarea and rich-editor checks cover Chinese, emoji, long text and unchanged clipboard formats.
+- Prevent the short voice input path from writing recognition text to the clipboard; Windows uses Unicode SendInput and macOS uses the native accessibility helper.
 - Avoid raising a hidden main window during dictation preparation. Real Codex-composer desktop recordings revealed that Windows `moveTop()` briefly exposed the previous Home/onboarding page before the recording bubble appeared.
 - Keep dictation text stable when the caret-origin bubble finishes. Remove the competing status-panel entrance animation that restarted at 35% opacity after the bubble expanded on Windows and macOS.
 - Initialize a new Windows transparent dictation surface invisibly without taking focus, so its first bubble frame can paint before reveal instead of reaching the preparation timeout. Cancellation during page loading preserves the close callback; failed loads leave no invisible overlay.
 
+### Changed
+
+- Add a tray entry and optional shortcut for opening voice recognition history. Remove the tray context-menu entries for Home, Hide and Start Recording; the existing tray double-click behavior remains unchanged.
+
 ### Validation
 
-- Actual Windows desktop recordings cover cold and repeated invocation, Home transitions and cancellation. Native Electron regressions cover first-frame preparation, settled text opacity, transparency, rounded corners, hidden-recorder spectrum, complete paste and cancellation. Recordings and frame captures stay in ignored local diagnostic output; macOS native appearance still requires a hardware check.
+
+- Actual Windows desktop recordings cover cold and repeated invocation, Home transitions and cancellation. Native Electron regressions cover first-frame preparation, settled text opacity, transparency, rounded corners, hidden-recorder spectrum, complete direct input and cancellation. Recordings and frame captures stay in ignored local diagnostic output; macOS native appearance still requires a hardware check.
 
 ## v0.4.24 - 2026-10-14
 

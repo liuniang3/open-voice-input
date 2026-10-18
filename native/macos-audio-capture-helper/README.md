@@ -57,7 +57,7 @@ exit on parent loss bounds framework hangs, leaving disk recovery authoritative.
 
 `--foreground-app` prints a numeric foreground PID without AppleScript/Automation.
 `--paste-to-app PID` requires Accessibility trust, activates/verifies the target,
-then posts Command+V. It never reads clipboard text. Electron owns clipboard and
+then posts Command+V. The `--type-text PID` command reads UTF-8 text from stdin and sends it as Unicode keyboard events without using the clipboard. Electron owns clipboard and
 permission settings. Both Electron and the helper include microphone usage text;
 TCC attribution for the final signed bundle must be validated on macOS.
 

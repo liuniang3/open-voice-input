@@ -76,18 +76,26 @@ async function run() {
     let opened = "";
     let foregroundArgs;
     let pasteArgs;
+    let typedArgs;
+    let typedText = "";
     const utilities = createMacOSUtilities({ platform: "darwin", helperPath: "/fixture/helper",
       electron: { systemPreferences: { getMediaAccessStatus: kind => kind === "screen" ? "denied" : "granted",
         isTrustedAccessibilityClient: () => trusted, askForMediaAccess: async kind => kind === "microphone" },
       shell: { openExternal: async url => { opened = url; } } },
       execFileSyncImpl: (file, args) => { foregroundArgs = args; return "1234\n"; },
-      execFileImpl: (file, args, options, callback) => { pasteArgs = args; callback(null, "", ""); } });
+execFileImpl: (file, args, options, callback) => {
+        if (args[0] === "--type-text") { typedArgs = args; callback(null, "", ""); return { stdin: { end: (value) => { typedText = value; } } }; }
+        pasteArgs = args; callback(null, "", "");
+      } });
     assert.equal(utilities.getForegroundApp(), "1234");
     assert.deepEqual(foregroundArgs, ["--foreground-app"]);
     assert.deepEqual(utilities.getPermissionStatus(), { microphone: "granted", screen: "denied", accessibility: "granted" });
     assert.equal(await utilities.requestMicrophoneAccess(), true);
     assert.equal(await utilities.pasteToApp("1234"), true);
-    assert.deepEqual(pasteArgs, ["--paste-to-app", "1234"]);
+assert.deepEqual(pasteArgs, ["--paste-to-app", "1234"]);
+    assert.equal(await utilities.typeTextToApp("1234", "中文输入"), true);
+    assert.deepEqual(typedArgs, ["--type-text", "1234"]);
+    assert.equal(typedText, "中文输入");
     await assert.rejects(utilities.pasteToApp("1;do shell script"), { code: "invalid_pid" });
     trusted = false;
     await assert.rejects(utilities.pasteToApp("1234"), { code: "accessibility_denied" });

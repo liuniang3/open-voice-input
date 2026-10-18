@@ -287,6 +287,20 @@ async function verifyRecordingIntegration(page) {
       assert.equal(result.hidden && result.ended && result.closed, true, "finish clears the spectrum and releases recording resources");
     }
   }
+  const failedInput = await page.evaluate(async () => {
+    window.mockCalls.length = 0;
+    window.mockApiOverrides.injectText = async () => ({ ok: false });
+    const retained = resultText.value;
+    await sendResult({ hideAfterSend: true });
+    delete window.mockApiOverrides.injectText;
+    return { retained: resultText.value === retained, title: statusTitle.textContent, detail: statusDetail.textContent,
+      calls: window.mockCalls.map(call => call.name) };
+  });
+  assert.equal(failedInput.retained, true);
+  assert.equal(failedInput.title, "写入失败");
+  assert.ok(failedInput.calls.includes("openResultWindow"));
+  assert.ok(!failedInput.calls.includes("copyText") && !failedInput.calls.includes("hide"));
+  assert.ok(!failedInput.detail.includes("已复制"));
   await page.evaluate(async () => { window.applyWindowMode("recording"); window.mockCalls.length = 0; await window.startRecording(); });
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !isRecording && document.getElementById("recordingSpectrum").hidden);

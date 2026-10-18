@@ -19,4 +19,6 @@ assert.match(showWindowSource, /sendWhenLoaded\(mainWindow, "open-home"\)/);
 assert.doesNotMatch(createTraySource, /tray\.on\("click",\s*showWindowOnly\)/,
   "a tray click must not flash the compact ready window before settings opens");
 
+assert.match(createTraySource, /label: "识别输入历史"/);
+for (const removed of ["主页", "隐藏", "开始录音"]) assert.doesNotMatch(createTraySource, new RegExp(`label: "${removed}"`));
 console.log("Tray double-click homepage behavior checks passed.");

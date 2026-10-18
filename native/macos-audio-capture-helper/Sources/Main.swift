@@ -230,6 +230,31 @@ struct Main {
             down.postToPid(pid); up.postToPid(pid)
             return
         }
+        if args.count == 3, args[1] == "--type-text" {
+            guard let pid = pid_t(args[2]), pid > 1, AXIsProcessTrusted(),
+                  let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated,
+                  app.activate(options: [.activateIgnoringOtherApps]) else { Darwin.exit(1) }
+            let deadline = Date().addingTimeInterval(1.5)
+            while NSWorkspace.shared.frontmostApplication?.processIdentifier != pid, Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            }
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                  let source = CGEventSource(stateID: .combinedSessionState) else { Darwin.exit(1) }
+            let data = FileHandle.standardInput.readDataToEndOfFile()
+            guard let text = String(data: data, encoding: .utf8) else { Darwin.exit(1) }
+            let units = Array(text.utf16)
+            for start in stride(from: 0, to: units.count, by: 20) {
+                let end = min(start + 20, units.count)
+                let chunk = Array(units[start..<end])
+                guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                      let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { Darwin.exit(1) }
+                chunk.withUnsafeBufferPointer { buffer in
+                    down.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
+                }
+                down.postToPid(pid); up.postToPid(pid)
+            }
+            return
+        }
         guard args.count == 1 else { Darwin.exit(64) }
         let app = HelperApp()
         app.start()
