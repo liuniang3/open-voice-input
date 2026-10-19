@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Allow dictation shortcuts while Home or Settings is open, minimized, or hidden to the tray. Suspend shortcuts only during key-combination capture; release that capture on blur, minimize, hide, tab navigation, or renderer failure. Serialize shortcut unregister/register work so a quick window switch cannot strand global shortcuts. Apply the same lifecycle to first-run shortcut setup.
 - Fix Windows direct dictation input: use the complete native INPUT union (40 bytes on x64), verify foreground ownership and stop on native failure. Text travels through UTF-8 stdin, newline input uses Shift+Enter, and failures reopen the result instead of claiming a clipboard copy or recording successful usage. Real textarea and rich-editor checks cover Chinese, emoji, long text and unchanged clipboard formats.
 - Prevent the short voice input path from writing recognition text to the clipboard; Windows uses Unicode SendInput and macOS uses the native accessibility helper.
 - Avoid raising a hidden main window during dictation preparation. Real Codex-composer desktop recordings revealed that Windows `moveTop()` briefly exposed the previous Home/onboarding page before the recording bubble appeared.
@@ -18,6 +19,7 @@ All notable changes to this project are documented here.
 
 ### Validation
 
+- Native Windows regression uses the actual registered system shortcut in nine Home/Settings visibility and shortcut-editor scenarios, checks the visible dictation popup and synthetic PCM capture, then cancels with Escape. Shared Windows/macOS routing and registration-order tests and browser focus/tab tests cover shortcut editing without paid API requests or user configuration.
 
 - Actual Windows desktop recordings cover cold and repeated invocation, Home transitions and cancellation. Native Electron regressions cover first-frame preparation, settled text opacity, transparency, rounded corners, hidden-recorder spectrum, complete direct input and cancellation. Recordings and frame captures stay in ignored local diagnostic output; macOS native appearance still requires a hardware check.
 

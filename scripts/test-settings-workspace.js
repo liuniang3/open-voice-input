@@ -69,6 +69,22 @@ async function verifyBrowser(page, output) {
   await page.waitForFunction(() => document.body.classList.contains("settings-open"));
   assert.equal(await page.locator('[data-settings-tab]').count(), 4);
   assert.equal(await page.locator("#settingsPanel").locator("#hotkeyInput").isVisible(), true);
+  const originalShortcut = await page.locator("#hotkeyInput").inputValue();
+  await page.evaluate(() => { window.mockCalls.length = 0; });
+  await page.locator("#hotkeyInput").click();
+  await page.waitForFunction(() => activeHotkeyCapture?.ready);
+  assert.equal(await page.evaluate(() => window.mockCalls.filter(call => call.name === "startHotkeyCapture").length), 1,
+    "focus plus click starts a single shortcut-edit session");
+  await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  await page.waitForFunction(() => activeHotkeyCapture === null);
+  assert.equal(await page.locator("#hotkeyInput").inputValue(), originalShortcut);
+  assert.equal(await page.locator("#hotkeyInput").evaluate(node => node.classList.contains("is-capturing")), false);
+  assert.ok(await page.evaluate(() => window.mockCalls.some(call => call.name === "endHotkeyCapture")));
+  await page.locator("#hotkeyInput").click();
+  await page.waitForFunction(() => activeHotkeyCapture?.ready);
+  await page.evaluate(() => setSettingsTab("cleaner"));
+  assert.equal(await page.evaluate(() => activeHotkeyCapture), null, "changing tabs releases a hidden shortcut editor");
+  await page.evaluate(() => setSettingsTab("asr"));
   assert.equal(await page.locator("#mimoApiKeyInput").isVisible(), true);
   assert.equal(await page.locator("#aliyunApiKeyInput").isVisible(), false);
   assert.deepEqual(await page.locator("#asrProviderSelect option").evaluateAll(options => options.map(item => item.value)), ["mimo", "qwen3-asr"]);

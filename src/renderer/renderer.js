@@ -1158,7 +1158,10 @@ function setSettingsTab(tabName, { requestId } = {}) {
   const available = new Set(settingsTabButtons.map((button) => button.dataset.settingsTab));
   const requestedTab = window.SettingsWorkspace.settingsTab(tabName);
   activeSettingsTab = available.has(requestedTab) ? requestedTab : "asr";
-  if (previousTab !== activeSettingsTab) document.getElementById("settingsFeedback").hidden = true;
+  if (previousTab !== activeSettingsTab) {
+    endHotkeyCapture({ restore: true });
+    document.getElementById("settingsFeedback").hidden = true;
+  }
   for (const button of settingsTabButtons) {
     const active = button.dataset.settingsTab === activeSettingsTab;
     button.classList.toggle("is-active", active);
@@ -2152,7 +2155,9 @@ async function saveMicrophoneSelection() {
 }
 
 function beginHotkeyCapture(kind, input, hint, statusElement) {
-  activeHotkeyCapture = {
+  if (activeHotkeyCapture?.input === input) return;
+  endHotkeyCapture({ restore: true, resume: false });
+  const capture = activeHotkeyCapture = {
     kind,
     input,
     hint,
@@ -2164,7 +2169,7 @@ function beginHotkeyCapture(kind, input, hint, statusElement) {
   hint.hidden = false;
   statusElement.textContent = "正在准备快捷键捕获…";
   window.mimoInput.startHotkeyCapture().then(() => {
-    if (activeHotkeyCapture?.input !== input) return;
+    if (activeHotkeyCapture !== capture) return;
     activeHotkeyCapture.ready = true;
     statusElement.textContent = "正在监听键盘组合…";
   }).catch((error) => {
@@ -2181,6 +2186,14 @@ function endHotkeyCapture({ restore = false, resume = true } = {}) {
   activeHotkeyCapture = null;
   if (resume) window.mimoInput.endHotkeyCapture().catch(() => {});
 }
+
+function leaveHotkeyCapture() {
+  const input = activeHotkeyCapture?.input;
+  endHotkeyCapture({ restore: true });
+  input?.blur();
+}
+window.addEventListener("blur", leaveHotkeyCapture);
+window.mimoInput.onWindowBlur?.(leaveHotkeyCapture);
 
 function formatHotkey(event) {
   const baseKey = normalizeHotkeyKey(event);

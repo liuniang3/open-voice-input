@@ -310,6 +310,7 @@ let registeredHotkeyMap = {}; // accelerator -> action
 let failedHotkeys = [];
 let hotkeyHelperProcess = null;
 let shortcutCaptureSuspended = false;
+let hotkeyRegistrationQueue = Promise.resolve();
 let windowMode = "compact";
 let usageStats;
 let voiceHistory;
@@ -1011,7 +1012,10 @@ function createWindow() {
   mainWindow.on("move", observeLiveGeometry);
   mainWindow.on("blur", () => {
     mainWindow.webContents.send("window-blur");
+    releaseShortcutCapture();
   });
+  mainWindow.on("minimize", releaseShortcutCapture);
+  mainWindow.on("hide", releaseShortcutCapture);
   mainWindow.on("close", (event) => {
     if (!meetingQuitCleanupStarted) {
       event.preventDefault();
@@ -1656,12 +1660,21 @@ async function unregisterConfiguredHotkeys() {
   registeredHotkeyMap = {};
 }
 
+function queueHotkeyRegistration(task) {
+  // A blur can resume shortcuts before the native helper has finished stopping.
+  const pending = hotkeyRegistrationQueue.then(task);
+  hotkeyRegistrationQueue = pending.catch(() => {});
+  return pending;
+}
+
 async function suspendConfiguredHotkeys() {
   if (shortcutCaptureSuspended) return { ok: true };
   shortcutCaptureSuspended = true;
-  await unregisterConfiguredHotkeys();
-  logEvent("hotkey: suspended for capture");
-  return { ok: true };
+  return queueHotkeyRegistration(async () => {
+    await unregisterConfiguredHotkeys();
+    logEvent("hotkey: suspended for capture");
+    return { ok: true };
+  });
 }
 
 async function resumeConfiguredHotkeys() {
@@ -1673,9 +1686,14 @@ async function resumeConfiguredHotkeys() {
 }
 
 async function registerHotkey() {
+  return queueHotkeyRegistration(registerConfiguredHotkeys);
+}
+
+async function registerConfiguredHotkeys() {
   logEvent("hotkey: register start", JSON.stringify(hotkeyCandidates()));
   await unregisterConfiguredHotkeys();
   failedHotkeys = [];
+  if (shortcutCaptureSuspended || meetingQuitCleanupStarted) return;
 
   const candidates = hotkeyCandidates();
   if (os.platform() === "win32") {
@@ -1702,6 +1720,11 @@ async function registerHotkey() {
   }
 }
 
+function releaseShortcutCapture() {
+  if (!shortcutCaptureSuspended || meetingQuitCleanupStarted) return;
+  void resumeConfiguredHotkeys().catch(() => logEvent("hotkey: resume failed"));
+}
+
 function runHotkeyAction(action) {
   if (shortcutCaptureSuspended || meetingQuitCleanupStarted) return;
   if (action === "meeting") {
@@ -1712,17 +1735,13 @@ function runHotkeyAction(action) {
     showSettings("history");
     return;
   }
-  if (windowMode === "settings") {
-    logEvent("hotkey: ignored while editing settings", action || "short");
-    return;
-  }
   // The global registration and focused-window fallback may receive one press.
   if (shortStartPending || captureOwner === "short") return;
   showAndStart();
 }
 
 function handleFocusedHotkey(event, input) {
-  if (shortcutCaptureSuspended || windowMode === "settings" || meetingQuitCleanupStarted) return;
+  if (shortcutCaptureSuspended || meetingQuitCleanupStarted) return;
   const candidate = hotkeyCandidates().find(item => matchesShortcutInput(item.accelerator, input, os.platform()));
   if (!candidate) return;
   event.preventDefault();
@@ -3513,6 +3532,7 @@ app.on("will-quit", () => {
 });
 
 app.on("render-process-gone", (_event, webContents, details) => {
+  if (webContents === mainWindow?.webContents) releaseShortcutCapture();
   if (webContents === mainWindow?.webContents && ["short", "setup"].includes(captureOwner)) {
     captureOwner = null;
     stopRealtimeAsr();

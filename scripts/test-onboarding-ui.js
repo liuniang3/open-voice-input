@@ -13,7 +13,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 function node(id, tag = "div") {
   return { id, tag, value: "", checked: false, children: [], firstChild: {}, dataset: {}, listeners: {},
     classList: { toggle() {}, add() {}, remove() {} },
-    setAttribute() {}, focus() {}, addEventListener(name, handler) { this.listeners[name] = handler; },
+    setAttribute() {}, focus() {}, blur() { this.listeners.blur?.(); }, addEventListener(name, handler) { this.listeners[name] = handler; },
     replaceChildren() { this.children = []; if (this.tag === "select") this.value = ""; },
     appendChild(item) { this.children.push(item); if (this.tag === "select" && this.children.length === 1) this.value = item.value; }
   };
@@ -27,8 +27,11 @@ function fixture(patch = {}) {
   $("onboardingPanel").querySelectorAll = selector => [...nodes.values()].filter(item => selector === "button"
     ? item.tag === "button" : ["input", "select"].includes(item.tag));
   let failSave = false;
+  const windowListeners = new Map();
+  const shortcutCalls = { starts: 0, ends: 0 };
   const api = { openHome: async () => ({ ok: true }), getSettings: async () => structuredClone(settings),
-    endHotkeyCapture: async () => {}, saveSettings: async patch => {
+    startHotkeyCapture: async () => { shortcutCalls.starts++; },
+    endHotkeyCapture: async () => { shortcutCalls.ends++; }, saveSettings: async patch => {
       if (failSave) throw new Error("fixture save unavailable");
       settings = ensureTextSuppliers(ensureConnectionProfiles({ ...settings, ...patch }));
       return structuredClone(settings);
@@ -36,8 +39,10 @@ function fixture(patch = {}) {
   };
   const ui = createOnboardingUi({ document: { getElementById: $, createElement: tag => node("", tag),
     querySelectorAll: () => [], querySelector: () => null, body: { classList: { add() {}, remove() {} } } },
+    addEventListener: (name, callback) => windowListeners.set(name, callback),
     mimoInput: api, TextSupplierUi, AsrProviderInfo, navigator: { mediaDevices: { enumerateDevices: async () => [] } } });
-  return { $, ui, settings: () => settings, failSave: value => { failSave = value; },
+  return { $, ui, shortcutCalls, blurWindow: () => windowListeners.get("blur")?.(),
+    settings: () => settings, failSave: value => { failSave = value; },
     async click(id) { $(id).listeners.click(); await tick(); },
     change(id, value) { $(id).value = value; $(id).listeners.change(); }
   };
@@ -128,6 +133,13 @@ async function cleanerStep(f) {
   assert.deepEqual(f.settings().textSupplierCatalogs[id].models, ["my-fast-model"]);
   assert.equal(f.settings().asrConnections.mimo.apiKey, "test-only-asr");
   console.log("PASS explicit supplier save, retry, no duplicate, unavailable catalogs and isolated manual model selection");
+  await f.$("guideHotkey").listeners.focus();
+  assert.equal(f.shortcutCalls.starts, 1);
+  const releases = f.shortcutCalls.ends;
+  f.blurWindow(); await tick();
+  assert.equal(f.shortcutCalls.ends, releases + 1, "leaving setup restores global shortcuts once");
+  f.blurWindow(); await tick();
+  assert.equal(f.shortcutCalls.ends, releases + 1, "repeated blur is idempotent");
 
   const mimo = fixture(); await cleanerStep(mimo);
   mimo.change("guideCleanerPreset", "mimo-plan");

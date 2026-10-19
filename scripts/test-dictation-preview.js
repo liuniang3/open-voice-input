@@ -414,7 +414,7 @@ if (process.versions.electron && process.argv.includes("--electron-app-fixture")
   const filename = path.join(root, "src/main.js"), mod = new Module(filename, module);
   mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename));
   mod._compile(fs.readFileSync(filename, "utf8") + `
-globalThis.fixtureApp = { showAndStart, focusMainWindow, showHome, settingsSave: saveSettings,
+globalThis.fixtureApp = { showAndStart, focusMainWindow, showHome, showSettings, settingsSave: saveSettings,
   inputContext: getDictationInputContext, placement: dictationBounds,
   focusSyntheticTarget: handle => new Promise((resolve, reject) => execFile("powershell.exe", ["-NoProfile", "-File",
     path.join(__dirname, "../scripts/fixtures/dictation-input-field.ps1"), "-ForegroundHandle", handle],

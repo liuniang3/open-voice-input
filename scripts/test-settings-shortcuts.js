@@ -442,6 +442,33 @@ function mainHarness(platform = "darwin", extraStubs = {}) {
 
 async function integrationTests() {
   for (const platform of ["win32", "darwin"]) {
+    const lifecycle = mainHarness(platform);
+    lifecycle.run(`
+      globalThis.registrationEvents = [];
+      globalThis.registrationGate = new Promise(resolve => { globalThis.finishUnregister = resolve; });
+      unregisterConfiguredHotkeys = async () => {
+        registrationEvents.push('unregister'); await registrationGate;
+        registeredHotkeys = []; registeredHotkeyMap = {};
+      };
+      startWindowsHotkeyHelper = async candidates => {
+        registrationEvents.push('register');
+        registeredHotkeys = candidates.map(item => item.accelerator);
+      };
+      globalShortcut.register = () => { registrationEvents.push('register'); return true; };
+      globalThis.pendingCapture = suspendConfiguredHotkeys();
+      releaseShortcutCapture();
+    `);
+    assert.equal(lifecycle.run("shortcutCaptureSuspended"), false, "leaving the editor releases the page-independent guard immediately");
+    lifecycle.run("finishUnregister()");
+    await lifecycle.run("pendingCapture");
+    await lifecycle.run("hotkeyRegistrationQueue");
+    assert.ok(lifecycle.run("registeredHotkeys.length") >= 2, "quick minimize/blur during suspension restores shortcuts");
+    const order = Array.from(lifecycle.run("registrationEvents"));
+    assert.equal(order.lastIndexOf("unregister"), 1, "unregistration and reregistration are serialized");
+    assert.ok(order.indexOf("register") > order.lastIndexOf("unregister"));
+  }
+  console.log("ok - Windows/macOS shortcut-edit blur/minimize recovery is ordered and cannot strand global registration");
+  for (const platform of ["win32", "darwin"]) {
     const placed = mainHarness(platform);
     placed.controls.contextGate = deferred();
     placed.run("showAndStart(); showAndStart()");
@@ -489,18 +516,23 @@ async function integrationTests() {
     assert.equal(fresh.asrProfiles[fresh.asrModel].mode, "realtime");
     const savedBatch = ensureConnectionProfiles({ ...structuredClone(defaults), asrMode: "batch" });
     assert.equal(savedBatch.asrMode, "batch", "explicit batch settings are not migrated to realtime");
-    focused.run("globalThis.focusedStarts = 0; showAndStart = () => { focusedStarts++; shortStartPending = true; }; windowMode = 'home';");
+    focused.run("globalThis.focusedStarts = 0; showAndStart = () => { focusedStarts++; shortStartPending = true; };");
     let prevented = 0;
     const event = { preventDefault() { prevented++; } };
     const input = { type: "keyDown", code: "KeyM", key: "m", alt: true, [platform === "darwin" ? "meta" : "control"]: true };
-    focused.run("handleFocusedHotkey")(event, input);
-    focused.run("runHotkeyAction('short')");
-    assert.equal(focused.run("focusedStarts"), 1, "focused fallback and global dispatch start only once");
-    assert.equal(prevented, 1);
-    for (const flags of ["windowMode = 'settings'", "windowMode = 'home'; shortcutCaptureSuspended = true", "shortcutCaptureSuspended = false; captureOwner = 'short'"]) {
+    let expected = 0;
+    for (const mode of ["home", "settings", "compact", "file", "result"]) {
+      focused.run(`windowMode = '${mode}'; shortStartPending = false;`);
+      focused.run("handleFocusedHotkey")(event, input);
+      focused.run("runHotkeyAction('short')");
+      assert.equal(focused.run("focusedStarts"), ++expected, `${mode}: focused/global dispatch starts once`);
+    }
+    const previous = focused.run("focusedStarts");
+    assert.equal(previous, 5, "every workspace allows dictation");
+    for (const flags of ["windowMode = 'settings'; shortcutCaptureSuspended = true", "windowMode = 'home'; shortcutCaptureSuspended = true", "shortcutCaptureSuspended = false; captureOwner = 'short'"]) {
       focused.run(`shortStartPending = false; ${flags};`);
       focused.run("handleFocusedHotkey")(event, input);
-      assert.equal(focused.run("focusedStarts"), 1, "capture and settings guards block duplicate starts");
+      assert.equal(focused.run("focusedStarts"), previous, "only actual shortcut capture or active recording blocks starts");
     }
   }
   for (const platform of ["win32", "darwin"]) {

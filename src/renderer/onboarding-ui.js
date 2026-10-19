@@ -265,6 +265,14 @@
       captureInput = null; captureReady = false;
       await api.endHotkeyCapture?.().catch(() => {});
     }
+    function leaveCapture() {
+      const input = captureInput;
+      if (!input) return;
+      void endCapture();
+      input.blur();
+    }
+    win.addEventListener("blur", leaveCapture);
+    api.onWindowBlur?.(leaveCapture);
     async function captureKey(event, kind) {
       event.preventDefault(); event.stopPropagation();
       const input = event.currentTarget;
