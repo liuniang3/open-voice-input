@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v0.4.25 - 2026-10-19
 
 ### Fixed
 
@@ -19,9 +19,14 @@ All notable changes to this project are documented here.
 
 ### Validation
 
+- `76/76` shared regression scripts pass. Windows x64, Intel macOS x64 and Apple Silicon macOS arm64 CI pass, including native component builds and unsigned macOS ZIP packaging. Release builds repeat shared tests and sensitive-information checks; native macOS capture, permissions, direct text input and appearance still require hardware validation.
 - Native Windows regression uses the actual registered system shortcut in nine Home/Settings visibility and shortcut-editor scenarios, checks the visible dictation popup and synthetic PCM capture, then cancels with Escape. Shared Windows/macOS routing and registration-order tests and browser focus/tab tests cover shortcut editing without paid API requests or user configuration.
 
 - Actual Windows desktop recordings cover cold and repeated invocation, Home transitions and cancellation. Native Electron regressions cover first-frame preparation, settled text opacity, transparency, rounded corners, hidden-recorder spectrum, complete direct input and cancellation. Recordings and frame captures stay in ignored local diagnostic output; macOS native appearance still requires a hardware check.
+
+### Release
+
+- Windows installer/portable and unsigned macOS Intel/Apple Silicon DMG/ZIP packages include update metadata, blockmaps and SHA-256 checksums. Publish only after all platform builds and uploads succeed. User credentials, local settings, recordings, transcripts and diagnostic screenshots are excluded; upgrades retain existing local configuration.
 
 ## v0.4.24 - 2026-10-14
 
