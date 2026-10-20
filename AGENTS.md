@@ -8,3 +8,10 @@
 - Preserve existing user edits. Do not permanently delete files; use the system recycle bin when deletion is requested.
 - No external model delegation unless the user explicitly authorizes it. Native subagents are permitted only when authorized; at most three concurrent model tasks INCLUDING the main agent.
 
+## macOS development handoff
+
+- Before continuing macOS work, read `MACOS_START_HERE.md`, `docs/MACOS_HANDOFF.md`, `docs/MACOS_ACCEPTANCE.md`, and `docs/MACOS_DEVELOPMENT.md` when present.
+- If present, `.codex/local/MACOS_WORKSTATION.md` records private workstation paths and runtime commands. Keep this local material out of commits.
+- Use a `codex/macos-*` branch and keep native differences in the platform layer or Swift helper. Contribute through a pull request; main and release tags are maintained separately.
+- Keep synthetic/native protocol checks, application packaging, and hardware acceptance as separate evidence. Update the development baseline with actual results and leave untested permissions, audio capture, and text injection explicitly unverified.
+
