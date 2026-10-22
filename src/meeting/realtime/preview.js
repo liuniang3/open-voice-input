@@ -238,6 +238,44 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
       dead: false, stream: null, controller: new AbortController() };
   }
 
+  async function readPcm(ctx, start, end) {
+    const wav = await wait(ctx, () => readAudio(start, end), appendTimeoutMs, "preview_audio_timeout");
+    if (!Buffer.isBuffer(wav) || wav.length !== 44 + (end - start) * 2
+      || wav.toString("ascii", 0, 4) !== "RIFF" || wav.toString("ascii", 8, 12) !== "WAVE"
+      || wav.toString("ascii", 36, 40) !== "data" || wav.readUInt32LE(24) !== RATE
+      || wav.readUInt16LE(22) !== 1 || wav.readUInt16LE(34) !== 16) {
+      throw failure("preview_audio_invalid");
+    }
+    return wav.subarray(44);
+  }
+
+  async function skipPausedSilence(ctx) {
+    if (!preview.skipPausedSilence || ctx.retry) return false;
+    const w = ctx.window;
+    let start = w.startFrame;
+    while (start < w.endFrame) {
+      const end = Math.min(w.endFrame, start + readLimit);
+      const pcm = await readPcm(ctx, start, end);
+      if (ctx.dead) throw failure("preview_aborted");
+      let offset = 0;
+      // Only exact digital zero is skipped, never quiet speech or background
+      // noise. The full archive and native PCM retain their original timeline.
+      while (offset < pcm.length && pcm.readInt16LE(offset) === 0) offset += 2;
+      start += offset / 2;
+      if (offset < pcm.length) { preview.skipPausedSilence = false; break; }
+    }
+    if (start === w.startFrame) return false;
+    // Keep a checkpointed interval for late-track invalidation and recovery.
+    // Its sentFrame stays at the start: these samples were never uploaded.
+    w.endFrame = start;
+    w.status = "completed";
+    w.skipped = "paused_silence";
+    cursor = start; preview.cursorFrame = cursor;
+    ctx.dead = true;
+    changed();
+    return true;
+  }
+
   async function send(ctx) {
     const w = ctx.window;
     while (!ctx.dead) {
@@ -245,14 +283,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
       if (ctx.rotationReady || w.sentFrame >= w.endFrame) return;
       const end = Math.min(w.endFrame, w.sentFrame + readLimit);
       const start = w.sentFrame;
-      const wav = await wait(ctx, () => readAudio(start, end), appendTimeoutMs, "preview_audio_timeout");
-      if (!Buffer.isBuffer(wav) || wav.length !== 44 + (end - start) * 2
-        || wav.toString("ascii", 0, 4) !== "RIFF" || wav.toString("ascii", 8, 12) !== "WAVE"
-        || wav.toString("ascii", 36, 40) !== "data" || wav.readUInt32LE(24) !== RATE
-        || wav.readUInt16LE(22) !== 1 || wav.readUInt16LE(34) !== 16) {
-        throw failure("preview_audio_invalid");
-      }
-      const pcm = wav.subarray(44);
+      const pcm = await readPcm(ctx, start, end);
       for (let sent = start; sent < end;) {
         const next = Math.min(end, sent + chunkFrames);
         const count = next - sent;
@@ -314,7 +345,10 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
         }
         const ctx = active;
         try {
-          if (!ctx.stream) await connect(ctx);
+          if (!ctx.stream) {
+            if (await skipPausedSilence(ctx)) { active = null; continue; }
+            await connect(ctx);
+          }
           await send(ctx);
           if (draining) {
             await finish(ctx);
@@ -360,6 +394,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
       const queued = retryQueue.indexOf(w);
       if (queued >= 0) retryQueue.splice(queued, 1);
       w.status = "failed";
+      delete w.skipped;
       w.error = { code: "preview_audio_changed" };
       w.revision = (w.revision || 0) + 1;
       w.sentences = w.sentences.filter(s => s.final);
@@ -401,6 +436,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
         markUnsent("preview_unsent");
       } finally { clearTimeout(timer); }
       active = null;
+      preview.skipPausedSilence = true;
       terminalStatus = "completed";
       changed();
       await durable();

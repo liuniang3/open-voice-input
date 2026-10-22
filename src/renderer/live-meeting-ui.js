@@ -49,6 +49,7 @@
     let windowBusy = false;
     let windowRevision = 0;
     let summarySignature = "";
+    let savedSummaryModel = "";
     let audioSignature = "";
     let historySignature = "";
     let historyItems = [];
@@ -127,6 +128,20 @@
       element.value = selected;
     }
 
+    function loadSummaryModels(settings) {
+      const picker = win.TextSupplierUi;
+      const summaryOptions = picker.modelOptionGroups(settings, "summary");
+      const selected = picker.formatPair(summaryOptions.selected.supplierId, summaryOptions.selected.modelId);
+      const models = summaryOptions.groups.flatMap(group => group.models.map(modelId => [
+        picker.formatPair(group.supplierId, modelId), `${group.label} / ${modelId}`
+      ]));
+      if (summaryOptions.selected.modelId && !models.some(([value]) => value === selected)) {
+        models.push([selected, `${summaryOptions.selected.supplierId} / ${summaryOptions.selected.modelId}（手动配置）`]);
+      }
+      options($("liveCleanerModel"), models, selected);
+      savedSummaryModel = selected;
+    }
+
     function loadSettings(settings) {
       const selection = asrDefaults.workspaceSelection(settings, "live");
       asrSettings = {
@@ -155,16 +170,7 @@
         $("liveModel").value = asrDefaults.FOLLOW_DICTATION;
         $("liveCustomModelField").hidden = true;
       }
-      const picker = win.TextSupplierUi;
-      const summaryOptions = picker.modelOptionGroups(settings, "summary");
-      const selectedSummary = picker.formatPair(summaryOptions.selected.supplierId, summaryOptions.selected.modelId);
-      const cleaners = summaryOptions.groups.flatMap(group => group.models.map(modelId => [
-        picker.formatPair(group.supplierId, modelId), `${group.label} / ${modelId}`
-      ]));
-      if (summaryOptions.selected.modelId && !cleaners.some(([value]) => value === selectedSummary)) {
-        cleaners.push([selectedSummary, `${summaryOptions.selected.supplierId} / ${summaryOptions.selected.modelId}（手动配置）`]);
-      }
-      options($("liveCleanerModel"), cleaners, selectedSummary);
+      loadSummaryModels(settings);
       options($("liveReviewModel"), [...reviewers].map((id) => [id, id]), REVIEW_MODEL);
       destination = String(settings.meetingRealtimeDestination || "");
       $("liveCaptureMode").value = ["system", "microphone", "dual"].includes(settings.meetingCaptureMode) ? settings.meetingCaptureMode : "dual";
@@ -523,12 +529,8 @@
           states.textContent = [item.hasTranscript ? "有原文" : "无原文", item.hasCorrection ? "已校订" : "未校订", item.hasSummary ? "有摘要" : "无摘要"].join(" · ");
           button.appendChild(head); button.appendChild(meta); button.appendChild(states);
           button.addEventListener("click", () => {
-            if (button.disabled || item.sessionId === dto.sessionId) { setHistoryOpen(false); return; }
-            void action("history", async () => {
-              const result = await invoke("meetingLiveOpenSession", { sessionId: item.sessionId });
-              setHistoryOpen(false);
-              return result;
-            });
+            if (button.disabled || item.sessionId === dto.sessionId) return;
+            void action("history", () => invoke("meetingLiveOpenSession", { sessionId: item.sessionId }));
           });
           $("liveHistoryList").appendChild(button);
         }
@@ -799,12 +801,13 @@
         const modelId = selectedModel();
         const transcriptionIntervalSeconds = Number($("liveTranscriptionInterval").value) || 30;
         const saveIntervalSeconds = Number($("liveSaveInterval").value) || 30;
-        await invoke("saveSettings", { meetingRealtimeModel: modelId,
+        const settings = await invoke("saveSettings", { meetingRealtimeModel: modelId,
           meetingRealtimeFollowDictation: $("liveModel").value === asrDefaults.FOLLOW_DICTATION,
           meetingTranscriptionIntervalSeconds: transcriptionIntervalSeconds,
           meetingAutosaveIntervalSeconds: saveIntervalSeconds });
         asrSettings.meetingRealtimeFollowDictation = $("liveModel").value === asrDefaults.FOLLOW_DICTATION;
         if (active(dto)) return;
+        loadSummaryModels(settings);
         return invoke("meetingLiveStart", {
           title: $("liveTitle").value.trim(), modelId,
           provider: batchModel(modelId) ? "mimo" : "aliyun-streaming",
@@ -850,7 +853,28 @@
       if (minimal !== windowFlags.minimal) { windowFlags.minimal = minimal; render(); }
     });
     $("liveUseMimoReview").addEventListener("change", render);
-    $("liveCleanerModel").addEventListener("change", render);
+    $("liveCleanerModel").addEventListener("change", () => {
+      if ($("liveCleanerModel").disabled) return;
+      const picker = win.TextSupplierUi;
+      const selected = picker.parsePair($("liveCleanerModel").value);
+      if (!selected.modelId) return;
+      void action("summaryModel", async () => {
+        try {
+          // Read the current slots so a summary choice cannot restore an old
+          // cleanup preference or write supplier credentials from a UI cache.
+          const current = await invoke("getSettings");
+          const next = picker.applySelection(current, "summary", selected);
+          const saved = await invoke("saveSettings", {
+            textModelSelections: next.textModelSelections,
+            meetingAnalysisModel: next.meetingAnalysisModel
+          });
+          loadSummaryModels(saved);
+        } catch (error) {
+          $("liveCleanerModel").value = savedSummaryModel;
+          throw error;
+        }
+      });
+    });
     $("liveChooseDestination").addEventListener("click", () => {
       if ($("liveChooseDestination").disabled) return;
       void action("destination", async () => {

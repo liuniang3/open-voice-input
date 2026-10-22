@@ -123,6 +123,121 @@ async function main() {
     assert.equal(x.api.snapshot().segments.length, 3);
   });
 
+  await test("after twenty-minute rotation a nine-minute pause does not delay resumed drafts", async () => {
+    const pauseStart = RATE * 1250;
+    const resumedAt = pauseStart + RATE * 562;
+    let time = 0;
+    const x = fixture({ now: () => time, paceMs: 90,
+      sleep: async ms => { time += ms; },
+      readAudio: async (start, end) => quietWave(start, end, [[pauseStart, resumedAt]]),
+      configure: s => {
+        const append = s.appendPcm;
+        let frames = 0;
+        s.appendPcm = async buffer => {
+          await append(buffer);
+          frames += buffer.length / 2;
+          s.callbacks.onSentence({ id: "draft", text: "Resumed speech", beginMs: 0,
+            endMs: frames / RATE * 1000, final: false });
+        };
+      } });
+    try {
+      x.api.kick(pauseStart);
+      await x.api.waitForIdle(); await x.api.drain(pauseStart);
+      assert.equal(x.streams.length, 3, "recording crosses two real ten-minute task boundaries");
+      const beforeResume = time;
+      x.api.kick(resumedAt + 1733);
+      await x.api.waitForIdle();
+      assert.equal(x.api.snapshot().previewText, "Resumed speech");
+      assert.equal(x.streams.length, 4, "pause silence does not open an ASR task");
+      assert.equal(x.streams[3].chunks.reduce((total, b) => total + b.length, 0), 1733 * 2);
+      assert.deepEqual(Buffer.concat(x.streams[3].chunks), quietWave(resumedAt, resumedAt + 1733).subarray(44));
+      assert.ok(time - beforeResume < 1000, "no minutes of paced silence before the resumed audio");
+      await x.api.drain(resumedAt + 1733);
+      const skipped = x.state.preview.windows.find(w => w.skipped === "paused_silence");
+      assert.deepEqual([skipped.startFrame, skipped.endFrame], [pauseStart, resumedAt]);
+      assert.equal(skipped.sentFrame, pauseStart, "skipped PCM is never counted as uploaded");
+      assert.equal(x.api.snapshot().segments.at(-1).startFrame, resumedAt);
+      assert.equal(x.api.snapshot().failedSegments, 0);
+    } finally { await x.api.shutdown(); }
+  });
+
+  await test("late audio invalidates skipped pause silence and remains available for explicit retry", async () => {
+    let late = false;
+    const x = fixture({ readAudio: async (start, end) => quietWave(start, end, late ? [] : [[RATE, RATE * 3]]) });
+    try {
+      await x.api.drain(RATE);
+      x.api.kick(RATE * 3 + 317);
+      await x.api.waitForIdle(); await x.api.drain(RATE * 3 + 317);
+      assert.equal(x.streams.length, 2);
+      late = true;
+      assert.equal(x.api.invalidate(RATE, RATE * 2), 1);
+      assert.equal(x.api.snapshot().failedSegments, 1, "late source data cannot remain marked as skipped silence");
+      await x.api.retry();
+      assert.equal(x.api.snapshot().failedSegments, 0);
+      assert.equal(x.state.preview.windows[1].skipped, undefined);
+      assert.deepEqual(Buffer.concat(x.streams[2].chunks), quietWave(RATE, RATE * 3).subarray(44));
+      assert.equal(x.api.snapshot().segments.length, 3, "successful live windows are retained during gap repair");
+    } finally { await x.api.shutdown(); }
+  });
+
+  await test("repeated pauses skip zero-only pumps but retain the quietest nonzero samples and timestamps", async () => {
+    const readAudio = async (start, end) => {
+      const wav = quietWave(start, end, [[RATE, RATE * 4], [RATE * 5, RATE * 8]]);
+      for (let offset = 44; offset < wav.length; offset += 2) {
+        if (wav.readInt16LE(offset)) wav.writeInt16LE(1, offset);
+      }
+      return wav;
+    };
+    const x = fixture({ readAudio });
+    try {
+      await x.api.drain(RATE);
+      for (const end of [RATE * 2, RATE * 3, RATE * 4]) {
+        x.api.kick(end); await x.api.waitForIdle();
+        assert.equal(x.streams.length, 1, "zero-only pumps do not create idle ASR connections");
+      }
+      x.api.kick(RATE * 5); await x.api.waitForIdle(); await x.api.drain(RATE * 5);
+      x.api.kick(RATE * 8 + 17); await x.api.waitForIdle(); await x.api.drain(RATE * 8 + 17);
+      assert.equal(x.streams.length, 3);
+      assert.deepEqual(Buffer.concat(x.streams[1].chunks), (await readAudio(RATE * 4, RATE * 5)).subarray(44));
+      assert.deepEqual(Buffer.concat(x.streams[2].chunks), (await readAudio(RATE * 8, RATE * 8 + 17)).subarray(44));
+      assert.deepEqual(x.api.snapshot().segments.map(s => s.startFrame), [0, RATE * 4, RATE * 8]);
+      assert.equal(x.api.snapshot().failedSegments, 0);
+      assert.equal(x.state.preview.cursorFrame, RATE * 8 + 17);
+    } finally { await x.api.shutdown(); }
+  });
+
+  await test("late audio cancels a paused-silence read and recovery keeps its interval retryable", async () => {
+    const pending = deferred();
+    let reading = false;
+    const x = fixture({ readAudio: async (start, end) => {
+      if (start >= RATE) { reading = true; return pending.promise; }
+      return wave(start, end);
+    } });
+    try {
+      await x.api.drain(RATE);
+      x.api.kick(RATE * 3);
+      await turn(); assert.equal(reading, true);
+      assert.equal(x.api.invalidate(RATE, RATE * 2), 1);
+      await x.api.waitForIdle();
+      pending.resolve(quietWave(RATE, RATE * 3, [[RATE, RATE * 3]]));
+      await turn();
+      assert.equal(x.streams.length, 1);
+      assert.equal(x.state.preview.windows[1].status, "failed");
+      assert.equal(x.state.preview.windows[1].skipped, undefined);
+      assert.equal(x.state.preview.cursorFrame, RATE * 3);
+      const state = structuredClone(x.state);
+      const restored = fixture({ state });
+      try {
+        await restored.api.recover(RATE * 3);
+        assert.equal(restored.streams.length, 0, "recovery never contacts ASR automatically");
+        await restored.api.retry();
+        assert.deepEqual(Buffer.concat(restored.streams[0].chunks), wave(RATE, RATE * 3).subarray(44));
+        assert.equal(restored.api.snapshot().failedSegments, 0);
+        assert.equal(restored.api.snapshot().segments.length, 2);
+      } finally { await restored.api.shutdown(); }
+    } finally { await x.api.shutdown(); }
+  });
+
   await test("first connect failure records complete gap and reconnect preserves failure for explicit retry", async () => {
     const x = fixture({ configure: (s, n) => { if (n === 1) s.ready = Promise.reject(new Error("key=DO_NOT_STORE transport body")); } });
     x.api.kick(RATE);

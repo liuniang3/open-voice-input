@@ -2,6 +2,7 @@
 
 const { EventEmitter } = require("node:events");
 const path = require("node:path");
+const { MACOS_UPDATE_FEED } = require("./platform/macos-updates");
 
 const UPDATE_REPOSITORY = Object.freeze({
   provider: "github",
@@ -124,7 +125,7 @@ function createUpdateService({
   if (platform === "darwin") autoUpdater.channel = channel;
   autoUpdater.allowDowngrade = false;
   autoUpdater.fullChangelog = false;
-  autoUpdater.setFeedURL?.({ ...UPDATE_REPOSITORY, channel });
+  autoUpdater.setFeedURL?.({ ...(platform === "darwin" ? MACOS_UPDATE_FEED : UPDATE_REPOSITORY), channel });
 
   autoUpdater.on("checking-for-update", () => publish({ status: "checking", error: null }));
   autoUpdater.on("update-available", (info) => {

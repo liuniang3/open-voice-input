@@ -360,18 +360,21 @@ test("recoverable history does not disable a new meeting; unsafe finalization st
   }
 });
 
-test("history browser opens a local session without starting capture or ASR", async () => {
-  const f = fixture();
+for (const width of [1180, 720]) test(`history browser keeps records open for manual folding at ${width}px without capture or ASR`, async () => {
+  const f = fixture({ width });
   f.setStatus({ status: "idle", recording: false, recoverableSessions: [{
     sessionId: "old", title: "历史例会", status: "completed", startedAtMs: 1800000000000,
     durationMs: 72000, modelId: "mimo-v2.5-asr", hasTranscript: true, hasCorrection: false, hasSummary: false
+  }, {
+    sessionId: "another", title: "另一次会议", status: "completed", startedAtMs: 1790000000000,
+    durationMs: 60000, modelId: "mimo-v2.5-asr", hasTranscript: true
   }] });
   await f.ui.open();
   await f.click("liveHistoryToggle");
   await tick();
   assert.equal(f.count("meetingLiveHistory"), 1);
   assert.equal(f.$("liveHistoryBrowser").hidden, false);
-  assert.equal(f.$("liveHistoryList").children.length, 1);
+  assert.equal(f.$("liveHistoryList").children.length, 2);
   assert.match(f.$("liveHistoryList").children[0].textContent + f.$("liveHistoryList").children[0].children[0].children[0].textContent, /历史例会/);
   f.$("liveHistoryList").children[0].click();
   await tick(); await tick();
@@ -379,13 +382,29 @@ test("history browser opens a local session without starting capture or ASR", as
   assert.equal(f.count("meetingLiveStart"), 0);
   assert.equal(f.count("meetingLiveRetry"), 0);
   assert.equal(f.$("liveRaw").textContent, "历史会议原文");
-  assert.equal(f.$("liveHistoryBrowser").hidden, true);
+  assert.equal(f.$("liveHistoryBrowser").hidden, false, `selecting a record keeps history open at ${width}px`);
+  assert.equal(f.$("liveHistoryToggle").attributes["aria-expanded"], "true");
+  f.$("liveHistoryList").children[0].click();
+  await tick();
+  assert.equal(f.count("meetingLiveOpenSession"), 1, "the current record is not reopened");
+  assert.equal(f.$("liveHistoryBrowser").hidden, false, "selecting the current record keeps history open");
+  f.$("liveHistoryList").children[1].click();
+  await tick(); await tick();
+  assert.deepEqual(f.last("meetingLiveOpenSession").args, [{ sessionId: "another" }]);
+  assert.equal(f.$("liveHistoryList").children[1].attributes["aria-selected"], "true");
+  assert.equal(f.$("liveHistoryBrowser").hidden, false, "records can be browsed consecutively");
+  assert.equal(JSON.parse(f.win.localStorage.getItem("ovi-live-sidebars")).history, true);
+  await f.click("liveHistoryClose");
+  assert.equal(f.$("liveHistoryBrowser").hidden, true, "the close button still folds history");
+  await f.click("liveHistoryToggle");
+  assert.equal(f.$("liveHistoryBrowser").hidden, false, "the toggle reopens history");
   f.$("liveCleanerModel").value = "analysis-b";
   f.push(completed({ sessionId: "old", title: "历史例会", rawText: "历史会议原文" }));
   await f.click("liveSummarize");
   assert.equal(f.last("meetingLiveSummarize").args[0].sessionId, "old");
   assert.equal(f.last("meetingLiveSummarize").args[0].useMimoReview, false);
   assert.equal(f.count("meetingLiveCleanup"), 0);
+  f.ui.destroy();
 });
 
 test("save indicator uses backend timestamp, flags delayed saves and freezes duration", async () => {
@@ -501,6 +520,82 @@ test("meeting summary sends the exact supplier and model pair selected in settin
     sessionId: "s1", supplierId: "vendor-a", modelId: "shared-model",
     useMimoReview: false, reviewModelId: "mimo-v2.5-asr"
   });
+});
+
+test("changing the meeting summary model persists it across navigation and new meetings", async () => {
+  const f = fixture();
+  f.setStatus(completed());
+  await f.ui.open();
+  f.$("liveCleanerModel").value = "__legacy__::analysis-b";
+  f.$("liveCleanerModel").dispatch("change"); await tick();
+  assert.equal(f.handlers.getSettings().meetingAnalysisModel, "analysis-b");
+  f.ui.close(); await f.ui.open();
+  assert.equal(f.$("liveCleanerModel").value, "__legacy__::analysis-b");
+  await f.click("liveStart");
+  f.push(completed({ sessionId: "next" }));
+  await f.click("liveSummarize");
+  assert.equal(f.last("meetingLiveSummarize").args[0].modelId, "analysis-b");
+  assert.equal(f.count("meetingLiveSummarize"), 1, "changing a preference never generates a summary");
+  f.ui.destroy();
+});
+
+test("summary preferences preserve supplier identity and the latest independent cleanup selection", async () => {
+  const f = fixture();
+  f.setSettings({
+    textSuppliers: ["vendor-a", "vendor-b"].map(id => ({ id, name: id })),
+    textSupplierCatalogs: { "vendor-a": { models: ["shared-model"] }, "vendor-b": { models: ["shared-model"] } },
+    textModelSelections: { summary: { supplierId: "vendor-a", modelId: "shared-model" },
+      cleanup: { supplierId: "vendor-a", modelId: "cleanup-old" } }
+  });
+  await f.ui.open();
+  f.setSettings({ textModelSelections: { summary: { supplierId: "vendor-a", modelId: "shared-model" },
+    cleanup: { supplierId: "vendor-b", modelId: "cleanup-new" } } });
+  f.$("liveCleanerModel").value = "vendor-b::shared-model";
+  f.$("liveCleanerModel").dispatch("change"); await tick();
+  const saved = f.handlers.getSettings();
+  assert.deepEqual(saved.textModelSelections, {
+    summary: { supplierId: "vendor-b", modelId: "shared-model" },
+    cleanup: { supplierId: "vendor-b", modelId: "cleanup-new" }
+  });
+  assert.deepEqual(Object.keys(f.last("saveSettings").args[0]).sort(), ["meetingAnalysisModel", "textModelSelections"]);
+  f.ui.close(); await f.ui.open();
+  assert.equal(f.$("liveCleanerModel").value, "vendor-b::shared-model");
+  f.push(completed());
+  await f.click("liveSummarize");
+  assert.equal(f.last("meetingLiveSummarize").args[0].supplierId, "vendor-b");
+  f.ui.destroy();
+});
+
+test("a failed summary preference save restores the saved selection and allows retry", async () => {
+  const f = fixture();
+  f.setStatus(completed());
+  await f.ui.open();
+  const save = f.handlers.saveSettings;
+  f.handlers.saveSettings = () => { throw new Error("设置保存失败"); };
+  f.$("liveCleanerModel").value = "__legacy__::analysis-b";
+  f.$("liveCleanerModel").dispatch("change"); await tick();
+  assert.equal(f.$("liveCleanerModel").value, "__legacy__::analysis-a");
+  assert.match(f.$("liveError").textContent, /设置保存失败/);
+  assert.equal(f.count("meetingLiveSummarize"), 0);
+  f.handlers.saveSettings = save;
+  f.$("liveCleanerModel").value = "__legacy__::analysis-b";
+  f.$("liveCleanerModel").dispatch("change"); await tick();
+  f.ui.close(); await f.ui.open();
+  assert.equal(f.$("liveCleanerModel").value, "__legacy__::analysis-b");
+  f.ui.destroy();
+});
+
+test("starting a new meeting refreshes the summary default from saved settings", async () => {
+  const f = fixture();
+  f.setStatus(completed());
+  await f.ui.open();
+  f.setSettings({ meetingAnalysisModel: "analysis-b" });
+  await f.click("liveStart");
+  f.push(completed({ sessionId: "next" }));
+  assert.equal(f.$("liveCleanerModel").value, "__legacy__::analysis-b");
+  await f.click("liveSummarize");
+  assert.equal(f.last("meetingLiveSummarize").args[0].modelId, "analysis-b");
+  f.ui.destroy();
 });
 
 test("push supersedes a stale status response; closing invalidates pending reads", async () => {

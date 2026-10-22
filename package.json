@@ -1,7 +1,7 @@
 {
   "name": "open-voice-input",
   "productName": "Open Voice Input",
-  "version": "0.4.25",
+  "version": "0.4.27",
   "description": "Windows and macOS voice input assistant with pluggable ASR providers and optional LLM cleanup.",
   "main": "src/main.js",
   "scripts": {
@@ -140,6 +140,11 @@
       ]
     },
     "mac": {
+      "publish": {
+        "provider": "generic",
+        "url": "https://github.com/liuniang3/open-voice-input/releases/download/macos-updates/",
+        "useMultipleRangeRequest": false
+      },
       "category": "public.app-category.productivity",
       "icon": "assets/mimo-icon.png",
       "minimumSystemVersion": "13.0",

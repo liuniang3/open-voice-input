@@ -1,0 +1,104 @@
+name: Build Mac Release
+
+on:
+  push:
+    tags: ["macos-v*"]
+
+# Serialize updates to the Mac feed. This workflow never publishes a global latest release.
+concurrency:
+  group: macos-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x64
+          - runner: macos-15
+            arch: arm64
+    env:
+      OVI_TARGET_ARCH: ${{ matrix.arch }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          architecture: ${{ matrix.arch }}
+          cache: npm
+      - run: npm ci
+      - name: Require a dedicated Mac tag and release notes
+        run: |
+          node scripts/prepare-macos-update-feed.js --check-tag
+          test -f "docs/releases/macOS-v$(node -p 'require("./package.json").version').md"
+      - name: Build and test Mac distribution
+        run: npm run dist:mac
+      - name: Keep Mac architecture metadata and checksums separate
+        run: |
+          mv dist/latest-mac.yml dist/latest-${{ matrix.arch }}-mac.yml
+          cp dist/SHA256SUMS.txt dist/macOS-${{ matrix.arch }}-SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-release-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.zip.blockmap
+            dist/latest-*-mac.yml
+            dist/macOS-*-SHA256SUMS.txt
+
+  publish-macos:
+    needs: build-macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-release-*
+          merge-multiple: true
+          path: macos-artifacts
+      - name: Inspect the existing Mac feed
+        run: |
+          if gh release view macos-updates --json isPrerelease,isDraft > macos-feed-release.json; then
+            node -e 'const r=require("./macos-feed-release.json"); if (!r.isPrerelease) throw new Error("Mac feed must remain a GitHub prerelease")'
+            if node -e 'process.exit(require("./macos-feed-release.json").isDraft ? 1 : 0)'; then
+              gh release download macos-updates --pattern 'latest-*-mac.yml' --dir macos-previous
+            fi
+          else
+            gh release create macos-updates --draft --prerelease --latest=false --target "$GITHUB_SHA" --title 'Mac 版（macOS）更新通道' --notes '仅用于 Mac 版的架构更新清单；安装包和改进说明见 macos-v* 版本。'
+          fi
+      - name: Verify both Mac packages and prepare versioned download links
+        run: node scripts/prepare-macos-update-feed.js
+      - name: Create the Mac release as a draft prerelease
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --json isDraft,isPrerelease > macos-version-release.json; then
+            node -e 'const r=require("./macos-version-release.json"); if (!r.isDraft || !r.isPrerelease) throw new Error("Refusing to replace a published Mac release")'
+          else
+            version="$(node -p 'require("./package.json").version')"
+            gh release create "$GITHUB_REF_NAME" --draft --prerelease --latest=false --title "Open Voice Input Mac 版（macOS）v$version" --notes-file "docs/releases/macOS-v$version.md"
+          fi
+      - name: Upload and publish complete Mac release
+        run: |
+          gh release upload "$GITHUB_REF_NAME" macos-artifacts/* --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease --latest=false
+      - name: Advance only the Mac update channels
+        run: |
+          gh release upload macos-updates macos-feed/latest-*-mac.yml --clobber
+          gh release edit macos-updates --draft=false --prerelease --latest=false
