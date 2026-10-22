@@ -14,6 +14,10 @@
 
 本轮将 3 个旧安装包、1 个旧 App 构建副本及附属文件移入系统废纸篓，恢复清单保存在被忽略的本机目录，现用 App 和用户数据保留。修复基线 `a9db424` 的 Ubuntu、Windows x64、Mac x64/arm64 CI 全部通过（run `39788224603`）；0.4.27 版本提交与双架构发布结果以对应 PR / Mac Release Actions 为准。版本说明见 [Mac 版 v0.4.27](releases/macOS-v0.4.27.md)。
 
+发布结果：版本提交 `4a427a4` 的平台矩阵全部通过（run `39790068205`）；`macos-v0.4.27` 的 Intel / Apple Silicon 构建及 Mac 发布全部成功（run `39791005486`），10 个版本资产和 2 个独立通道清单齐全。版本与通道 Release 均保持 prerelease，Windows 的全局 latest 仍为 `v0.4.25`，原有资产 ID/名称/尺寸与 main 均未变化。
+
+两架构线上清单经公共资产 API 回读并核对摘要；使用实际 electron-updater Provider 解析，确认 0.4.26 可比较出 0.4.27、显示本次 Mac 侧栏改善说明，并解析到对应架构的版本化 ZIP/DMG URL。未执行 App 内实际下载/安装及新增硬件验收；PR 保持 draft。旧包清理和新安装包交付已完成，后续每次 bug 修复默认沿用此交付流程。
+
 ## 2026-10-22：Mac 版 v0.4.26 候选安装包
 
 用户要求生成可直接更新的安装包并推送，授权分发本次 Mac 候选版。使用 `macos-v0.4.26` 独立标签和 Mac 专用发布工作流，源码仍位于 `codex/macos-meeting-resume-preview` / PR #1；main 合并与真机验收单独维护。只发布 Mac，不修改 Windows 专用实现或 `release.yml`，不移动全局 latest。
