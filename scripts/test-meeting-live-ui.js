@@ -360,18 +360,21 @@ test("recoverable history does not disable a new meeting; unsafe finalization st
   }
 });
 
-test("history browser opens a local session without starting capture or ASR", async () => {
-  const f = fixture();
+for (const width of [1180, 720]) test(`history browser keeps records open for manual folding at ${width}px without capture or ASR`, async () => {
+  const f = fixture({ width });
   f.setStatus({ status: "idle", recording: false, recoverableSessions: [{
     sessionId: "old", title: "历史例会", status: "completed", startedAtMs: 1800000000000,
     durationMs: 72000, modelId: "mimo-v2.5-asr", hasTranscript: true, hasCorrection: false, hasSummary: false
+  }, {
+    sessionId: "another", title: "另一次会议", status: "completed", startedAtMs: 1790000000000,
+    durationMs: 60000, modelId: "mimo-v2.5-asr", hasTranscript: true
   }] });
   await f.ui.open();
   await f.click("liveHistoryToggle");
   await tick();
   assert.equal(f.count("meetingLiveHistory"), 1);
   assert.equal(f.$("liveHistoryBrowser").hidden, false);
-  assert.equal(f.$("liveHistoryList").children.length, 1);
+  assert.equal(f.$("liveHistoryList").children.length, 2);
   assert.match(f.$("liveHistoryList").children[0].textContent + f.$("liveHistoryList").children[0].children[0].children[0].textContent, /历史例会/);
   f.$("liveHistoryList").children[0].click();
   await tick(); await tick();
@@ -379,13 +382,29 @@ test("history browser opens a local session without starting capture or ASR", as
   assert.equal(f.count("meetingLiveStart"), 0);
   assert.equal(f.count("meetingLiveRetry"), 0);
   assert.equal(f.$("liveRaw").textContent, "历史会议原文");
-  assert.equal(f.$("liveHistoryBrowser").hidden, true);
+  assert.equal(f.$("liveHistoryBrowser").hidden, false, `selecting a record keeps history open at ${width}px`);
+  assert.equal(f.$("liveHistoryToggle").attributes["aria-expanded"], "true");
+  f.$("liveHistoryList").children[0].click();
+  await tick();
+  assert.equal(f.count("meetingLiveOpenSession"), 1, "the current record is not reopened");
+  assert.equal(f.$("liveHistoryBrowser").hidden, false, "selecting the current record keeps history open");
+  f.$("liveHistoryList").children[1].click();
+  await tick(); await tick();
+  assert.deepEqual(f.last("meetingLiveOpenSession").args, [{ sessionId: "another" }]);
+  assert.equal(f.$("liveHistoryList").children[1].attributes["aria-selected"], "true");
+  assert.equal(f.$("liveHistoryBrowser").hidden, false, "records can be browsed consecutively");
+  assert.equal(JSON.parse(f.win.localStorage.getItem("ovi-live-sidebars")).history, true);
+  await f.click("liveHistoryClose");
+  assert.equal(f.$("liveHistoryBrowser").hidden, true, "the close button still folds history");
+  await f.click("liveHistoryToggle");
+  assert.equal(f.$("liveHistoryBrowser").hidden, false, "the toggle reopens history");
   f.$("liveCleanerModel").value = "analysis-b";
   f.push(completed({ sessionId: "old", title: "历史例会", rawText: "历史会议原文" }));
   await f.click("liveSummarize");
   assert.equal(f.last("meetingLiveSummarize").args[0].sessionId, "old");
   assert.equal(f.last("meetingLiveSummarize").args[0].useMimoReview, false);
   assert.equal(f.count("meetingLiveCleanup"), 0);
+  f.ui.destroy();
 });
 
 test("save indicator uses backend timestamp, flags delayed saves and freezes duration", async () => {

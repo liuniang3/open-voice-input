@@ -529,12 +529,8 @@
           states.textContent = [item.hasTranscript ? "有原文" : "无原文", item.hasCorrection ? "已校订" : "未校订", item.hasSummary ? "有摘要" : "无摘要"].join(" · ");
           button.appendChild(head); button.appendChild(meta); button.appendChild(states);
           button.addEventListener("click", () => {
-            if (button.disabled || item.sessionId === dto.sessionId) { setHistoryOpen(false); return; }
-            void action("history", async () => {
-              const result = await invoke("meetingLiveOpenSession", { sessionId: item.sessionId });
-              setHistoryOpen(false);
-              return result;
-            });
+            if (button.disabled || item.sessionId === dto.sessionId) return;
+            void action("history", () => invoke("meetingLiveOpenSession", { sessionId: item.sessionId }));
           });
           $("liveHistoryList").appendChild(button);
         }
