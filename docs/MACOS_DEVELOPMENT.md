@@ -2,6 +2,16 @@
 
 接管日期：2026-10-20（Asia/Shanghai）。本页用于后续开发恢复上下文；完整功能与约束见 `MACOS_HANDOFF.md`，真机验收见 `MACOS_ACCEPTANCE.md`。
 
+## 2026-10-22：Mac 版 v0.4.26 候选安装包
+
+用户要求生成可直接更新的安装包并推送，授权分发本次 Mac 候选版。使用 `macos-v0.4.26` 独立标签和 Mac 专用发布工作流，源码仍位于 `codex/macos-meeting-resume-preview` / PR #1；main 合并与真机验收单独维护。只发布 Mac，不修改 Windows 专用实现或 `release.yml`，不移动全局 latest。
+
+版本号与锁文件已同步为 0.4.26，具体改进、首次手动迁移步骤及未签名/未公证状态见 [Mac 版 v0.4.26 更新说明](releases/macOS-v0.4.26.md)。本机 Apple Silicon 完整 `dist:mac` 构建成功，包含敏感信息检查、helper/FFmpeg 构建和检查、77/77 共享回归、DMG、ZIP、blockmap 和 SHA-256 校验文件。
+
+DMG 以只读方式挂载核对：应用标识和版本正确，会议修复与 Mac 更新源源码匹配，打包 helper/FFmpeg 均为 arm64 且与构建输入一致；打包 helper 的 ping/shutdown、FFmpeg 版本探测通过。ZIP/DMG 的 SHA-512 和尺寸与清单匹配，安装镜像校验及“应用程序”链接通过；本机已生成供用户手动替换的 DMG。未启动新 App、未自动替换当前运行版本或清理其用户数据。
+
+发布前基线 `02a3997` 的 Windows x64、Mac x64/arm64、Ubuntu CI 全部通过（run `39780669512`）。本次版本提交的检查、Mac 双架构分发与独立通道实际状态以 PR 和 Mac Release Actions 为准，本机结果不能代替 Intel 构建或线上下载/安装验收。真实阿里云长会议、系统权限、采集和文字输入仍未完成验收，PR 保持候选状态。
+
 ## 2026-10-22：Mac 版独立更新通道（未发布）
 
 用户明确本协作只接受 Mac 部分。Windows 专用实现和现有 `release.yml` 保持原样；共享修复继续做回归检查，不代表发布 Windows。两项会议修复的上一提交 `e9b44ee` 已通过 Ubuntu、Windows x64、Mac x64/arm64 全部 CI（run `39778370771`）；本项的新提交仍以 PR 最新检查为准。
