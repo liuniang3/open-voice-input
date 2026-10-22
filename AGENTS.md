@@ -10,10 +10,12 @@
 
 ## macOS development handoff
 
+- This collaboration accepts macOS work only. Do not change Windows-specific code or its release workflow. Necessary shared fixes still require regression checks; they do not authorize a Windows release.
 - Before continuing macOS work, read `MACOS_START_HERE.md`, `docs/MACOS_HANDOFF.md`, `docs/MACOS_ACCEPTANCE.md`, and `docs/MACOS_DEVELOPMENT.md` when present.
 - If present, `.codex/local/MACOS_WORKSTATION.md` records private workstation paths and runtime commands. Keep this local material out of commits.
 - Use a `codex/macos-*` branch and keep native differences in the platform layer or Swift helper. Contribute through a pull request; main and release tags are maintained separately.
 - Keep synthetic/native protocol checks, application packaging, and hardware acceptance as separate evidence. Update the development baseline with actual results and leave untested permissions, audio capture, and text injection explicitly unverified.
 - The reusable local Codex skill is `$open-voice-input-dev`. Keep the repository handoff and development records current so a new session can take over from them.
 - Mac update titles and release notes must explicitly say **Mac 版（macOS）**, describe concrete user-visible improvements and distinguish tested behavior from outstanding hardware checks. Record unreleased fixes in `CHANGELOG.md`; coordinate official version numbers and tags with the maintainer.
+- Mac releases use `macos-v*` and the independent `macos-updates` feed, never the repository-wide latest release. Keep both Mac releases and the feed marked as GitHub prereleases with `latest=false`, so existing Windows updaters ignore them. See `docs/MACOS_RELEASE.md`; do not alter `release.yml` or publish `v*` tags for Mac-only work.
 

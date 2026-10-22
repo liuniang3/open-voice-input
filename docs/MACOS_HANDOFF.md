@@ -162,7 +162,7 @@ Mac 默认用户目录为 ~/Library/Application Support/open-voice-input；Windo
 2. 共享服务/界面保持一份实现，Mac 差异限制在平台层及 Swift helper。不要复制整套 Windows 业务或大规模重排 main.js 来完成小修复。
 3. PR 写清设备、macOS、是否打包版、授权状态、复现步骤、根因、回归结果及剩余限制。未通过真机项应明确标注，诊断截图和真实音频不提交到 Git。
 4. .github/workflows/platform.yml 在 PR 上检查 Ubuntu 子集、Windows x64、Mac x64/arm64；通过后由维护者合并。文档变更推 main 不一定触发路径过滤后的平台 CI，需要时手动运行。
-5. 发布由维护者统一版本号、package-lock、CHANGELOG 和 docs/releases/v版本.md，再推标签。release.yml 构建三平台，检查 15 个资产齐全后发布最新版；不要用个人测试标签触发生产发布。
+5. 当前协作只承接 Mac；不改 Windows 专用代码或 `release.yml`。Mac 发布由维护者协调版本号和锁文件，准备 `docs/releases/macOS-v版本.md`，再按 [MACOS_RELEASE.md](MACOS_RELEASE.md) 使用 `macos-v*` 标签和独立更新源。原 `v*` 全平台流程仍由原维护者管理；不要用 Mac 修复触发它，也不要用个人测试标签触发生产发布。
 6. 两位开发者同时工作时先对齐改动文件；每次 PR 合并后更新 main，避免共享设置结构和 IPC 契约长期分叉。
 
 ## 如何邀请朋友进入 GitHub 仓库

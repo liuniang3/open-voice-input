@@ -2,6 +2,22 @@
 
 接管日期：2026-10-20（Asia/Shanghai）。本页用于后续开发恢复上下文；完整功能与约束见 `MACOS_HANDOFF.md`，真机验收见 `MACOS_ACCEPTANCE.md`。
 
+## 2026-10-22：Mac 版独立更新通道（未发布）
+
+用户明确本协作只接受 Mac 部分。Windows 专用实现和现有 `release.yml` 保持原样；共享修复继续做回归检查，不代表发布 Windows。两项会议修复的上一提交 `e9b44ee` 已通过 Ubuntu、Windows x64、Mac x64/arm64 全部 CI（run `39778370771`）；本项的新提交仍以 PR 最新检查为准。
+
+旧 Mac 更新器虽然按架构读取清单，仍先查询 GitHub 全局 latest，无法独立发布 Mac 更新。现在仅在 `darwin` 路由到 `src/platform/macos-updates.js` 的固定 GenericProvider 源，继续区分 x64/arm64、禁止降级，并保留未签名安装包的手动打开与安装前任务保护。Mac 打包配置同步写入相同更新源；Windows 的 provider、配置和发布行为保持原样。
+
+新增 `release-macos.yml`，只响应 `macos-v*`，构建 Mac 两架构；两端成功并校验版本、架构、SHA-256、SHA-512、尺寸和 blockmap 后，再发布 Mac 包及独立清单。版本 Release 与 `macos-updates` 通道都使用 GitHub prerelease 和 `latest=false`，避免占用 Windows 的全局 stable/latest。独立清单包含具体 Mac 改进说明和带版本的绝对下载地址，旧任务不能回退通道或替换相同版本。完整流程与首次手动迁移限制见 [MACOS_RELEASE.md](MACOS_RELEASE.md)。
+
+本轮验证：
+
+- 新通道回归在旧代码中失败，证实旧 Mac 会查询全局 release feed；修复后 13 项通过，使用实际 electron-updater Provider 与模拟 HTTP 响应检查两架构 Mac 路由、Windows 原路径、版本和说明；另覆盖包校验、错误架构/Windows 包拒绝、两清单先验证后写入和防回退。
+- 完整共享回归通过 77/77 脚本，包含前两项会议修复；敏感信息扫描、skill 校验和差异检查通过。
+- Mac arm64 未签名开发 `.app` 和 ZIP/ZIP blockmap 均构建成功。分发包中的 `app-update.yml` 指向独立 Mac 源；打包更新器、平台配置、会议预览和摘要 UI 与源码一致，实际 ZIP 的 SHA-512、尺寸、版本及架构清单核对通过。
+
+新工作流只做静态配置和合成包验证，尚未通过正式标签执行；未创建 Mac 版本 Release、通道或正式标签，也未运行线上下载/安装验收。版本仍为 0.4.25 开发版；旧 Mac 安装版首次接入须手动安装，不能自动迁移。真实阿里云长会议、TCC 权限、录音和文字输入仍按真机清单验收。
+
 ## 2026-10-22：Mac 版会议摘要模型设置记忆（未发布）
 
 本项继续在 `codex/macos-meeting-resume-preview` 分支和 PR #1 中维护。用户确认问题位于会议页左下角的“摘要模型”，对应文本供应商的 `summary` 槽位。

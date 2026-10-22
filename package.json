@@ -140,6 +140,11 @@
       ]
     },
     "mac": {
+      "publish": {
+        "provider": "generic",
+        "url": "https://github.com/liuniang3/open-voice-input/releases/download/macos-updates/",
+        "useMultipleRangeRequest": false
+      },
       "category": "public.app-category.productivity",
       "icon": "assets/mimo-icon.png",
       "minimumSystemVersion": "13.0",
