@@ -503,6 +503,82 @@ test("meeting summary sends the exact supplier and model pair selected in settin
   });
 });
 
+test("changing the meeting summary model persists it across navigation and new meetings", async () => {
+  const f = fixture();
+  f.setStatus(completed());
+  await f.ui.open();
+  f.$("liveCleanerModel").value = "__legacy__::analysis-b";
+  f.$("liveCleanerModel").dispatch("change"); await tick();
+  assert.equal(f.handlers.getSettings().meetingAnalysisModel, "analysis-b");
+  f.ui.close(); await f.ui.open();
+  assert.equal(f.$("liveCleanerModel").value, "__legacy__::analysis-b");
+  await f.click("liveStart");
+  f.push(completed({ sessionId: "next" }));
+  await f.click("liveSummarize");
+  assert.equal(f.last("meetingLiveSummarize").args[0].modelId, "analysis-b");
+  assert.equal(f.count("meetingLiveSummarize"), 1, "changing a preference never generates a summary");
+  f.ui.destroy();
+});
+
+test("summary preferences preserve supplier identity and the latest independent cleanup selection", async () => {
+  const f = fixture();
+  f.setSettings({
+    textSuppliers: ["vendor-a", "vendor-b"].map(id => ({ id, name: id })),
+    textSupplierCatalogs: { "vendor-a": { models: ["shared-model"] }, "vendor-b": { models: ["shared-model"] } },
+    textModelSelections: { summary: { supplierId: "vendor-a", modelId: "shared-model" },
+      cleanup: { supplierId: "vendor-a", modelId: "cleanup-old" } }
+  });
+  await f.ui.open();
+  f.setSettings({ textModelSelections: { summary: { supplierId: "vendor-a", modelId: "shared-model" },
+    cleanup: { supplierId: "vendor-b", modelId: "cleanup-new" } } });
+  f.$("liveCleanerModel").value = "vendor-b::shared-model";
+  f.$("liveCleanerModel").dispatch("change"); await tick();
+  const saved = f.handlers.getSettings();
+  assert.deepEqual(saved.textModelSelections, {
+    summary: { supplierId: "vendor-b", modelId: "shared-model" },
+    cleanup: { supplierId: "vendor-b", modelId: "cleanup-new" }
+  });
+  assert.deepEqual(Object.keys(f.last("saveSettings").args[0]).sort(), ["meetingAnalysisModel", "textModelSelections"]);
+  f.ui.close(); await f.ui.open();
+  assert.equal(f.$("liveCleanerModel").value, "vendor-b::shared-model");
+  f.push(completed());
+  await f.click("liveSummarize");
+  assert.equal(f.last("meetingLiveSummarize").args[0].supplierId, "vendor-b");
+  f.ui.destroy();
+});
+
+test("a failed summary preference save restores the saved selection and allows retry", async () => {
+  const f = fixture();
+  f.setStatus(completed());
+  await f.ui.open();
+  const save = f.handlers.saveSettings;
+  f.handlers.saveSettings = () => { throw new Error("设置保存失败"); };
+  f.$("liveCleanerModel").value = "__legacy__::analysis-b";
+  f.$("liveCleanerModel").dispatch("change"); await tick();
+  assert.equal(f.$("liveCleanerModel").value, "__legacy__::analysis-a");
+  assert.match(f.$("liveError").textContent, /设置保存失败/);
+  assert.equal(f.count("meetingLiveSummarize"), 0);
+  f.handlers.saveSettings = save;
+  f.$("liveCleanerModel").value = "__legacy__::analysis-b";
+  f.$("liveCleanerModel").dispatch("change"); await tick();
+  f.ui.close(); await f.ui.open();
+  assert.equal(f.$("liveCleanerModel").value, "__legacy__::analysis-b");
+  f.ui.destroy();
+});
+
+test("starting a new meeting refreshes the summary default from saved settings", async () => {
+  const f = fixture();
+  f.setStatus(completed());
+  await f.ui.open();
+  f.setSettings({ meetingAnalysisModel: "analysis-b" });
+  await f.click("liveStart");
+  f.push(completed({ sessionId: "next" }));
+  assert.equal(f.$("liveCleanerModel").value, "__legacy__::analysis-b");
+  await f.click("liveSummarize");
+  assert.equal(f.last("meetingLiveSummarize").args[0].modelId, "analysis-b");
+  f.ui.destroy();
+});
+
 test("push supersedes a stale status response; closing invalidates pending reads", async () => {
   const f = fixture();
   const stale = deferred();
