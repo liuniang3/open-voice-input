@@ -14,6 +14,9 @@
 2. [macOS 共创说明](docs/MACOS_HANDOFF.md)：当前功能、架构、开发命令、已知限制、协作与发布流程。
 3. [macOS 真机验收清单](docs/MACOS_ACCEPTANCE.md)：需要朋友在 Mac 上逐项验证的项目和结果模板。
 4. [v0.4.25 更新日志](docs/releases/v0.4.25.md)：这次交接所依据的最新已发布行为。
+5. [macOS 开发接管记录](docs/MACOS_DEVELOPMENT.md)：接管后的实际改动、验证与剩余事项。后续修复以此和当前源码恢复上下文。
+
+本机 Codex 可使用 `$open-voice-input-dev` 接管开发。Mac 版每次更新的标题和说明必须明确写出“Mac 版（macOS）”及具体改善；尚未发布的修复先记入 `CHANGELOG.md`，正式版本号由维护者统一。
 
 旧 README 和阶段文档中存在过时的剪贴板输入、独立校订与说话人分离描述。不要据此恢复已经移除的功能；遇到冲突时以当前源码、测试及上述交接说明为依据。
 

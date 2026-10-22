@@ -189,7 +189,7 @@ async function main() {
     } finally { await x.dispose(); }
   });
 
-  await test("pause drains native tail; resume sends silence gap and next audio without duplication", async () => {
+  await test("pause drains native tail; resume previews new speech without uploading the pause gap", async () => {
     const x = await fixture();
     try {
       await x.api.start({ captureMode: "microphone" });
@@ -212,10 +212,13 @@ async function main() {
       await x.api.stop();
       const silence = Buffer.alloc((secondStart - 2123) * 2);
       assert.equal(x.streams.length, 2);
-      assert.deepEqual(Buffer.concat(x.streams[1].chunks), Buffer.concat([silence, second]));
+      assert.deepEqual(Buffer.concat(x.streams[1].chunks), second);
       assert.equal(x.api.status().rawText, "Repeated words\n\nRepeated words");
       const state = await x.checkpoint();
-      assert.deepEqual(state.preview.windows.map(w => [w.startFrame, w.endFrame]), [[0, 2123], [2123, secondStart + 1607]]);
+      assert.deepEqual(state.preview.windows.map(w => [w.startFrame, w.endFrame]),
+        [[0, 2123], [2123, secondStart], [secondStart, secondStart + 1607]]);
+      assert.equal(state.preview.windows[1].skipped, "paused_silence");
+      assert.equal(state.segments[1].startFrame, secondStart, "resumed text retains its full-recording timestamp");
       await x.assertArchive(x.api, { microphone: Buffer.concat([first, tail, silence, second]) });
       assert.equal(x.nativeStops(), 1);
     } finally { await x.dispose(); }

@@ -14,4 +14,6 @@
 - If present, `.codex/local/MACOS_WORKSTATION.md` records private workstation paths and runtime commands. Keep this local material out of commits.
 - Use a `codex/macos-*` branch and keep native differences in the platform layer or Swift helper. Contribute through a pull request; main and release tags are maintained separately.
 - Keep synthetic/native protocol checks, application packaging, and hardware acceptance as separate evidence. Update the development baseline with actual results and leave untested permissions, audio capture, and text injection explicitly unverified.
+- The reusable local Codex skill is `$open-voice-input-dev`. Keep the repository handoff and development records current so a new session can take over from them.
+- Mac update titles and release notes must explicitly say **Mac 版（macOS）**, describe concrete user-visible improvements and distinguish tested behavior from outstanding hardware checks. Record unreleased fixes in `CHANGELOG.md`; coordinate official version numbers and tags with the maintainer.
 
