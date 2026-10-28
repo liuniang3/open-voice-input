@@ -89,6 +89,8 @@ function createAliMeetingStream({
   closeTimeoutMs = 1000,
   maxBufferedBytes = 65536,
   backpressurePollMs = 10,
+  heartbeatIntervalMs = 15000,
+  heartbeatTimeoutMs = 10000,
   signal
 } = {}) {
   if (typeof apiKey !== "string" || !apiKey.trim() || /[\r\n]/.test(apiKey)) {
@@ -98,7 +100,7 @@ function createAliMeetingStream({
   if (![8000, 16000].includes(sampleRate)) throw streamError("invalid_sample_rate");
   const maxChunkBytes = sampleRate / 10 * 2;
   if (![readyTimeoutMs, sendTimeoutMs, finishTimeoutMs, closeTimeoutMs,
-    maxBufferedBytes, backpressurePollMs].every(positiveInteger) || maxBufferedBytes < maxChunkBytes) {
+    maxBufferedBytes, backpressurePollMs, heartbeatIntervalMs, heartbeatTimeoutMs].every(positiveInteger) || maxBufferedBytes < maxChunkBytes) {
     throw streamError("invalid_limits");
   }
   if ((onSentence != null && typeof onSentence !== "function") ||
@@ -123,6 +125,8 @@ function createAliMeetingStream({
   let shutdown;
   let finishTimer;
   let previousSentence;
+  let heartbeatTimer;
+  let pongTimer;
   const readyTimer = setTimeout(() => fail("ready_timeout"), readyTimeoutMs);
 
   function notifyError(error) {
@@ -138,6 +142,8 @@ function createAliMeetingStream({
     shutdown = deferred();
     clearTimeout(readyTimer);
     clearTimeout(finishTimer);
+    clearInterval(heartbeatTimer);
+    clearTimeout(pongTimer);
     detachSignal();
     for (const cancel of [...pendingSends]) cancel(failure || streamError("closed"));
     if (!socket || socket.readyState === 3) {
@@ -234,7 +240,7 @@ function createAliMeetingStream({
     if (state !== "connecting" || failure || runSent) return;
     observed(control("run-task", {
       task_group: "audio", task: "asr", function: "recognition", model,
-      parameters: { format: "pcm", sample_rate: sampleRate }, input: {}
+      parameters: { format: "pcm", sample_rate: sampleRate, heartbeat: true }, input: {}
     }, () => { runSent = true; }));
   }
 
@@ -287,6 +293,16 @@ function createAliMeetingStream({
         state = "ready";
         clearTimeout(readyTimer);
         readyState.resolve();
+        // Silent PCM still needs the ASR heartbeat option above. WebSocket ping
+        // separately detects a half-open transport, even when send() succeeds.
+        if (typeof socket.ping === "function") {
+          heartbeatTimer = setInterval(() => {
+            if (failure || state !== "ready" || pongTimer) return;
+            pongTimer = setTimeout(() => fail("heartbeat_timeout"), heartbeatTimeoutMs);
+            try { socket.ping(); } catch { fail("connection_failed"); }
+          }, heartbeatIntervalMs);
+          heartbeatTimer.unref?.();
+        }
         break;
       case "result-generated":
         if (state !== "ready") return fail("unexpected_result");
@@ -365,6 +381,7 @@ function createAliMeetingStream({
       socket.on("open", handleOpen);
       socket.on("message", handleMessage);
       socket.on("error", () => fail("connection_failed"));
+      socket.on("pong", () => { clearTimeout(pongTimer); pongTimer = null; });
       socket.on("close", () => {
         if (state !== "finished" && !failure) fail("disconnected");
       });

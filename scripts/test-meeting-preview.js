@@ -33,7 +33,7 @@ function fixture(options = {}) {
   const streams = [];
   const reads = [];
   let saves = 0;
-  const api = createMeetingPreview({ state, paceMs: 0, reconnectDelayMs: 0,
+  const api = createMeetingPreview({ state, paceMs: 0, reconnectDelayMs: 0, autoRetry: false, resultStallSeconds: 0,
     readAudio: async (start, end) => { reads.push([start, end]); return wave(start, end); },
     createStream: callbacks => {
       const stream = { callbacks, chunks: [], closed: 0, finishes: 0,
@@ -466,11 +466,11 @@ async function main() {
     await x.api.shutdown();
   });
 
-  await test("default windows never exceed ten minutes and invalid options cannot lose spans", async () => {
+  await test("explicit window limit is respected without imposing a ten-minute default", async () => {
     const state = {};
     const api = createMeetingPreview({ state, windowSeconds: 3600 });
     await api.recover(RATE * 1250);
-    assert.deepEqual(state.preview.windows.map(w => w.endFrame - w.startFrame), [RATE * 600, RATE * 600, RATE * 50]);
+    assert.deepEqual(state.preview.windows.map(w => w.endFrame - w.startFrame), [RATE * 1250]);
     await api.shutdown();
     assert.throws(() => createMeetingPreview({ state: {}, windowSeconds: NaN }), { code: "preview_limits_invalid" });
   });
@@ -504,7 +504,7 @@ async function main() {
   await test("twenty-minute rotation keeps exact ordered coverage, bounded sockets and a recoverable retiring failure", async () => {
     let opened = 0; let openCount = 0; let maxOpen = 0; const states = [];
     const state = {};
-    const api = createMeetingPreview({ state, paceMs: 0, reconnectDelayMs: 0,
+    const api = createMeetingPreview({ state, paceMs: 0, reconnectDelayMs: 0, windowSeconds: 600, autoRetry: false,
       readAudio: async (start, end) => quietWave(start, end),
       createStream: ({ onSentence }) => {
         const id = ++opened; openCount++; maxOpen = Math.max(maxOpen, openCount);
@@ -539,7 +539,7 @@ async function main() {
     assert.equal(x.api.invalidate(-1, RATE), 0);
     assert.equal(x.api.invalidate(5, 5), 0);
     assert.deepEqual(x.api.snapshot().segments, finals);
-    assert.equal(x.state.preview.windows[0].error.code, "preview_audio_changed");
+    assert.equal(x.state.preview.windows.find(w => w.repair).error.code, "preview_audio_changed");
     assert.equal(x.state.preview.windows[1].status, "completed");
     await x.api.waitForIdle();
     assert.equal(x.streams.length, 2, "invalidation never starts a replay");
@@ -551,12 +551,12 @@ async function main() {
     await x.api.shutdown();
   });
 
-  await test("late audio cancels active read-ahead, drops draft and rejects stale socket callbacks", async () => {
+  await test("late unsent audio refreshes read-ahead without closing the live task", async () => {
     const send = deferred();
     let changedAudio = false;
     const x = fixture({ readAudio: async (start, end) => {
       const wav = wave(start, end);
-      if (changedAudio) wav.writeInt16LE(777, 44);
+      if (changedAudio) for (let f = Math.max(start, RATE / 2); f < end; f++) wav.writeInt16LE(777, 44 + (f - start) * 2);
       return wav;
     }, configure: (s, n) => {
       if (n !== 1) return;
@@ -571,17 +571,15 @@ async function main() {
     await turn();
     assert.equal(x.streams[0].chunks.length, 1);
     changedAudio = true;
-    assert.equal(x.api.invalidate(RATE / 2, RATE), 1, "also invalidate stale read-ahead not yet sent");
-    await x.api.waitForIdle();
-    assert.equal(x.streams[0].closed, 1);
-    assert.equal(x.api.snapshot().previewText, "");
-    assert.equal(x.api.snapshot().segments[0].text, "retained final");
-    x.streams[0].callbacks.onSentence({ id: "1", text: "obsolete", beginMs: 100, endMs: 200, final: true });
-    assert.equal(x.api.snapshot().segments.length, 1);
-    await x.api.retry();
-    assert.equal(x.streams[1].chunks[0].readInt16LE(0), 777, "retry rereads changed durable audio");
-    assert.equal(x.api.snapshot().failedSegments, 0);
+    const affected = x.api.invalidate(RATE / 2, RATE);
     send.resolve();
+    await x.api.waitForIdle();
+    assert.equal(affected, 0, "unsubmitted samples need a cache refresh, not an ASR replay");
+    assert.equal(x.streams[0].closed, 0);
+    assert.equal(x.streams.length, 1);
+    assert.equal(x.api.snapshot().segments[0].text, "retained final");
+    assert.equal(Buffer.concat(x.streams[0].chunks).readInt16LE(RATE), 777, "the original socket receives the updated durable samples");
+    assert.equal(x.api.snapshot().failedSegments, 0);
     await x.api.shutdown();
   });
 
@@ -663,10 +661,10 @@ async function main() {
     } finally { await x.api.shutdown(); }
   });
 
-  await test("default pause rotation starts at 9m30s and restart checkpoints the released suffix", async () => {
+  await test("explicit bounded pause rotation checkpoints the released suffix", async () => {
     const state = {};
     let sealed;
-    const x = fixture({ state, readAudio: async (start, end) => quietWave(start, end, [[0, RATE * 615]]),
+    const x = fixture({ state, windowSeconds: 600, readAudio: async (start, end) => quietWave(start, end, [[0, RATE * 615]]),
       onChange: () => {
         if (!sealed && state.preview.windows.length === 1 && state.preview.windows[0].rotationBoundary === "pause") {
           sealed = structuredClone(state);
@@ -685,6 +683,216 @@ async function main() {
         assert.equal(restored.api.snapshot().failedSegments, 2);
       } finally { await restored.api.shutdown(); }
     } finally { await x.api.shutdown(); }
+  });
+
+  await test("one healthy task keeps language context through thirty minutes and saving intervals", async () => {
+    const state = {}, updates = [];
+    let opened = 0, frames = 0, finished = 0;
+    const api = createMeetingPreview({ state, paceMs: 0, readSeconds: 40,
+      readAudio: async (a, b) => {
+        assert(b - a <= RATE * 40);
+        return quietWave(a, b);
+      }, createStream: ({ onSentence }) => {
+        opened++;
+        return { ready: Promise.resolve(), appendPcm: async pcm => {
+          frames += pcm.length / 2;
+          onSentence({ id: "continuous", text: "Continuous draft", beginMs: 0, endMs: frames * 1000 / RATE, final: false });
+        }, finish: async () => {
+          finished++;
+          onSentence({ id: "continuous", text: "Complete continuous speech", beginMs: 0, endMs: frames * 1000 / RATE, final: true });
+        }, close() {} };
+      }, onChange: value => { if (value.previewText) updates.push(value.previewText); } });
+    try {
+      for (const seconds of [30, 60, 600, 1200, 1801]) {
+        api.kick(RATE * seconds);
+        await api.waitForIdle();
+        assert.equal(opened, 1);
+        assert.equal(finished, 0);
+        assert.equal(frames, RATE * seconds);
+      }
+      assert(updates.length > 0);
+      await api.drain(RATE * 1801 + 17);
+      assert.equal(finished, 1);
+      assert.equal(frames, RATE * 1801 + 17);
+      assert.equal(state.preview.windows.length, 1);
+      assert.equal(api.snapshot().segments[0].text, "Complete continuous speech");
+    } finally { await api.shutdown(); }
+  });
+
+  await test("late submitted audio repairs only affected sentences while live drafts continue", async () => {
+    let time = 0;
+    const x = fixture({ now: () => time, autoRetry: true, configure: (s, n) => {
+      if (n === 1) s.finish = async () => {};
+      else s.finish = async () => s.callbacks.onSentence({ id: "fixed", text: "Repaired middle", beginMs: 0, endMs: 600, final: true });
+    } });
+    try {
+      x.api.kick(RATE); await x.api.waitForIdle();
+      const emit = x.streams[0].callbacks.onSentence;
+      emit({ id: "before", text: "Keep before", beginMs: 0, endMs: 200, final: true });
+      emit({ id: "middle", text: "Old middle", beginMs: 200, endMs: 800, final: true });
+      emit({ id: "after", text: "Keep after", beginMs: 800, endMs: 1000, final: true });
+      assert.equal(x.api.invalidate(RATE * .4, RATE * .6), 1);
+      assert.equal(x.streams[0].closed, 0);
+      assert.equal(x.state.preview.windows[0].status, "streaming");
+      assert.deepEqual(x.api.snapshot().segments.map(s => s.text), ["Keep before", "Old middle", "Keep after"]);
+      time = 3000;
+      x.api.kick(RATE * 2); await x.api.waitForIdle();
+      emit({ id: "new", text: "Still live", beginMs: 1000, endMs: 2000, final: false });
+      assert.equal(x.api.snapshot().previewText, "Still live");
+      assert.equal(x.streams[0].closed, 0);
+      assert.equal(x.streams.length, 2);
+      assert.deepEqual(Buffer.concat(x.streams[1].chunks), wave(RATE * .2, RATE * .8).subarray(44));
+      assert.deepEqual(x.api.snapshot().segments.map(s => s.text), ["Keep before", "Repaired middle", "Keep after"]);
+      assert.equal(x.api.snapshot().failedSegments, 0);
+      const restored = fixture({ state: structuredClone(x.state) });
+      try {
+        await restored.api.recover(RATE * 2);
+        assert.deepEqual(restored.api.snapshot().segments.map(s => s.text), ["Keep before", "Repaired middle", "Keep after"]);
+        assert.equal(restored.streams.length, 0);
+      } finally { await restored.api.shutdown(); }
+    } finally { await x.api.shutdown(); }
+  });
+
+  await test("automatic disconnect recovery preserves confirmed text and replays only its tail", async () => {
+    let time = 0;
+    const x = fixture({ autoRetry: true, now: () => time, reconnectDelayMs: 100,
+      configure: (s, n) => {
+        if (n !== 1) return;
+        const append = s.appendPcm;
+        s.appendPcm = async pcm => {
+          await append(pcm);
+          if (s.chunks.length === 1) s.callbacks.onSentence({ id: "0", text: "Keep confirmed", beginMs: 0, endMs: 100, final: true });
+          if (s.chunks.length === 3) s.callbacks.onError(new Error("private transport body"));
+        };
+      } });
+    try {
+      x.api.kick(RATE); await x.api.waitForIdle();
+      time = 1000;
+      x.api.kick(RATE * 2); await x.api.waitForIdle();
+      const replay = x.streams.find(s => s !== x.streams[0] && s.chunks[0]?.readInt16LE(0) === wave(RATE / 10, RATE / 10 + 1).readInt16LE(44));
+      assert(replay);
+      assert.deepEqual(Buffer.concat(replay.chunks), wave(RATE / 10, RATE).subarray(44));
+      assert.equal(x.api.snapshot().segments[0].text, "Keep confirmed");
+      assert.equal(x.api.snapshot().failedSegments, 0);
+      await x.api.drain(RATE * 2);
+      assert.deepEqual(x.api.snapshot().segments.map(s => s.text), ["Keep confirmed", "Same words", "Same words"]);
+      assert(!JSON.stringify(x.state).includes("private transport body"));
+    } finally { await x.api.shutdown(); }
+  });
+
+  await test("automatic retries stop after five attempts and remain manually recoverable", async () => {
+    let time = 0, offline = true;
+    const x = fixture({ autoRetry: true, now: () => time, configure: s => {
+      if (offline) s.ready = Promise.reject(new Error("offline"));
+    } });
+    try {
+      x.api.kick(RATE); await x.api.waitForIdle();
+      for (let i = 0; i < 8; i++) { time += 100000; x.api.kick(RATE); await x.api.waitForIdle(); }
+      assert.equal(x.streams.length, 6);
+      assert.equal(x.state.preview.windows[0].autoAttempts, 5);
+      assert.equal(x.api.snapshot().failedSegments, 1);
+      offline = false;
+      await x.api.retry();
+      assert.equal(x.api.snapshot().failedSegments, 0);
+    } finally { await x.api.shutdown(); }
+  });
+
+  await test("voiced audio without any results is detected; silence and progressing drafts are safe", async () => {
+    const stuck = fixture({ resultStallSeconds: .3, readAudio: async (a, b) => quietWave(a, b) });
+    try {
+      stuck.api.kick(RATE); await stuck.api.waitForIdle();
+      assert.equal(stuck.state.preview.windows[0].error.code, "preview_result_timeout");
+      assert.equal(stuck.streams[0].closed, 1);
+    } finally { await stuck.api.shutdown(); }
+    for (const mode of ["silence", "drafts", "stale"]) {
+      const x = fixture({ resultStallSeconds: .3,
+        readAudio: async (a, b) => quietWave(a, b, mode === "silence" ? [[0, RATE * 2]] : []),
+        configure: s => {
+          if (mode === "silence") return;
+          const append = s.appendPcm;
+          s.appendPcm = async pcm => {
+            await append(pcm);
+            s.callbacks.onSentence({ id: "draft", text: "Listening", beginMs: 0,
+              endMs: mode === "stale" ? 100 : s.chunks.length * 100, final: false });
+          };
+        } });
+      try {
+        x.api.kick(RATE * 2); await x.api.waitForIdle();
+        assert.equal(x.api.snapshot().failedSegments, mode === "stale" ? 1 : 0);
+        assert.equal(x.streams.length, 1);
+      } finally { await x.api.shutdown(); }
+    }
+  });
+
+  await test("a nine-minute pause does not queue paced silence before resumed speech", async () => {
+    const resumedAt = RATE * 563;
+    let time = 0;
+    const x = fixture({ now: () => time, paceMs: 90, sleep: async ms => { time += ms; },
+      readAudio: async (a, b) => quietWave(a, b, [[RATE, resumedAt]]),
+      configure: s => {
+        const append = s.appendPcm;
+        s.appendPcm = async pcm => {
+          await append(pcm);
+          s.callbacks.onSentence({ id: "current", text: "Resumed speech", beginMs: 0, endMs: 50, final: false });
+        };
+      } });
+    try {
+      x.api.kick(RATE); await x.api.waitForIdle(); await x.api.drain(RATE);
+      const before = time;
+      x.api.kick(resumedAt + 1733); await x.api.waitForIdle();
+      assert.equal(x.streams.length, 2);
+      assert.equal(x.api.snapshot().previewText, "Resumed speech");
+      assert(time - before < 1000, "pause duration must not become ASR backlog");
+      assert.deepEqual(Buffer.concat(x.streams[1].chunks), quietWave(resumedAt, resumedAt + 1733).subarray(44));
+      const skipped = x.state.preview.windows.find(w => w.skipped);
+      assert.deepEqual([skipped.startFrame, skipped.endFrame, skipped.sentFrame], [RATE, resumedAt, RATE]);
+      await x.api.drain(resumedAt + 1733);
+      assert.equal(x.api.snapshot().segments.at(-1).startFrame, resumedAt);
+      assert.equal(x.api.snapshot().failedSegments, 0);
+    } finally { await x.api.shutdown(); }
+  });
+
+  await test("pause-gap skipping never discards quiet nonzero speech or loses late source audio", async () => {
+    let late = false;
+    const x = fixture({ readAudio: async (a, b) => {
+      const wav = quietWave(a, b, late ? [] : [[RATE, RATE * 4]]);
+      if (a <= RATE * 4 && b > RATE * 4) wav.writeInt16LE(1, 44 + (RATE * 4 - a) * 2);
+      return wav;
+    } });
+    try {
+      x.api.kick(RATE); await x.api.waitForIdle(); await x.api.drain(RATE);
+      for (const end of [RATE * 2, RATE * 3]) { x.api.kick(end); await x.api.waitForIdle(); assert.equal(x.streams.length, 1); }
+      x.api.kick(RATE * 5); await x.api.waitForIdle();
+      assert.equal(x.streams.length, 2);
+      assert.equal(x.streams[1].chunks[0].readInt16LE(0), 1);
+      late = true;
+      assert.equal(x.api.invalidate(RATE, RATE * 2), 1);
+      await x.api.retry();
+      assert.equal(x.api.snapshot().failedSegments, 0);
+      assert.deepEqual(Buffer.concat(x.streams[2].chunks), quietWave(RATE, RATE * 2).subarray(44));
+    } finally { await x.api.shutdown(); }
+  });
+
+  await test("late source audio cannot publish an obsolete retiring task as completed", async () => {
+    const receipt = deferred();
+    const x = fixture({ windowSeconds: .2, configure: (s, n) => {
+      if (n !== 1) return;
+      const finish = s.finish;
+      s.finish = async () => { await receipt.promise; await finish(); };
+    } });
+    try {
+      x.api.kick(RATE * .3);
+      for (let i = 0; i < 20 && x.streams.length < 2; i++) await turn();
+      assert.equal(x.state.preview.windows[0].status, "finishing");
+      assert.equal(x.api.invalidate(0, RATE * .1), 1);
+      receipt.resolve();
+      await x.api.waitForIdle();
+      assert.equal(x.state.preview.windows[0].status, "failed");
+      assert.equal(x.state.preview.windows[0].error.code, "preview_audio_changed");
+      assert.equal(x.streams[1].closed, 0, "the newer live connection keeps running");
+      await x.api.retry();
+      assert.equal(x.api.snapshot().failedSegments, 0);
+    } finally { receipt.resolve(); await x.api.shutdown(); }
   });
 
   console.log(`Meeting preview: ${count} tests passed.`);

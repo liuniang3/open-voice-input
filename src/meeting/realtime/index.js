@@ -234,8 +234,8 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
           // Preserve native gaps (e.g. a silent loopback endpoint) on the shared session timeline.
           const expectedStart = sourceStart + t.originOffset;
           const start = Math.max(t.frames, clockStart != null && clockStart - expectedStart > RATE / 4 ? clockStart : expectedStart);
-          if (isStreaming()) preview?.invalidate(start, start + pcm.length / 2);
           await writePcm(t.path, pcm, start);
+          if (isStreaming()) preview?.invalidate(start, start + pcm.length / 2);
           // An endpoint can deliver late audio after we previewed its interval as
           // silence. Invalidate exactly those windows; never silently lose late speech.
           for (const segment of isStreaming() ? [] : state.segments) {
@@ -264,8 +264,8 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
         if ((await fs.stat(fullPath)).size > 32 * 1024 * 1024) throw new Error("live_chunk_too_large");
         const raw = await fs.readFile(fullPath);
         const pcm = normalizeChunk(raw, format);
-        if (isStreaming()) preview?.invalidate(t.frames, t.frames + pcm.length / 2);
         await writePcm(t.path, pcm, t.frames);
+        if (isStreaming()) preview?.invalidate(t.frames, t.frames + pcm.length / 2);
         t.frames += pcm.length / 2;
         t.seq = seq;
       }
@@ -275,8 +275,8 @@ function createRealtimeMeetingService({ captureService, getSettings = () => ({})
       if (info?.size && !t.partRecovered) {
         if (info.size > 32 * 1024 * 1024) throw new Error("live_partial_too_large");
         const pcm = normalizeChunk(await fs.readFile(part), format);
-        if (isStreaming()) preview?.invalidate(t.frames, t.frames + pcm.length / 2);
         await writePcm(t.path, pcm, t.frames);
+        if (isStreaming()) preview?.invalidate(t.frames, t.frames + pcm.length / 2);
         t.frames += pcm.length / 2;
         t.partRecovered = true;
       }
