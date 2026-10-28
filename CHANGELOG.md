@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Fixed
+
+- Keep healthy Alibaba realtime meeting tasks open across Markdown saves and the previous ten-minute rotation boundary. Archive reads remain bounded to 40 seconds and PCM packets to 100 ms; MiMo non-realtime fallback retains its separate provider-limited segments.
+- Prevent late microphone/system audio from closing an entire live ASR task. Refresh unsent mixed PCM, checkpoint affected submitted sentences as separate repair jobs and replace only successfully repaired ranges. Keep ongoing preview and original native audio intact; drain final repairs under the existing stop deadline.
+- Enable Alibaba silence heartbeats, detect half-open WebSocket connections with ping/pong, and detect sustained voiced audio with no recognition results. Automatically retry failed ranges up to five times with backoff, retaining confirmed text and manual retry checkpoints.
+- Reuse the collaborator's shared pause-gap handling from 8a72d3b for Windows: skip only exact zero PCM after an explicit pause when uploading, retaining complete local WAVs and original timestamps. Quiet nonzero speech and late-track recovery remain intact.
+
+### Development
+
+- Codex maintains Windows; the collaborator owns macOS native changes and hardware validation. Shared service interfaces remain compatible and use the existing platform CI matrix.
+
+### Validation
+
+- All 76 shared regression scripts pass locally, including 39 preview cases, 29 transport cases and 16 archived-audio integration cases. Tests cover thirty minutes of simulated continuous audio, a nine-minute pause, late-track repair, stopped-session recovery, repeated phrases, half-open sockets and the automatic retry limit. Rendered meeting UI checks pass across desktop and narrow viewports.
+- A live Qwen Streaming API check used approximately 38 seconds of synthetic speech and silence over one connection, receiving 19 partial events and two final events with no transport error. This is a bounded live API smoke check, not a multi-hour hardware reliability claim. No private audio, credentials, screenshots or response bodies are included in the commit.
+
 ## v0.4.25 - 2026-10-19
 
 ### Fixed
