@@ -441,6 +441,9 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
       // Explicitly replaying a historical failed task is transactional: cancel
       // stale staged results. Live capture uses a separate bounded repair below.
       if (!ctx && w.status !== "completed") {
+        for (const retiringContext of retiring.keys()) {
+          if (retiringContext.window === w) fail(retiringContext, "preview_audio_changed");
+        }
         if (retryActive?.window === w) fail(retryActive, "preview_audio_changed");
         const queued = retryQueue.indexOf(w);
         if (queued >= 0) retryQueue.splice(queued, 1);
@@ -477,8 +480,6 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
       repair.autoAttempts = 0;
       repair.nextAutoAttemptAt = Math.min(repair.nextAutoAttemptAt ?? Infinity,
         now() + Math.max(reconnectDelayMs, 2000));
-      if (ctx) continue;
-      for (const ctx of retiring.keys()) if (ctx.window === w) fail(ctx, "preview_audio_changed");
     }
     if (affected) changed();
     return affected;

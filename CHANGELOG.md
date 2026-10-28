@@ -17,7 +17,7 @@ All notable changes to this project are documented here.
 
 ### Validation
 
-- All 76 shared regression scripts pass locally, including 39 preview cases, 29 transport cases and 16 archived-audio integration cases. Tests cover thirty minutes of simulated continuous audio, a nine-minute pause, late-track repair, stopped-session recovery, repeated phrases, half-open sockets and the automatic retry limit. Rendered meeting UI checks pass across desktop and narrow viewports.
+- All 76 shared regression scripts pass locally, including 40 preview cases, 29 transport cases and 16 archived-audio integration cases. Tests cover thirty minutes of simulated continuous audio, a nine-minute pause, late-track repair, stopped-session recovery, repeated phrases, half-open sockets and the automatic retry limit. Rendered meeting UI checks pass across desktop and narrow viewports.
 - A live Qwen Streaming API check used approximately 38 seconds of synthetic speech and silence over one connection, receiving 19 partial events and two final events with no transport error. This is a bounded live API smoke check, not a multi-hour hardware reliability claim. No private audio, credentials, screenshots or response bodies are included in the commit.
 
 ## v0.4.25 - 2026-10-19

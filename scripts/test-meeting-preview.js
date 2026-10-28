@@ -873,6 +873,28 @@ async function main() {
     } finally { await x.api.shutdown(); }
   });
 
+  await test("late source audio cannot publish an obsolete retiring task as completed", async () => {
+    const receipt = deferred();
+    const x = fixture({ windowSeconds: .2, configure: (s, n) => {
+      if (n !== 1) return;
+      const finish = s.finish;
+      s.finish = async () => { await receipt.promise; await finish(); };
+    } });
+    try {
+      x.api.kick(RATE * .3);
+      for (let i = 0; i < 20 && x.streams.length < 2; i++) await turn();
+      assert.equal(x.state.preview.windows[0].status, "finishing");
+      assert.equal(x.api.invalidate(0, RATE * .1), 1);
+      receipt.resolve();
+      await x.api.waitForIdle();
+      assert.equal(x.state.preview.windows[0].status, "failed");
+      assert.equal(x.state.preview.windows[0].error.code, "preview_audio_changed");
+      assert.equal(x.streams[1].closed, 0, "the newer live connection keeps running");
+      await x.api.retry();
+      assert.equal(x.api.snapshot().failedSegments, 0);
+    } finally { receipt.resolve(); await x.api.shutdown(); }
+  });
+
   console.log(`Meeting preview: ${count} tests passed.`);
 }
 
