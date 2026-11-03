@@ -2,7 +2,7 @@
 
 The current development version supports Windows/macOS and a **live meeting** workflow: Alibaba `qwen-audio-3.0-asr-flash-streaming` by default, or `fun-asr-realtime`, with separate provisional and confirmed text. When Alibaba is unavailable, `mimo-v2.5-asr` provides non-realtime segmented transcription as a fallback. Choose microphone, system audio, or both; use a floating window and pause/resume while keeping full local audio. Transcription and Markdown autosave intervals are configured independently. After stopping, generate a hierarchical mindmap and a coherent prose article that rewrites the speaker's ideas in context, optionally giving the model an additional MiMo full-audio review as evidence. Existing historical minutes still render in their old format. See [meeting behavior, outputs and recovery](docs/MEETING_REALTIME.md).
 
-Live ASR now prefers pauses when rotating Alibaba connections or segmenting MiMo fallback uploads. Continuous speech remains bounded by the existing time limits. Explicitly truncated MiMo output is split into smaller, checkpointed requests; completed ranges are reused and ordered by audio time. Local recordings remain complete, and Markdown autosave stays independent.
+Healthy Alibaba live ASR now keeps one task open instead of restarting at Markdown saves or every ten minutes. Silence heartbeats, transport checks and bounded background recovery handle interruptions. Late dual-track audio refreshes unsent PCM or repairs affected sentences without closing the live task. MiMo fallback uploads still prefer pauses within their provider limits; explicitly truncated output is split into checkpointed requests. Local recordings remain complete, and Markdown autosave stays independent. See [recovery behavior](docs/MEETING_REALTIME.md).
 
 New meeting and file summaries contain a short overview and topic-based chapters written as connected prose. A shared interactive mindmap uses colored curved branches, zoom, pan and expandable subtopics; chapter branches navigate to the corresponding prose. Larger maps start at chapter level, and narrow panes switch between map and article. Expand the source evidence below a paragraph to inspect its transcript quotes or seek the saved audio. Times identify source intervals, not exact word boundaries. Markdown, TXT and Word exports retain the overview and chapter structure; older summaries remain readable without regeneration. Summaries still depend on the selected model's ability to preserve meaning and important details.
 
@@ -194,7 +194,7 @@ npm run dist
 
 Artifacts are written to `dist/`. The build runs tests and a real-looking API key scan first. `.env` files, logs, recordings, and user settings are not included.
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, builds Windows and macOS artifacts, generates `SHA256SUMS.txt`, and uploads the updater channel metadata and blockmaps required by `electron-updater`.
+Pushing a `v*` tag runs `.github/workflows/release-windows.yml` for Windows only: installer, portable app, `SHA256SUMS.txt`, updater metadata and blockmap. The release becomes public only after its Windows assets are verified. macOS releases are maintained separately by the macOS collaborator using the `macos-v*` tags and `macos-updates` channel; their release numbers are independent. The legacy combined `.github/workflows/release.yml` is manual-only. Shared changes still run the Windows/macOS compatibility CI matrix.
 
 ## Short Dictation Usage
 

@@ -1,5 +1,7 @@
 # Open Voice Input
 
+阿里实时会议现改为持续长连接：30 秒只用于默认 Markdown 自动保存，不再按此周期或每 10 分钟关闭识别任务。双音轨晚到的数据单独补识别，静音保活和有限次数自动恢复不影响本地完整音频。暂停后恢复时跳过上传中的暂停零样本，避免数分钟的追赶延迟；安静但非零的语音及原始音频时间线仍保留。
+
 当前开发版支持 Windows/macOS 和 **会议实时转录**：默认阿里 `qwen-audio-3.0-asr-flash-streaming`，也可选 `fun-asr-realtime`；阿里不可用时可切换到 `mimo-v2.5-asr` 非实时分段备用模式。支持仅麦克风、仅系统声音、双轨、悬浮窗和暂停/继续；完整音频持续保留，转录与 Markdown 自动保存间隔可分别选择。停止后按需生成思维导图与连贯的内容整理，可选择让摘要模型同时参考 MiMo 全音频复核结果。详见 [会议实时转录与恢复说明](docs/MEETING_REALTIME.md)。
 
 macOS 使用 AVAudioEngine 采集麦克风、ScreenCaptureKit 采集系统声音（macOS 13+）。仅系统模式不会打开麦克风，也不会请求麦克风权限，但仍需要屏幕/系统音频录制权限；自动粘贴另需辅助功能权限。无边框窗口顶部、短语音悬浮窗和会议悬浮窗均提供原生拖动命中区域，兼容系统启用的三指拖移。已提供 Apple Silicon/Intel 构建配置，本次更新不宣称通过 Mac 真机采集、粘贴或触控板手势验证。在装有 Xcode Command Line Tools 的 Mac 上执行 `npm run dist:mac`，Windows 继续执行 `npm run dist`。
@@ -198,7 +200,7 @@ npm run dist
 
 构建产物位于 `dist/`。构建前会自动运行 API Key 扫描和测试；`.env`、日志、录音和用户设置不会进入安装包。
 
-推送 `v*` 标签后，`.github/workflows/release.yml` 会构建 Windows 与 macOS 发布包、生成 `SHA256SUMS.txt`，并上传 `electron-updater` 所需的更新清单和 blockmap。
+推送 `v*` 标签后，`.github/workflows/release-windows.yml` 只构建 Windows 安装版和便携版，生成 `SHA256SUMS.txt`，并上传自动更新清单和 blockmap；核验 Windows 附件齐全后才公开发布。macOS 由协作者单独维护，使用 `macos-v*` 标签和 `macos-updates` 通道，两端发布版本号独立。旧的双平台 `.github/workflows/release.yml` 仅保留手动触发；共享修改仍运行 Windows/macOS 兼容性 CI。
 
 ## 短语音使用
 

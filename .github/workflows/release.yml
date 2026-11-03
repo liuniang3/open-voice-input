@@ -1,10 +1,7 @@
-name: Build Desktop Release
+name: Build Desktop Release (Legacy Manual)
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: write

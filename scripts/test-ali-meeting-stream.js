@@ -161,7 +161,7 @@ async function main() {
         assert.deepEqual(run.value, {
           header: { action: "run-task", task_id: x.stream.taskId, streaming: "duplex" },
           payload: { task_group: "audio", task: "asr", function: "recognition", model,
-            parameters: { format: "pcm", sample_rate: 16000 }, input: {} }
+            parameters: { format: "pcm", sample_rate: 16000, heartbeat: true }, input: {} }
         });
         assert.match(x.stream.taskId, /^[a-f0-9]{32}$/);
         await tick();
@@ -393,6 +393,26 @@ async function main() {
       x.ws.sentence({ begin_time: 0, text: "raw", sentence_end: false });
       await tick();
       await assert.rejects(x.stream.finish(), code("sentence_callback_failed"));
+    });
+
+    await test("transport heartbeat detects a half-open socket and accepts timely pong receipts", async () => {
+      const offline = setup({ heartbeatIntervalMs: 5, heartbeatTimeoutMs: 15 });
+      offline.ws.ping = () => { offline.ws.pings = (offline.ws.pings || 0) + 1; };
+      await start(offline);
+      await delay(50);
+      await assert.rejects(offline.stream.finish(), code("heartbeat_timeout"));
+      assert.equal(offline.errors.length, 1);
+      assert(offline.ws.pings > 0);
+      const healthy = setup({ heartbeatIntervalMs: 5, heartbeatTimeoutMs: 20 });
+      healthy.ws.ping = () => { healthy.ws.pings = (healthy.ws.pings || 0) + 1; healthy.ws.emit("pong"); };
+      await start(healthy);
+      await delay(35);
+      assert(healthy.ws.pings > 0);
+      assert.equal(healthy.errors.length, 0);
+      await complete(healthy);
+      const previous = healthy.ws.pings;
+      await delay(15);
+      assert.equal(healthy.ws.pings, previous, "finished tasks release heartbeat timers");
     });
 
     await test("constructor and socket errors expose only local error codes", async () => {

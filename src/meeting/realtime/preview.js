@@ -25,23 +25,28 @@ function createArchiveReader(paths) {
  */
 function createMeetingPreview({ state, readAudio, createStream, onChange = () => {},
   persist = () => {}, now = Date.now, sleep, chunkMs = 100, paceMs = 90,
-  windowSeconds = 600, readSeconds = 40, connectTimeoutMs = 10000,
+  windowSeconds = null, readSeconds = 40, connectTimeoutMs = 10000,
   finishTimeoutMs = 10000, appendTimeoutMs = 10000, drainTimeoutMs = 15000,
-  reconnectDelayMs = 2000, pauseBeforeSeconds = 30 } = {}) {
+  reconnectDelayMs = 2000, pauseBeforeSeconds = 30, autoRetry = true, maxAutoAttempts = 5,
+  resultStallSeconds = 45 } = {}) {
   if (!state) throw failure("preview_dependencies_missing");
-  if (![chunkMs, windowSeconds, readSeconds, connectTimeoutMs, finishTimeoutMs,
+  if ((windowSeconds != null && (!Number.isFinite(windowSeconds) || windowSeconds <= 0))
+    || !Number.isSafeInteger(maxAutoAttempts) || maxAutoAttempts < 0
+    || ![chunkMs, readSeconds, connectTimeoutMs, finishTimeoutMs,
     appendTimeoutMs, drainTimeoutMs].every(value => Number.isFinite(value) && value > 0)
-    || ![paceMs, reconnectDelayMs, pauseBeforeSeconds].every(value => Number.isFinite(value) && value >= 0)) {
+    || ![paceMs, reconnectDelayMs, pauseBeforeSeconds, resultStallSeconds].every(value => Number.isFinite(value) && value >= 0)) {
     throw failure("preview_limits_invalid");
   }
   readAudio ||= createArchiveReader(() => state.audioPaths || []);
-  const limit = Math.max(1, Math.floor(Math.min(600, Math.max(0.001, windowSeconds)) * RATE));
+  // Archive reads and recovery jobs stay bounded; the healthy live ASR task
+  // does not restart at Markdown saves or an arbitrary ten-minute boundary.
+  const limit = windowSeconds == null ? Infinity : Math.max(1, Math.floor(windowSeconds * RATE));
   const softLimit = limit - Math.floor(Math.min(pauseBeforeSeconds * RATE, limit / 2));
   const readLimit = Math.max(1, Math.floor(Math.min(40, Math.max(0.001, readSeconds)) * RATE));
   const chunkFrames = Math.max(1, Math.floor(Math.min(100, Math.max(0.001, chunkMs)) * RATE / 1000));
   const preview = state.preview ||= { version: 1, cursorFrame: 0, windows: [] };
   preview.windows ||= [];
-  let cursor = Math.max(frame(preview.cursorFrame), ...preview.windows.map(w => frame(w.endFrame)));
+  let cursor = Math.max(frame(preview.cursorFrame), ...preview.windows.filter(w => !w.repair).map(w => frame(w.endFrame)));
   let available = cursor;
   let active = null;
   const retiring = new Map();
@@ -76,10 +81,15 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
   function snapshot() {
     const ordered = [];
     let draft = null;
+    const repairs = preview.windows.filter(w => w.repair && (w.status === "completed" || w.hasResult));
     for (const w of preview.windows) {
       for (const s of w.sentences) {
         const startFrame = Math.min(w.endFrame, w.startFrame + Math.round(s.beginMs * RATE / 1000));
         const endFrame = Math.min(w.endFrame, w.startFrame + Math.round(s.endMs * RATE / 1000));
+        if (repairs.some(r => r !== w && (!w.repair ? r.targetWindowIds.includes(w.id)
+          : preview.windows.indexOf(r) > preview.windows.indexOf(w))
+          && startFrame >= (r.resultStartFrame ?? r.startFrame)
+          && endFrame <= (r.resultEndFrame ?? r.endFrame))) continue;
         if (s.final) ordered.push({ startFrame, endFrame, text: s.text, status: "completed" });
         else if (w.status !== "failed" && w.status !== "completed" && (!draft || startFrame >= draft.startFrame)) {
           draft = { startFrame, text: s.text };
@@ -93,8 +103,9 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
       segments: ordered.map((s, index) => ({ index, ...s })),
       previewText: draft?.text || "", failedSegments, pendingSegments,
       failed: failedSegments,
-      status: closed ? "closed" : draining ? "draining" : retryWorker ? "retrying"
-        : active && !active.dead ? "streaming" : retiring.size ? "rotating" : failedSegments ? "needs_retry" : terminalStatus,
+      status: closed ? "closed" : draining ? "draining" : active && !active.dead
+        ? active.window.status === "connecting" ? "connecting" : "streaming"
+        : retryWorker ? "retrying" : retiring.size ? "rotating" : failedSegments ? "needs_retry" : terminalStatus,
       error: checkpointFailed ? { code: "preview_checkpoint_failed" } : null
     };
   }
@@ -148,6 +159,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
     if (!ctx.retry) ctx.window.sentences = ctx.window.sentences.filter(s => s.final);
     ctx.controller.abort();
     closeStream(ctx.stream);
+    ctx.window.nextAutoAttemptAt = now() + Math.max(0, reconnectDelayMs) * Math.min(16, 2 ** (ctx.window.autoAttempts || 0));
     if (!ctx.retry && !ctx.retiring) nextConnectAt = now() + Math.max(0, reconnectDelayMs);
     changed();
   }
@@ -194,10 +206,12 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
     if (ctx.dead || !input || typeof input.text !== "string") return;
     const w = ctx.window;
     const sentences = ctx.retry ? ctx.stagedSentences : w.sentences;
-    const begin = Number(input.beginMs ?? input.begin_time ?? 0);
-    const end = Number(input.endMs ?? input.end_time ?? begin);
+    const offsetMs = (ctx.baseFrame - w.startFrame) * 1000 / RATE;
+    const begin = Number(input.beginMs ?? input.begin_time ?? 0) + offsetMs;
+    const end = Number(input.endMs ?? input.end_time ?? input.beginMs ?? input.begin_time ?? 0) + offsetMs;
     if (!Number.isFinite(begin) || !Number.isFinite(end) || begin < 0 || end < begin) return;
-    const id = sentenceId(input.id ?? input.sentence_id ?? begin);
+    const localId = sentenceId(input.id ?? input.sentence_id ?? begin);
+    const id = ctx.baseFrame === w.startFrame ? localId : "resume:" + ctx.baseFrame + ":" + localId;
     const final = input.final === true || input.sentence_end === true;
     const prior = sentences.find(s => s.id === id);
     if (prior?.final) return;
@@ -205,11 +219,20 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
     const latestDraft = sentences.find(s => !s.final);
     if (!final && (begin < latestFinal || (latestDraft && begin < latestDraft.beginMs)
       || (prior && end < prior.endMs))) return;
+    if (prior && prior.text === input.text && prior.endMs === end && prior.final === final) return;
+    if (input.text.trim()) { ctx.voicedWithoutResult = 0; ctx.resultRevision++; }
     const next = { id, text: input.text, beginMs: begin, endMs: end, final };
     const updated = sentences.filter(s => s.id !== id && (s.final || (final && s.beginMs > begin)));
     updated.push(next);
     if (ctx.retry) ctx.stagedSentences = updated;
     else w.sentences = updated;
+    if (final && !ctx.retry) {
+      const a = w.startFrame + Math.round(begin * RATE / 1000);
+      const b = w.startFrame + Math.round(end * RATE / 1000);
+      const partialRepair = preview.windows.find(r => r.repair && r.targetWindowIds.includes(w.id)
+        && r.startFrame < b && r.endFrame > a && (r.startFrame > a || r.endFrame < b));
+      if (partialRepair) invalidate(a, b);
+    }
     changed();
   }
 
@@ -233,9 +256,51 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
   }
 
   function context(w, retry = false) {
-    return { window: w, retry, stagedSentences: retry ? [] : null,
+    return { window: w, retry, baseFrame: w.startFrame, audioRevision: 0,
+      voicedWithoutResult: 0, resultRevision: 0,
+      readingStart: w.startFrame, readingEnd: w.startFrame, inflightEndFrame: w.startFrame,
+      stagedSentences: retry ? [] : null,
       quiet: createQuietDetector(RATE), rotationReady: false,
       dead: false, stream: null, controller: new AbortController() };
+  }
+
+  async function readPcm(ctx, start, end) {
+    const wav = await wait(ctx, () => readAudio(start, end), appendTimeoutMs, "preview_audio_timeout");
+    if (!Buffer.isBuffer(wav) || wav.length !== 44 + (end - start) * 2
+      || wav.toString("ascii", 0, 4) !== "RIFF" || wav.toString("ascii", 8, 12) !== "WAVE"
+      || wav.toString("ascii", 36, 40) !== "data" || wav.readUInt32LE(24) !== RATE
+      || wav.readUInt16LE(22) !== 1 || wav.readUInt16LE(34) !== 16) {
+      throw failure("preview_audio_invalid");
+    }
+    return wav.subarray(44);
+  }
+
+  // Preserve archive timestamps and full WAVs without pacing minutes of pause
+  // zeros. Only exact digital zero after an explicit pause is skipped.
+  async function skipPausedSilence(ctx) {
+    if (!preview.skipPausedSilence || ctx.retry) return false;
+    const w = ctx.window;
+    let start = w.startFrame;
+    while (start < w.endFrame) {
+      const end = Math.min(w.endFrame, start + readLimit);
+      const revision = ctx.audioRevision;
+      ctx.readingStart = start; ctx.readingEnd = end;
+      const pcm = await readPcm(ctx, start, end);
+      if (revision !== ctx.audioRevision) continue;
+      let offset = 0;
+      while (offset < pcm.length && pcm.readInt16LE(offset) === 0) offset += 2;
+      start += offset / 2;
+      ctx.skippedThroughFrame = start;
+      if (offset < pcm.length) { preview.skipPausedSilence = false; break; }
+    }
+    if (start === w.startFrame) return false;
+    w.endFrame = start;
+    w.status = "completed";
+    w.skipped = "paused_silence";
+    cursor = start; preview.cursorFrame = cursor;
+    ctx.dead = true;
+    changed();
+    return true;
   }
 
   async function send(ctx) {
@@ -245,24 +310,30 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
       if (ctx.rotationReady || w.sentFrame >= w.endFrame) return;
       const end = Math.min(w.endFrame, w.sentFrame + readLimit);
       const start = w.sentFrame;
-      const wav = await wait(ctx, () => readAudio(start, end), appendTimeoutMs, "preview_audio_timeout");
-      if (!Buffer.isBuffer(wav) || wav.length !== 44 + (end - start) * 2
-        || wav.toString("ascii", 0, 4) !== "RIFF" || wav.toString("ascii", 8, 12) !== "WAVE"
-        || wav.toString("ascii", 36, 40) !== "data" || wav.readUInt32LE(24) !== RATE
-        || wav.readUInt16LE(22) !== 1 || wav.readUInt16LE(34) !== 16) {
-        throw failure("preview_audio_invalid");
-      }
-      const pcm = wav.subarray(44);
+      const revision = ctx.audioRevision;
+      ctx.readingStart = start; ctx.readingEnd = end;
+      const pcm = await readPcm(ctx, start, end);
       for (let sent = start; sent < end;) {
+        // A late track can change cached mixed PCM. Re-read unsent samples
+        // instead of discarding the healthy task and its language context.
+        if (revision !== ctx.audioRevision) break;
         const next = Math.min(end, sent + chunkFrames);
         const count = next - sent;
         const started = now();
         const packet = pcm.subarray((sent - start) * 2, (next - start) * 2);
+        const resultRevision = ctx.resultRevision;
+        ctx.inflightEndFrame = next;
         await wait(ctx, () => ctx.stream.appendPcm(packet),
           appendTimeoutMs, "preview_append_timeout");
         w.sentFrame = next;
         sent = next;
         const quiet = ctx.quiet.append(packet);
+        if (resultStallSeconds && !draining && ctx.resultRevision === resultRevision) {
+          let energy = 0;
+          for (let i = 0; i < packet.length; i += 2) energy += (packet.readInt16LE(i) / 32768) ** 2;
+          if (energy / count > 0.006 ** 2) ctx.voicedWithoutResult += count;
+          if (ctx.voicedWithoutResult >= resultStallSeconds * RATE) throw failure("preview_result_timeout");
+        }
         if (!ctx.retry && !draining && pauseBeforeSeconds > 0 && quiet && next - w.startFrame >= softLimit) {
           // Only cut at acknowledged PCM. Release the reserved/read-ahead suffix
           // so the next task sends it exactly once, even after a restart.
@@ -286,6 +357,11 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
     await wait(ctx, () => ctx.stream.finish(), finishTimeoutMs, "preview_finish_timeout");
     if (ctx.dead) throw failure("preview_aborted");
     if (ctx.retry) ctx.window.sentences = ctx.stagedSentences.filter(s => s.final);
+    if (ctx.window.repair) {
+      ctx.window.hasResult = true;
+      ctx.window.resultStartFrame = ctx.window.startFrame;
+      ctx.window.resultEndFrame = ctx.window.endFrame;
+    }
     ctx.window.status = "completed";
     ctx.window.sentences = ctx.window.sentences.filter(s => s.final);
     ctx.dead = true;
@@ -314,7 +390,10 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
         }
         const ctx = active;
         try {
-          if (!ctx.stream) await connect(ctx);
+          if (!ctx.stream) {
+            if (await skipPausedSilence(ctx)) { active = null; continue; }
+            await connect(ctx);
+          }
           await send(ctx);
           if (draining) {
             await finish(ctx);
@@ -327,7 +406,7 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
           } else break;
         } catch (error) {
           const allowed = ["preview_connect_timeout", "preview_finish_timeout", "preview_append_timeout",
-            "preview_audio_timeout", "preview_audio_invalid"];
+            "preview_audio_timeout", "preview_audio_invalid", "preview_result_timeout"];
           fail(ctx, allowed.includes(error?.code) ? error.code : "preview_stream_failed");
           active = null;
           break;
@@ -343,26 +422,64 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
     paused = false;
     terminalStatus = "idle";
     void startWorker();
+    if (autoRetry) void retry({ automatic: true }).catch(() => {});
   }
 
   function invalidate(startFrame, endFrame) {
     if (closed || !Number.isSafeInteger(startFrame) || !Number.isSafeInteger(endFrame)
       || startFrame < 0 || endFrame <= startFrame) return 0;
     let affected = 0;
-    for (const w of preview.windows) {
-      if (w.startFrame >= endFrame || w.endFrame <= startFrame) continue;
+    for (const w of [...preview.windows]) {
+      if (w.repair || w.startFrame >= endFrame || w.endFrame <= startFrame) continue;
+      const ctx = active?.window === w && !active.dead ? active : null;
+      if (ctx && startFrame < ctx.readingEnd && endFrame > ctx.readingStart) ctx.audioRevision++;
+      const replaying = retryActive?.window === w || retryQueue.includes(w);
+      const exposedEnd = replaying || w.skipped ? w.endFrame : Math.max(w.sentFrame,
+        ctx?.inflightEndFrame || w.startFrame, ctx?.skippedThroughFrame || w.startFrame);
+      if (startFrame >= exposedEnd) continue;
       affected++;
-      // Include reserved/read-ahead audio, not just acknowledged sends. A late
-      // track can otherwise change the archive while stale mixed PCM is queued.
-      if (active?.window === w) fail(active, "preview_audio_changed");
-      for (const ctx of retiring.keys()) if (ctx.window === w) fail(ctx, "preview_audio_changed");
-      if (retryActive?.window === w) fail(retryActive, "preview_audio_changed");
-      const queued = retryQueue.indexOf(w);
-      if (queued >= 0) retryQueue.splice(queued, 1);
-      w.status = "failed";
-      w.error = { code: "preview_audio_changed" };
-      w.revision = (w.revision || 0) + 1;
-      w.sentences = w.sentences.filter(s => s.final);
+      // Explicitly replaying a historical failed task is transactional: cancel
+      // stale staged results. Live capture uses a separate bounded repair below.
+      if (!ctx && w.status !== "completed") {
+        for (const retiringContext of retiring.keys()) {
+          if (retiringContext.window === w) fail(retiringContext, "preview_audio_changed");
+        }
+        if (retryActive?.window === w) fail(retryActive, "preview_audio_changed");
+        const queued = retryQueue.indexOf(w);
+        if (queued >= 0) retryQueue.splice(queued, 1);
+        w.status = "failed"; w.error = { code: "preview_audio_changed" };
+        w.sentences = w.sentences.filter(s => s.final);
+        continue;
+      }
+      let from = Math.max(w.startFrame, startFrame);
+      let to = Math.min(exposedEnd, endFrame);
+      // Replace complete confirmed sentences, never discard the unaffected
+      // words on either side of a patch through a sentence.
+      for (const s of w.sentences) {
+        const a = w.startFrame + Math.round(s.beginMs * RATE / 1000);
+        const b = w.startFrame + Math.round(s.endMs * RATE / 1000);
+        if (s.final && a < to && b > from) { from = Math.min(from, a); to = Math.max(to, b); }
+      }
+      let repair = preview.windows.find(r => r.repair && r.targetWindowIds.includes(w.id)
+        && ((r.status !== "completed" && r.startFrame < to && r.endFrame > from)
+          || (r.startFrame === from && r.endFrame === to)));
+      if (!repair) {
+        repair = { id: "repair-" + (++nextId), repair: true, targetWindowIds: [w.id],
+          startFrame: from, endFrame: to, sentFrame: from, sentences: [] };
+        preview.windows.push(repair); preview.nextWindowId = nextId;
+      } else {
+        if (retryActive?.window === repair) fail(retryActive, "preview_audio_changed");
+        const queued = retryQueue.indexOf(repair);
+        if (queued >= 0) retryQueue.splice(queued, 1);
+        const newStart = Math.min(repair.startFrame, from);
+        const shiftMs = (repair.startFrame - newStart) * 1000 / RATE;
+        repair.sentences = repair.sentences.map(s => ({ ...s, beginMs: s.beginMs + shiftMs, endMs: s.endMs + shiftMs }));
+        repair.startFrame = newStart; repair.endFrame = Math.max(repair.endFrame, to);
+      }
+      repair.status = "failed"; repair.error = { code: "preview_audio_changed" };
+      repair.autoAttempts = 0;
+      repair.nextAutoAttemptAt = Math.min(repair.nextAutoAttemptAt ?? Infinity,
+        now() + Math.max(reconnectDelayMs, 2000));
     }
     if (affected) changed();
     return affected;
@@ -385,12 +502,14 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
     if (closed) return Promise.resolve(snapshot());
     available = Math.max(available, frame(availableFrames));
     paused = true;
-    cancelRetries();
+    if (!autoRetry) cancelRetries();
+    let expired = false;
     draining = Promise.resolve().then(async () => {
       const timer = setTimeout(() => {
+        expired = true;
         fail(active, "preview_drain_timeout");
         for (const ctx of retiring.keys()) fail(ctx, "preview_drain_timeout");
-        fail(retryActive, "preview_drain_timeout");
+        cancelRetries();
         markUnsent("preview_drain_timeout");
       }, Math.max(1, drainTimeoutMs));
       try {
@@ -399,8 +518,14 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
         if (active && !active.dead) await startWorker();
         await Promise.all(retiring.values());
         markUnsent("preview_unsent");
+        if (retryWorker) await retryWorker;
+        // Final receipts can widen a late-audio repair to the complete sentence.
+        // Finish those repairs under the same bounded stop deadline, without
+        // starting a wholesale replay of old network failures.
+        if (autoRetry && !expired) await retry({ automatic: true, drainingRepairs: true });
       } finally { clearTimeout(timer); }
       active = null;
+      preview.skipPausedSilence = true;
       terminalStatus = "completed";
       changed();
       await durable();
@@ -408,20 +533,35 @@ function createMeetingPreview({ state, readAudio, createStream, onChange = () =>
     return draining.then(() => snapshot());
   }
 
-  function retry() {
-    if (closed || draining || typeof createStream !== "function") return Promise.resolve(snapshot());
+  function retry({ automatic = false, drainingRepairs = false } = {}) {
+    if (closed || (draining && !drainingRepairs) || typeof createStream !== "function") return Promise.resolve(snapshot());
     for (const w of preview.windows) {
       if (w.status !== "failed" || retryQueue.includes(w) || retryActive?.window === w) continue;
+      if (drainingRepairs && !w.repair) continue;
+      if (automatic && ((w.autoAttempts || 0) >= maxAutoAttempts || (!drainingRepairs && now() < (w.nextAutoAttemptAt || 0))
+        || !["preview_stream_failed", "preview_connect_timeout", "preview_append_timeout",
+          "preview_finish_timeout", "preview_audio_changed", "preview_result_timeout"].includes(w.error?.code))) continue;
+      if (automatic) w.autoAttempts = (w.autoAttempts || 0) + 1;
+      else w.autoAttempts = 0;
+      w.automaticReplay = automatic && w.error?.code !== "preview_audio_changed";
       w.status = "pending";
       retryQueue.push(w);
     }
+    if (!retryWorker && !retryQueue.length) return Promise.resolve(snapshot());
     if (!retryWorker && retryQueue.length) {
       retryWorker = Promise.resolve().then(async () => {
         while (retryQueue.length && !closed) {
           const w = retryQueue.shift();
           const ctx = context(w, true);
           retryActive = ctx;
-          w.sentFrame = w.startFrame;
+          if (w.automaticReplay && !w.repair) {
+            // Already confirmed sentences survive a transient disconnect. Replay
+            // only its unconfirmed tail, with timestamps translated to the archive.
+            ctx.baseFrame = Math.min(w.endFrame, Math.max(w.startFrame, ...w.sentences
+              .filter(s => s.final).map(s => w.startFrame + Math.round(s.endMs * RATE / 1000))));
+            ctx.stagedSentences = w.sentences.filter(s => s.final);
+          }
+          w.sentFrame = ctx.baseFrame;
           try { await connect(ctx); await send(ctx); await finish(ctx); }
           catch { fail(ctx); }
           retryActive = null;

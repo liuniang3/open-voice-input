@@ -1,0 +1,87 @@
+name: Build Windows Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Validate release version and notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          node -e "const fs=require('node:fs');const v=require('./package.json').version;if(process.env.GITHUB_REF_NAME!=='v'+v)throw Error('Tag/package version mismatch');if(!fs.existsSync('docs/releases/v'+v+'.md'))throw Error('Release notes missing');"
+      - uses: dtolnay/rust-toolchain@1.85.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/audio-capture-helper
+      - run: npm ci
+      - name: Build and test installer and portable app
+        run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: open-voice-input-windows
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
+            dist/SHA256SUMS.txt
+      - name: Upload Windows release draft
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Open Voice Input ${{ github.ref_name }} (Windows)
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
+            dist/SHA256SUMS.txt
+          body_path: docs/releases/${{ github.ref_name }}.md
+
+  publish-release:
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Windows release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets > release-assets.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const version = process.env.GITHUB_REF_NAME.replace(/^v/, '');
+          const assets = JSON.parse(fs.readFileSync('release-assets.json', 'utf8')).assets;
+          const names = new Set(assets.filter(asset => asset.size > 0).map(asset => asset.name));
+          const expected = [
+            `Open-Voice-Input-Setup-${version}-x64.exe`,
+            `Open-Voice-Input-Setup-${version}-x64.exe.blockmap`,
+            `Open-Voice-Input-Portable-${version}-x64.exe`,
+            'latest.yml', 'SHA256SUMS.txt'
+          ];
+          const missing = expected.filter(name => !names.has(name));
+          if (missing.length) throw Error(`Release assets missing or empty: ${missing.join(', ')}`);
+          console.log(`Verified ${expected.length} Windows assets.`);
+          NODE
+      - name: Publish complete Windows release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

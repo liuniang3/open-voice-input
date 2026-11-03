@@ -189,7 +189,7 @@ async function main() {
     } finally { await x.dispose(); }
   });
 
-  await test("pause drains native tail; resume sends silence gap and next audio without duplication", async () => {
+  await test("pause retains the full WAV timeline while resumed ASR skips its zero-only gap", async () => {
     const x = await fixture();
     try {
       await x.api.start({ captureMode: "microphone" });
@@ -212,10 +212,13 @@ async function main() {
       await x.api.stop();
       const silence = Buffer.alloc((secondStart - 2123) * 2);
       assert.equal(x.streams.length, 2);
-      assert.deepEqual(Buffer.concat(x.streams[1].chunks), Buffer.concat([silence, second]));
+      assert.deepEqual(Buffer.concat(x.streams[1].chunks), second);
       assert.equal(x.api.status().rawText, "Repeated words\n\nRepeated words");
       const state = await x.checkpoint();
-      assert.deepEqual(state.preview.windows.map(w => [w.startFrame, w.endFrame]), [[0, 2123], [2123, secondStart + 1607]]);
+      assert.deepEqual(state.preview.windows.map(w => [w.startFrame, w.endFrame]),
+        [[0, 2123], [2123, secondStart], [secondStart, secondStart + 1607]]);
+      assert.equal(state.preview.windows[1].skipped, "paused_silence");
+      assert.equal(state.segments[1].startFrame, secondStart, "speech keeps its full-recording timestamp");
       await x.assertArchive(x.api, { microphone: Buffer.concat([first, tail, silence, second]) });
       assert.equal(x.nativeStops(), 1);
     } finally { await x.dispose(); }
@@ -432,7 +435,7 @@ async function main() {
     } finally { await x.dispose(); }
   });
 
-  await test("late system audio marks an already submitted preview interval for explicit retry", async () => {
+  await test("late system audio stays checkpointed and is repaired while stopping", async () => {
     const x = await fixture();
     try {
       await x.api.start();
@@ -441,16 +444,45 @@ async function main() {
       await eventually(() => x.streams[0]?.frames >= 1600, "mic preview beyond two-second arrival margin");
       const system = await x.add("system", RATE * 2 + 1600, { value: 3000 });
       await x.api.flush();
+      assert.ok(x.api.status().failedSegments > 0, "changed submitted audio remains pending until replacement succeeds");
       await x.api.stop();
       await x.assertArchive(x.api, { microphone: mic, system });
       const expectedFirst = Math.round(mic.readInt16LE(0) / 2) + Math.round(system.readInt16LE(0) / 2);
       assert.notEqual(x.streams[0].chunks[0].readInt16LE(0), expectedFirst, "the original request lacked the late system samples");
-      assert.ok(x.api.status().failedSegments > 0,
-        "late source audio must leave a retry gap; completed preview cannot claim coverage of never-submitted speech");
+      assert.equal(x.api.status().failedSegments, 0, "stop completes the late-audio repair within its deadline");
       const calls = x.streams.length;
       await x.api.retry(); await x.api.waitForIdle();
-      assert.ok(x.streams.length > calls);
+      assert.equal(x.streams.length, calls, "successful repairs are not sent twice");
       assert.equal(x.api.status().failedSegments, 0);
+    } finally { await x.dispose(); }
+  });
+
+  await test("late system audio is repaired in the background without interrupting current preview", async () => {
+    let time = Date.now();
+    const x = await fixture({ serviceOptions: { now: () => time } });
+    try {
+      await x.api.start();
+      const mic = await x.add("microphone", RATE * 2 + 1600, { value: 1000 });
+      await x.api.flush(); await x.api.waitForIdle();
+      const first = x.streams[0];
+      const system = await x.add("system", RATE * 2 + 1600, { value: 3000 });
+      await x.api.flush(); await x.api.waitForIdle();
+      assert.equal(first.closes, 0, "late source audio must not close the current ASR task");
+      assert.equal(x.api.status().recording, true);
+      assert(x.api.status().previewText.length > 0);
+      assert(x.api.status().failedSegments > 0, "the repair remains visible until committed");
+      time += 3000;
+      await x.api.flush(); await x.api.waitForIdle();
+      assert.equal(first.closes, 0);
+      assert.equal(x.streams.length, 2);
+      assert.equal(x.api.status().failedSegments, 0);
+      const patch = Buffer.concat(x.streams[1].chunks);
+      assert(patch.length > 0 && patch.length <= 1600 * 2);
+      for (let i = 0; i < patch.length; i += 2) assert.equal(patch.readInt16LE(i),
+        Math.round(mic.readInt16LE(i) / 2) + Math.round(system.readInt16LE(i) / 2));
+      await x.api.stop();
+      assert.equal(x.api.status().failedSegments, 0, "final sentences have complete corrected coverage");
+      await x.assertArchive(x.api, { microphone: mic, system });
     } finally { await x.dispose(); }
   });
 
