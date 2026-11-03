@@ -200,7 +200,7 @@ npm run dist
 
 构建产物位于 `dist/`。构建前会自动运行 API Key 扫描和测试；`.env`、日志、录音和用户设置不会进入安装包。
 
-推送 `v*` 标签后，`.github/workflows/release.yml` 会构建 Windows 与 macOS 发布包、生成 `SHA256SUMS.txt`，并上传 `electron-updater` 所需的更新清单和 blockmap。
+推送 `v*` 标签后，`.github/workflows/release-windows.yml` 只构建 Windows 安装版和便携版，生成 `SHA256SUMS.txt`，并上传自动更新清单和 blockmap；核验 Windows 附件齐全后才公开发布。macOS 由协作者单独维护，使用 `macos-v*` 标签和 `macos-updates` 通道，两端发布版本号独立。旧的双平台 `.github/workflows/release.yml` 仅保留手动触发；共享修改仍运行 Windows/macOS 兼容性 CI。
 
 ## 短语音使用
 

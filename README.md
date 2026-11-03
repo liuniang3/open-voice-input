@@ -194,7 +194,7 @@ npm run dist
 
 Artifacts are written to `dist/`. The build runs tests and a real-looking API key scan first. `.env` files, logs, recordings, and user settings are not included.
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, builds Windows and macOS artifacts, generates `SHA256SUMS.txt`, and uploads the updater channel metadata and blockmaps required by `electron-updater`.
+Pushing a `v*` tag runs `.github/workflows/release-windows.yml` for Windows only: installer, portable app, `SHA256SUMS.txt`, updater metadata and blockmap. The release becomes public only after its Windows assets are verified. macOS releases are maintained separately by the macOS collaborator using the `macos-v*` tags and `macos-updates` channel; their release numbers are independent. The legacy combined `.github/workflows/release.yml` is manual-only. Shared changes still run the Windows/macOS compatibility CI matrix.
 
 ## Short Dictation Usage
 

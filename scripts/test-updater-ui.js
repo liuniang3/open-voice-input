@@ -13,6 +13,24 @@ const main = read("src/main.js");
 const updater = read("src/updater.js");
 const workflow = read(".github/workflows/release.yml");
 const pkg = JSON.parse(read("package.json"));
+const yaml = require("js-yaml");
+const windowsRelease = yaml.load(read(".github/workflows/release-windows.yml"));
+const legacyRelease = yaml.load(workflow);
+
+assert.equal(legacyRelease.on.push, undefined, "Windows tags must not trigger legacy macOS publishing");
+assert.deepEqual(windowsRelease.on.push.tags, ["v*"]);
+assert.deepEqual(Object.keys(windowsRelease.jobs).sort(), ["build-windows", "publish-release"]);
+assert.equal(windowsRelease.jobs["build-windows"]["runs-on"], "windows-latest");
+assert.equal(windowsRelease.jobs["publish-release"].needs, "build-windows");
+const releaseUpload = windowsRelease.jobs["build-windows"].steps.find(step => step.uses?.startsWith("softprops/action-gh-release@"));
+assert.equal(releaseUpload.with.draft, true, "release stays a draft until all artifacts exist");
+for (const asset of ["dist/*.exe", "dist/*.exe.blockmap", "dist/latest.yml", "dist/SHA256SUMS.txt"]) {
+  assert.ok(releaseUpload.with.files.includes(asset), `Windows release must publish ${asset}`);
+}
+assert.doesNotMatch(releaseUpload.with.files, /mac|\.dmg|\.zip/);
+const lock = JSON.parse(read("package-lock.json"));
+assert.equal(lock.version, pkg.version);
+assert.equal(lock.packages[""].version, pkg.version);
 
 for (const id of ["updateCurrentVersion", "updateStateBadge", "updateStatusTitle", "updateStatusDetail",
   "updateProgress", "updateCheckBtn", "updateDownloadBtn", "updateInstallBtn", "updateAutoCheckInput",

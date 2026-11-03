@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v0.4.26 - 2026-11-03 (Windows)
 
 ### Fixed
 
@@ -14,6 +14,7 @@ All notable changes to this project are documented here.
 ### Development
 
 - Codex maintains Windows; the collaborator owns macOS native changes and hardware validation. Shared service interfaces remain compatible and use the existing platform CI matrix.
+- Publish Windows installers, portable builds and updater metadata through a dedicated Windows release workflow. The legacy combined desktop release workflow is manual-only; macOS releases remain maintained separately.
 
 ### Validation
 
