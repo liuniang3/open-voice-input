@@ -102,6 +102,7 @@
       actionButton("prev").disabled = unavailable || page === 0;
       actionButton("next").disabled = unavailable || (page + 1) * PAGE_SIZE >= filteredCount;
       actionButton("clear-selection").disabled = unavailable || !selected.size;
+      actionButton("select-results").disabled = unavailable || !filteredCount;
       actionButton("remove-many").disabled = unavailable || !selected.size;
       $("select-page").disabled = unavailable || !visibleEntries.length;
       for (const action of ["import-cancel", "import-prev", "import-next", "import-confirm"]) {
@@ -394,6 +395,13 @@
         render(); $("entries").scrollTop = 0; return;
       }
       if (action === "clear-selection") { selected.clear(); renderSelection(); controls(); return; }
+      if (action === "select-results") {
+        const query = $("search").value.trim().toLocaleLowerCase();
+        for (const entry of snapshot.entries) {
+          if (!query || entry.text.toLocaleLowerCase().includes(query)) selected.add(entry.id);
+        }
+        renderSelection(); controls(); return;
+      }
       if (action === "remove-many") {
         deleting = true; renderSelection(); controls(); actionButton("delete-cancel").focus(); return;
       }

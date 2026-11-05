@@ -387,6 +387,14 @@ async function libraryTests(browser) {
     assert.equal(await control(page, "entries").locator("li").count(), 100);
     assert.match(await control(page, "page").innerText(), /1 \/ 3/);
     assert.match(await control(page, "request-limit").innerText(), /最多使用 100.*当前启用 100/);
+    await action(page, "select-results").click();
+    assert.match(await control(page, "selection").innerText(), /已选 205 条/);
+    await action(page, "clear-selection").click();
+    await control(page, "search").fill("术语20");
+    await action(page, "select-results").click();
+    assert.match(await control(page, "selection").innerText(), /已选 6 条/);
+    await action(page, "clear-selection").click();
+    await control(page, "search").fill("");
     await action(page, "edit", "word-0").click();
     await control(page, "text").fill("批量管理中的草稿");
     await control(page, "select-page").check();
