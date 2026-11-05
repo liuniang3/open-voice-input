@@ -335,11 +335,18 @@ function observeInsertedText(target, text) {
   stopCorrectionObservation();
   if (!getHotwordStore().canObserve()) return;
   const generation = correctionGeneration;
+  let ended = false;
   try {
     const helperPath = meetingPaths.resolveHelperPath({ platform: process.platform,
       isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appRoot: path.join(__dirname, "..") });
-    correctionObservation = require("./platform/windows-correction-observer").startCorrectionObservation({
+    const observation = require("./platform/windows-correction-observer").startCorrectionObservation({
       helperPath, target, text,
+      onStatus: ({ status }) => {
+        if (["corrected", "helper-exit", "timeout", "protocol-error", "stopped", "spawn-error", "helper-error", "unsupported-platform"].includes(status)) {
+          ended = true;
+          if (generation === correctionGeneration) correctionObservation = null;
+        }
+      },
       onCorrection: async ({ before, after }) => {
         if (generation !== correctionGeneration || !getHotwordStore().canObserve()) return;
         try {
@@ -349,6 +356,7 @@ function observeInsertedText(target, text) {
         } catch { logEvent("hotwords: candidate persistence unavailable"); }
       }
     });
+    correctionObservation = ended ? null : observation;
   } catch { logEvent("hotwords: correction observation unavailable"); }
 }
 
