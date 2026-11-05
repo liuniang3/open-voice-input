@@ -7,6 +7,7 @@
 //! Parent death: stdin EOF + parent PID polling. Job Object parent bind is disabled.
 
 mod capture;
+mod correction_watch;
 mod dual_sync;
 mod input_context;
 mod job;
@@ -36,6 +37,10 @@ struct AppState {
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--watch-correction") {
+        correction_watch::run();
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--input-context") {
         input_context::print_context();
         return;

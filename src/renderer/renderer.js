@@ -3000,6 +3000,7 @@ historyHotkeyInput.addEventListener("beforeinput", (event) => event.preventDefau
 
 window.addEventListener("keydown", (event) => {
   if (textSupplierManager?.isOpen()) return;
+  if (currentWindowMode === "settings" && event.target?.closest?.("#hotwordsPanel")) return;
   if (event.key === "Escape" && currentWindowMode === "settings" && activeSettingsTab === "cleaner" && activeTextSupplierView === "manager") {
     event.preventDefault();
     setTextSupplierView("overview", { focus: true });

@@ -104,6 +104,24 @@ async function main() {
   }
 
   try {
+    await test("instant vocabulary is snapshotted only for supported Qwen models and regions", async () => {
+      for (const model of ALI_MEETING_MODELS) {
+        const hotwords = ["MiMo", "祺元", "__proto__"];
+        const x = setup({ model, hotwords });
+        hotwords.push("later-change");
+        await start(x);
+        const parameters = x.ws.sent[0].value.payload.parameters;
+        assert.deepEqual(parameters.vocabulary, model.startsWith("qwen-") ? { MiMo: 4, 祺元: 4 } : undefined);
+        assert.equal(parameters.heartbeat, true);
+        await complete(x);
+      }
+      for (const baseUrl of ["https://dashscope-us.aliyuncs.com", "https://workspace.ap-southeast-1.maas.aliyuncs.com"]) {
+        const x = setup({ baseUrl, hotwords: ["MiMo"] });
+        await start(x);
+        assert.equal(x.ws.sent[0].value.payload.parameters.vocabulary, undefined);
+        await complete(x);
+      }
+    });
     await test("regional, workspace and explicit proxy routes preserve authority", async () => {
       assert.equal(resolveAliMeetingUrl(), ALI_MEETING_WS_URL);
       const bases = ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com",

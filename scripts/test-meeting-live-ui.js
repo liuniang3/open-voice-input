@@ -657,6 +657,7 @@ async function prepareBrowser(page) {
       "/settings-workspace.css": ["src/renderer/settings-workspace.css", "text/css"],
       "/settings-workspace.js": ["src/renderer/settings-workspace.js", "text/javascript"],
       "/voice-history-ui.js": ["src/renderer/voice-history-ui.js", "text/javascript"],
+      "/hotwords.js": ["src/renderer/hotwords.js", "text/javascript"],
       "/recording-spectrum.js": ["src/renderer/recording-spectrum.js", "text/javascript"],
       "/voice-settings-snapshot.js": ["src/renderer/voice-settings-snapshot.js", "text/javascript"],
       "/reading-layout.js": ["src/renderer/reading-layout.js", "text/javascript"],
@@ -720,6 +721,7 @@ async function prepareBrowser(page) {
         window.mockCalls.push({ name, payload });
         if (name === "getSettings") return settings;
         if (name === "getHomeOverview") return window.mockHome;
+        if (name === "getHotwords") return { enabled: true, observeCorrections: false, observationAvailable: true, limit: 100, entries: [], candidates: [] };
         if (name === "listVoiceHistory") {
           const rows = window.mockVoiceRecords.filter(row => !payload?.query || (row.rawText + row.text).includes(payload.query));
           return { ok: true, total: rows.length, entries: rows.slice(payload?.offset || 0, (payload?.offset || 0) + (payload?.limit || 40))

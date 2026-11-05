@@ -311,6 +311,29 @@
                 <span>启用数字、日期等文本规范化</span>
               </label>
             </section>
+            <details id="hotwordsPanel" class="settings-group hotwords-panel">
+              <summary><span class="ui-icon icon-chevron" aria-hidden="true"></span><strong>热词词典</strong><span data-hotwords="summary">正在读取</span><span data-hotwords="pending">待确认 —</span></summary>
+              <div class="hotwords-body">
+                <label class="switch-field"><input data-hotwords="enabled" type="checkbox" checked disabled aria-describedby="hotwordsPrivacy" /><span>启用热词词典</span></label>
+                <p id="hotwordsPrivacy" class="hotwords-note">仅用于短语音输入，不用于会议或文件转写。启用后，已确认且启用的词条会发送给稳定模式的文本整理服务；语音识别仅 qwen-audio-3.0-asr-flash-streaming 及其日期版本使用即时词表。其他 ASR（包括 Qwen3-ASR Flash 批量识别和 MiMo）暂不发送热词参数。修正记录保存在本机。</p>
+                <label class="switch-field"><input data-hotwords="observe" type="checkbox" disabled aria-describedby="hotwordsObservation" /><span>观察输入后的修正（仅 Windows，默认关闭）</span></label>
+                <p id="hotwordsObservation" class="hotwords-note" data-hotwords="observation-note">开启后，仅短时观察本次语音输入所在的当前输入框；候选修正保存在本机，须手动确认后才加入词典。</p>
+                <div class="hotwords-heading"><h3>已确认词条 <span data-hotwords="count">— / 100</span></h3><button type="button" class="icon-btn" data-hotwords-action="refresh" aria-label="刷新热词词典" title="刷新热词词典"><span class="ui-icon icon-refresh" aria-hidden="true"></span></button></div>
+                <form data-hotwords="editor" class="hotwords-editor">
+                  <label for="hotwordsText" data-hotwords="editor-label">添加词条</label>
+                  <div class="hotwords-editor-controls"><input id="hotwordsText" data-hotwords="text" type="text" autocomplete="off" spellcheck="false" placeholder="姓名、术语或专有名词" aria-describedby="hotwordsTermHint" disabled /><button type="submit" data-hotwords="save" disabled>添加</button><button type="button" data-hotwords-action="cancel" hidden>取消</button></div>
+                </form>
+                <p id="hotwordsTermHint" class="hotwords-note">含中文等非 ASCII 字符：最多 15 个字符；纯 ASCII：最多 7 个空格分隔的词，且不超过 80 个字符。</p>
+                <p data-hotwords="limit" class="hotwords-note" hidden>词典已满，请先删除词条再添加；仍可编辑或停用已有词条。</p>
+                <ul data-hotwords="entries" class="hotwords-list" aria-label="已确认词条"></ul>
+                <p data-hotwords="entries-empty" class="hotwords-note" hidden>还没有词条。</p>
+                <h3>候选修正</h3>
+                <ul data-hotwords="candidates" class="hotwords-list" aria-label="待确认的候选修正"></ul>
+                <p data-hotwords="candidates-empty" class="hotwords-note" hidden>暂无待确认的修正。</p>
+                <p data-hotwords="status" class="hotwords-note" role="status" aria-live="polite" aria-atomic="true">正在读取热词词典…</p>
+                <p data-hotwords="error" class="hotwords-error" role="alert" aria-atomic="true" hidden></p>
+              </div>
+            </details>
           </div>
 
           <div id="settingsCleanerPanel" class="settings-tab-panel" role="tabpanel" aria-labelledby="settingsTabCleaner" data-settings-panel="cleaner" hidden>
@@ -1212,6 +1235,7 @@
     <script src="./home-ui.js"></script>
     <script src="./onboarding-ui.js"></script>
     <script src="./settings-workspace.js"></script>
+    <script src="./hotwords.js"></script>
     <script src="./voice-history-ui.js"></script>
     <script src="./recording-spectrum.js"></script>
     <script src="./dictation-motion.js"></script>

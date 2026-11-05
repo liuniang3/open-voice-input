@@ -9,6 +9,13 @@ contextBridge.exposeInMainWorld("mimoInput", {
   downloadUpdate: () => ipcRenderer.invoke("app:update:download"),
   installUpdate: () => ipcRenderer.invoke("app:update:install"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
+  getHotwords: () => ipcRenderer.invoke("hotwords:get"),
+  updateHotwords: (payload) => ipcRenderer.invoke("hotwords:update", payload),
+  onHotwordsUpdated: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("hotwords:updated", listener);
+    return () => ipcRenderer.removeListener("hotwords:updated", listener);
+  },
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   checkHotkey: (payload) => ipcRenderer.invoke("shortcut:check", payload),
   startHotkeyCapture: () => ipcRenderer.invoke("shortcut:capture-start"),

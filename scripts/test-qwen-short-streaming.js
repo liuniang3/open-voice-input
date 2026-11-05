@@ -78,6 +78,7 @@ function fakeStreamFactory(state) {
       apiKey: "test-only",
       baseUrl: "https://dashscope.aliyuncs.com/api-ws/v1/inference",
       model: MODEL,
+      hotwords: ["MiMo", "祺元"],
       streamFactory: fakeStreamFactory(state),
       onPartial: text => partials.push(text),
       onFinal: text => finals.push(text)
@@ -95,6 +96,7 @@ function fakeStreamFactory(state) {
     const text = await session.finish();
 
     assert.equal(state.options.model, MODEL);
+    assert.deepEqual(state.options.hotwords, ["MiMo", "祺元"]);
     assert.equal(state.options.baseUrl, "https://dashscope.aliyuncs.com/api-ws/v1/inference");
     assert.deepEqual(state.chunks.map(chunk => chunk.length), [3200, 3200, 600, 3200, 800]);
     assert.equal(Buffer.concat(state.chunks).equals(Buffer.concat([first, second])), true);

@@ -15,12 +15,13 @@ const { createTextSupplierChat, resolveTextLlmProfile } = require("./text-suppli
 const { buildTextCleanupMessages, parseAndValidateCleanupResponse } = require("./cleaner/text-cleanup-method");
 const { createOpenCodeGoClient } = require("./opencode-go-client");
 const { resolveProviderConnection } = require("../settings/provider-connections");
+const { normalizeWords } = require("../hotwords");
 
 const QWEN_ASR_OPENAI_MODEL = "qwen3-asr-flash";
 const QWEN_ASR_OPENAI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const QWEN_ASR_MODES = new Set(["batch", "realtime"]);
 
-function createVoicePipeline({ getSettings, logEvent, providerOverrides = {}, onTranscript }) {
+function createVoicePipeline({ getSettings, logEvent, providerOverrides = {}, onTranscript, getHotwords = () => [] }) {
   // Per-invocation settings scope: concurrent requests each keep their own
   // snapshot instead of clobbering a shared override mid-flight.
   const settingsScope = new AsyncLocalStorage();
@@ -166,6 +167,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {}, on
 
   async function transcribe({ audioDataUrl, pcm16Base64, audioSegments, shortContext, transcriptionMode, settingsSnapshot, history }) {
     return withSettingsSnapshot(settingsSnapshot, async () => {
+      const vocabulary = normalizeWords(getHotwords()).join("、");
       const settings = readSettings();
       const mode = normalizeTranscriptionMode(transcriptionMode || settings.transcriptionMode);
       const asrProvider = resolveAsrProvider(settings);
@@ -197,7 +199,8 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {}, on
       try {
         const cleanerProvider = resolveCleanerProvider(settings);
         logEvent?.("voice-pipeline: cleaner start", `${cleanerProvider.id}:${resolveCleanerModel()}`);
-        const cleanedResult = await cleanerProvider.clean({ rawText: rawTranscript, shortContext });
+        const cleanedResult = await cleanerProvider.clean({ rawText: rawTranscript,
+          shortContext: vocabulary ? [shortContext, vocabulary].filter(Boolean).join("\n") : shortContext });
         logEvent?.("voice-pipeline: cleaner done", cleanedResult.text ? "accepted" : "fallback-empty-or-unsafe");
         return completed(cleanedResult.text || rawTranscript, historyRaw, mode, history, Boolean(cleanedResult.text));
       } catch (error) {
@@ -209,6 +212,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {}, on
 
   async function cleanText({ rawText, shortContext, settingsSnapshot, history }) {
     return withSettingsSnapshot(settingsSnapshot, async () => {
+      const vocabulary = normalizeWords(getHotwords()).join("、");
       const text = cleanTranscript(rawText);
       if (!text) return "";
       const settings = readSettings();
@@ -217,7 +221,8 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {}, on
         // to the raw text; they never fall through to another supplier.
         const cleanerProvider = resolveCleanerProvider(settings);
         logEvent?.("voice-pipeline: cleaner start", `${cleanerProvider.id}:${resolveCleanerModel()}`);
-        const cleanedResult = await cleanerProvider.clean({ rawText: text, shortContext });
+        const cleanedResult = await cleanerProvider.clean({ rawText: text,
+          shortContext: vocabulary ? [shortContext, vocabulary].filter(Boolean).join("\n") : shortContext });
         logEvent?.("voice-pipeline: cleaner done", cleanedResult.text ? "accepted" : "fallback-empty-or-unsafe");
         return completed(cleanedResult.text || text, String(rawText).trim(), "stable", history, Boolean(cleanedResult.text));
       } catch (error) {
