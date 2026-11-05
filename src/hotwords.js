@@ -5,13 +5,14 @@ const path = require("node:path");
 const { randomUUID, createHash } = require("node:crypto");
 
 const LIMIT = 100;
+const LIBRARY_LIMIT = 100000;
 const MAX_TERM = 80;
 const ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const KEY = /(?:\b(?:sk|tp|ghp|github_pat)[-_][\w-]{12,}|\bLTAI\w{12,})/i;
 const GENERIC = /^(?:不|没|没有|可以|不能|不要|需要|应该|这个|那个|我们|你们|他们|然后|就是|今天|明天|同意|不同意|是|不是|true|false|yes|no)$/i;
 
 function term(value) {
-  if (typeof value !== "string" || /[\r\n\x00-\x1f\x7f<>]/.test(value)) throw new Error("hotword_invalid_term");
+  if (typeof value !== "string" || value.length > MAX_TERM * 2 || /[\r\n\x00-\x1f\x7f<>]/.test(value)) throw new Error("hotword_invalid_term");
   const text = value.normalize("NFC").trim().replace(/ +/g, " ");
   if (!text || [...text].length > MAX_TERM || KEY.test(text) || !/^[\p{L}\p{N} .+#_&'’()/-]+$/u.test(text) || !/\p{L}/u.test(text)) {
     throw new Error("hotword_invalid_term");
@@ -96,7 +97,7 @@ function createHotwordStore({ directory, fsImpl = fs, platform = process.platfor
   function validate(data) {
     if (!data || data.version !== 1 || typeof data.enabled !== "boolean" || typeof data.observeCorrections !== "boolean" ||
         !Array.isArray(data.entries) || !Array.isArray(data.candidates) || !Array.isArray(data.dismissed) ||
-        data.entries.length > LIMIT || data.candidates.length > LIMIT || data.dismissed.length > 200) throw new Error("hotwords_invalid_store");
+        data.entries.length > LIBRARY_LIMIT || data.candidates.length > LIMIT || data.dismissed.length > 200) throw new Error("hotwords_invalid_store");
     for (const entry of data.entries) {
       if (!ID.test(entry.id) || term(entry.text) !== entry.text || typeof entry.enabled !== "boolean") throw new Error("hotwords_invalid_store");
     }
@@ -115,7 +116,7 @@ function createHotwordStore({ directory, fsImpl = fs, platform = process.platfor
   function ready() {
     return loaded ||= (async () => {
       try {
-        if ((await fsImpl.stat(file)).size > 256 * 1024) throw new Error("hotwords_invalid_store");
+        if ((await fsImpl.stat(file)).size > 32 * 1024 * 1024) throw new Error("hotwords_invalid_store");
         state = validate(JSON.parse(await fsImpl.readFile(file, "utf8")));
       } catch (error) {
         if (error.code !== "ENOENT") { state.enabled = false; throw new Error("hotwords_unavailable"); }
@@ -124,7 +125,7 @@ function createHotwordStore({ directory, fsImpl = fs, platform = process.platfor
   }
   const observationAvailable = platform === "win32";
   const snapshot = () => ({ enabled: state.enabled, observeCorrections: state.observeCorrections && observationAvailable,
-    observationAvailable, limit: LIMIT, entries: state.entries.map(entry => ({ ...entry })), candidates: state.candidates.map(item => ({ ...item })) });
+    observationAvailable, limit: LIBRARY_LIMIT, requestLimit: LIMIT, entries: state.entries.map(entry => ({ ...entry })), candidates: state.candidates.map(item => ({ ...item })) });
   const pairHash = ({ from, to }) => createHash("sha256").update(JSON.stringify([from, to])).digest("hex");
   function run(task) {
     const next = tail.then(async () => { await ready(); return task(); });
@@ -144,16 +145,17 @@ function createHotwordStore({ directory, fsImpl = fs, platform = process.platfor
     const existing = payload.id ? next.entries.find(entry => entry.id === payload.id) : next.entries.find(entry => entry.text.toLowerCase() === text.toLowerCase());
     if (payload.id && !existing) throw new Error("hotword_not_found");
     if (next.entries.some(entry => entry.id !== existing?.id && entry.text.toLowerCase() === text.toLowerCase())) throw new Error("hotword_duplicate");
+    if (payload.enabled !== false && !existing?.enabled && next.entries.filter(entry => entry.enabled).length >= LIMIT) throw new Error("hotwords_active_limit");
     if (existing) { existing.text = text; existing.enabled = payload.enabled !== false; }
     else {
-      if (next.entries.length >= LIMIT) throw new Error("hotwords_limit");
+      if (next.entries.length >= LIBRARY_LIMIT) throw new Error("hotwords_limit");
       next.entries.push({ id: randomUUID(), text, enabled: payload.enabled !== false });
     }
   }
   return {
     ready,
     get: () => run(() => snapshot()),
-    words: () => state.enabled ? state.entries.filter(entry => entry.enabled).map(entry => entry.text) : [],
+    words: () => state.enabled ? state.entries.filter(entry => entry.enabled).slice(0, LIMIT).map(entry => entry.text) : [],
     canObserve: () => observationAvailable && state.enabled && state.observeCorrections,
     update: payload => run(async () => {
       const next = structuredClone(state);
@@ -169,6 +171,10 @@ function createHotwordStore({ directory, fsImpl = fs, platform = process.platfor
       else if (payload?.action === "remove") {
         if (!next.entries.some(entry => entry.id === payload.id)) throw new Error("hotword_not_found");
         next.entries = next.entries.filter(entry => entry.id !== payload.id);
+      } else if (payload?.action === "removeMany") {
+        if (!Array.isArray(payload.ids) || !payload.ids.length || payload.ids.length > LIBRARY_LIMIT || payload.ids.some(id => typeof id !== "string" || !ID.test(id))) throw new Error("hotwords_invalid_action");
+        const ids = new Set(payload.ids);
+        next.entries = next.entries.filter(entry => !ids.has(entry.id));
       } else if (payload?.action === "accept" || payload?.action === "dismiss") {
         const candidate = next.candidates.find(item => item.id === payload.id);
         if (!candidate) throw new Error("hotword_not_found");
@@ -176,6 +182,21 @@ function createHotwordStore({ directory, fsImpl = fs, platform = process.platfor
         else next.dismissed = [...new Set([...next.dismissed, pairHash(candidate)])].slice(-200);
         next.candidates = next.candidates.filter(item => item.id !== payload.id);
       } else throw new Error("hotwords_invalid_action");
+      await save(next);
+      return snapshot();
+    }),
+    importWords: words => run(async () => {
+      if (!Array.isArray(words) || words.length > LIBRARY_LIMIT) throw new Error("hotwords_limit");
+      const seen = new Set(state.entries.map(entry => entry.text.toLowerCase()));
+      const additions = [];
+      for (const value of words) {
+        const text = term(value), key = text.toLowerCase();
+        if (!seen.has(key)) { seen.add(key); additions.push(text); }
+      }
+      if (state.entries.length + additions.length > LIBRARY_LIMIT) throw new Error("hotwords_limit");
+      const next = structuredClone(state);
+      let enabled = next.entries.filter(entry => entry.enabled).length;
+      for (const text of additions) next.entries.push({ id: randomUUID(), text, enabled: enabled++ < LIMIT });
       await save(next);
       return snapshot();
     }),
@@ -196,4 +217,4 @@ function createHotwordStore({ directory, fsImpl = fs, platform = process.platfor
   };
 }
 
-module.exports = { createHotwordStore, correctionCandidate, instantVocabulary, normalizeWords, term };
+module.exports = { createHotwordStore, correctionCandidate, instantVocabulary, normalizeWords, term, LIBRARY_LIMIT };

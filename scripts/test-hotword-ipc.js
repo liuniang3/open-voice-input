@@ -17,6 +17,13 @@ const { mainHarness } = require("./test-settings-shortcuts");
   };
   const h = mainHarness("win32", {
     "./hotwords": { createHotwordStore: () => store },
+    "./hotword-import-session": { createHotwordImporter: () => ({
+      preview: async () => ({ token: "fixture", words: ["MiMo"] }),
+      commit: async (_sender, payload) => {
+        if (payload.token !== "fixture") throw new Error("private path and content");
+        return { enabled: true, entries: [{ text: "MiMo" }] };
+      }
+    }) },
     "./platform/windows-correction-observer": { startCorrectionObservation(options) {
       observers.push(options); return { stop() { stopped++; } };
     } }
@@ -25,6 +32,11 @@ const { mainHarness } = require("./test-settings-shortcuts");
   const evil = { sender: { getURL: () => "https://untrusted.invalid" }, senderFrame: { url: "https://untrusted.invalid" } };
   await assert.rejects(h.invoke("hotwords:get", {}, evil), /hotwords_unavailable/);
   await assert.rejects(h.invoke("hotwords:update", { action: "configure", observeCorrections: true }, evil), /hotwords_unavailable/);
+  await assert.rejects(h.invoke("hotwords:import:preview", {}, evil), /hotwords_unavailable/);
+  await assert.rejects(h.invoke("hotwords:import:commit", { token: "fixture" }, evil), /hotwords_unavailable/);
+  assert.equal((await h.invoke("hotwords:import:preview")).token, "fixture");
+  assert.equal((await h.invoke("hotwords:import:commit", { token: "fixture" })).entries[0].text, "MiMo");
+  await assert.rejects(h.invoke("hotwords:import:commit", { token: "bad" }), error => error.message === "hotwords_unavailable");
   assert.equal(enabled, false);
   h.run('observeInsertedText("123", "Only this synthetic text.")');
   assert.equal(observers.length, 0, "default-off never spawns a reader");

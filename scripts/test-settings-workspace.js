@@ -16,9 +16,12 @@ function unitTests() {
   assert.equal(nextSettingsTab("updates", "ArrowDown"), "asr");
   assert.equal(nextSettingsTab("history", "Home"), "asr");
   assert.equal(nextSettingsTab("asr", "End"), "updates");
-  assert.deepEqual([...html.matchAll(/data-settings-tab="([^"]+)"/g)].map(match => match[1]), ["asr", "cleaner", "history", "updates"]);
-  assert.deepEqual([...html.matchAll(/data-settings-panel="([^"]+)"/g)].map(match => match[1]), ["asr", "cleaner", "history", "updates"]);
-  const asr = html.slice(html.indexOf('id="settingsAsrPanel"'), html.indexOf('id="settingsCleanerPanel"'));
+  assert.equal(nextSettingsTab("asr", "ArrowDown"), "hotwords");
+  assert.equal(nextSettingsTab("hotwords", "ArrowDown"), "cleaner");
+  assert.equal(nextSettingsTab("cleaner", "ArrowUp"), "hotwords");
+  assert.deepEqual([...html.matchAll(/data-settings-tab="([^"]+)"/g)].map(match => match[1]), ["asr", "hotwords", "cleaner", "history", "updates"]);
+  assert.deepEqual([...html.matchAll(/data-settings-panel="([^"]+)"/g)].map(match => match[1]), ["asr", "hotwords", "cleaner", "history", "updates"]);
+  const asr = html.slice(html.indexOf('id="settingsAsrPanel"'), html.indexOf('id="settingsHotwordsPanel"'));
   const cleaner = html.slice(html.indexOf('id="settingsCleanerPanel"'), html.indexOf('id="legacySummarySettings"'));
   for (const id of ["stableModeBtn", "fastModeBtn", "hotkeyInput", "meetingHotkeyInput", "microphoneSelect", "asrProviderSelect", "mimoApiKeyInput", "aliyunApiKeyInput", "asrModelPresetSelect"]) assert.ok(asr.includes(`id="${id}"`), `${id} belongs to recognition settings`);
   for (const id of ["textSupplierManage", "textSupplierBack", "textSupplierManagerView", "textSupplierCards", "cleanupSupplierSelect", "cleanupModelSelect"]) assert.ok(cleaner.includes(`id="${id}"`), `${id} belongs to expression settings`);
@@ -67,7 +70,7 @@ async function verifyBrowser(page, output) {
     await window.mockOpenSettings();
   });
   await page.waitForFunction(() => document.body.classList.contains("settings-open"));
-  assert.equal(await page.locator('[data-settings-tab]').count(), 4);
+  assert.equal(await page.locator('[data-settings-tab]').count(), 5);
   assert.equal(await page.locator("#settingsPanel").locator("#hotkeyInput").isVisible(), true);
   const originalShortcut = await page.locator("#hotkeyInput").inputValue();
   await page.evaluate(() => { window.mockCalls.length = 0; });
@@ -219,13 +222,18 @@ async function verifyBrowser(page, output) {
   await page.locator('[data-settings-tab="updates"]').focus();
   await page.keyboard.press("ArrowDown");
   assert.equal(await page.locator('[data-settings-tab="asr"]').getAttribute("aria-selected"), "true");
+  await page.keyboard.press("ArrowDown");
+  assert.equal(await page.locator('[data-settings-tab="hotwords"]').getAttribute("aria-selected"), "true");
+  assert.equal(await page.locator("#saveSettingsBtn").isVisible(), false);
+  await page.keyboard.press("ArrowDown");
+  assert.equal(await page.locator('[data-settings-tab="cleaner"]').getAttribute("aria-selected"), "true");
   const screenshots = [];
   for (const size of [{ width: 1040, height: 780 }, { width: 840, height: 700 }, { width: 640, height: 520 }, { width: 540, height: 620 }]) {
     await page.setViewportSize(size);
-    for (const tab of ["asr", "cleaner", "history", "updates"]) {
+    for (const tab of ["asr", "hotwords", "cleaner", "history", "updates"]) {
       await page.locator(`[data-settings-tab="${tab}"]`).click();
       const overflow = await page.evaluate(() => {
-        const regions = ["settingsPanel", "settingsAsrPanel", "settingsCleanerPanel", "settingsHistoryPanel", "settingsUpdatesPanel"];
+        const regions = ["settingsPanel", "settingsAsrPanel", "settingsHotwordsPanel", "settingsCleanerPanel", "settingsHistoryPanel", "settingsUpdatesPanel"];
         return regions.filter(id => { const el = document.getElementById(id); return el.getClientRects().length && el.scrollWidth > el.clientWidth + 1; });
       });
       assert.deepEqual(overflow, [], `${tab} must fit the window at ${size.width}`);
@@ -266,7 +274,7 @@ async function verifyNativeSettings() {
     await page.locator("#guideSkip").click();
     await page.locator("#settingsBtn").click();
     await page.waitForFunction(() => document.body.classList.contains("settings-open"));
-    assert.equal(await page.locator('[data-settings-tab]').count(), 4);
+    assert.equal(await page.locator('[data-settings-tab]').count(), 5);
     assert.equal(await page.locator("#settingsAsrPanel").isVisible(), true);
     assert.equal(await page.locator("#mimoApiKeyInput").inputValue(), "", "native fixture must not inherit real keys");
     await page.locator("#asrConsoleOpen").click();
@@ -276,6 +284,25 @@ async function verifyNativeSettings() {
     assert.deepEqual(openedUrls, ["https://platform.xiaomimimo.com/console/api-keys", "https://bailian.console.aliyun.com/?tab=globalset#/efm/api_key"]);
     assert.deepEqual(await page.evaluate(() => window.mimoInput.openAsrConsole("https://example.invalid")), { ok: false });
     assert.equal(await application.evaluate(() => globalThis.oviTestConsoleUrls.length), 2);
+    await page.locator('[data-settings-tab="hotwords"]').click();
+    await page.waitForFunction(() => !document.querySelector('[data-hotwords="enabled"]').disabled);
+    assert.equal(await page.locator("#saveSettingsBtn").isVisible(), false);
+    assert.equal(await page.locator('[data-hotwords="count"]').innerText(), "0 / 100000");
+    assert.deepEqual(await page.evaluate(() => [typeof window.mimoInput.previewHotwordImport, typeof window.mimoInput.commitHotwordImport]), ["function", "function"]);
+    await page.locator('[data-hotwords="text"]').fill("原生词典测试");
+    await page.locator('[data-hotwords="save"]').click();
+    await page.waitForFunction(() => document.querySelectorAll('[data-hotwords="entries"] li').length === 1);
+    await page.locator('[data-hotwords="text"]').fill("保留输入草稿");
+    await page.locator('[data-hotwords="select-page"]').check();
+    await page.locator('[data-hotwords-action="remove-many"]').click();
+    await page.locator('[data-hotwords-action="delete-cancel"]').click();
+    assert.equal((await page.evaluate(() => window.mimoInput.getHotwords())).entries.length, 1);
+    await page.locator('[data-hotwords-action="remove-many"]').click();
+    await page.locator('[data-hotwords-action="delete-confirm"]').click();
+    await page.waitForFunction(() => document.querySelectorAll('[data-hotwords="entries"] li').length === 0);
+    assert.equal((await page.evaluate(() => window.mimoInput.getHotwords())).entries.length, 0);
+    assert.equal(await page.locator('[data-hotwords="text"]').inputValue(), "保留输入草稿");
+    await verifyNativeHotwordImport(application, page, sandbox);
     await page.locator('[data-settings-tab="cleaner"]').click();
     assert.equal(await page.locator("#textSupplierManage").isVisible(), true);
     assert.equal(await page.locator("#textSupplierAdd").isVisible(), false);
@@ -313,8 +340,69 @@ async function verifyNativeSettings() {
       enabled: (await window.mimoInput.getSettings()).voiceHistoryEnabled }), requestId);
     assert.equal(restored.entry.entry.rawText, persisted.rawText);
     assert.equal(restored.enabled, false);
-    console.log("Native Windows settings: real IPC, completed dictation history, privacy toggle and restart persistence passed with isolated user data and no API calls.");
+    assert.equal(await page.evaluate(async () => (await window.mimoInput.getHotwords()).entries.length), 75471);
+    console.log("Native Windows settings: dictionary tab, real CRUD/removeMany IPC, draft retention, completed dictation history, privacy toggle and restart persistence passed with isolated user data and no provider calls.");
   } finally { await application.close(); }
+}
+async function verifyNativeHotwordImport(application, page, sandbox) {
+  const words = Array.from({ length: 75672 }, (_, i) => `测试热词${i}`);
+  const file = path.join(sandbox, "synthetic-vocabulary.txt");
+  const invalidFile = path.join(sandbox, "synthetic-empty.txt");
+  fs.writeFileSync(file, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from([...words, ...words.slice(0, 2812)].join("\r\n"), "utf16le")]));
+  fs.writeFileSync(invalidFile, "");
+  await application.evaluate(({ dialog }) => {
+    globalThis.oviOriginalHotwordDialog = dialog.showOpenDialog;
+    globalThis.oviHotwordPickerFile = null;
+    globalThis.oviHotwordPickerCalls = [];
+    dialog.showOpenDialog = async (...args) => {
+      globalThis.oviHotwordPickerCalls.push(args.at(-1));
+      return globalThis.oviHotwordPickerFile
+        ? { canceled: false, filePaths: [globalThis.oviHotwordPickerFile] } : { canceled: true, filePaths: [] };
+    };
+  });
+  const control = name => page.locator(`[data-hotwords="${name}"]`);
+  const action = name => page.locator(`[data-hotwords-action="${name}"]`);
+  const idle = () => page.waitForFunction(() => document.getElementById("hotwordsPanel").getAttribute("aria-busy") === "false");
+  try {
+    await action("import").click(); await idle();
+    assert.equal(await control("import-preview").isVisible(), false);
+    assert.match(await control("status").innerText(), /已取消/);
+    const options = await application.evaluate(() => globalThis.oviHotwordPickerCalls[0]);
+    assert.deepEqual(options.properties, ["openFile"]);
+    assert.deepEqual(options.filters[0].extensions, ["txt", "csv", "tsv", "xlsx", "bin"]);
+    await application.evaluate((_, file) => { globalThis.oviHotwordPickerFile = file; }, invalidFile);
+    await action("import").click(); await idle();
+    assert.match(await control("error").innerText(), /16 MiB/);
+    await application.evaluate((_, file) => { globalThis.oviHotwordPickerFile = file; }, file);
+    await action("import").click(); await idle();
+    assert.match(await control("import-stats").innerText(), /共 78484 条.*新有效 75672 条.*重复 2812 条.*剩余容量 100000/);
+    assert.equal(await control("import-words").locator("li").count(), 100);
+    assert.equal((await page.evaluate(() => window.mimoInput.getHotwords())).entries.length, 0);
+    await action("import-cancel").click();
+    assert.equal((await page.evaluate(() => window.mimoInput.getHotwords())).entries.length, 0);
+    await action("import").click(); await idle();
+    await action("import-confirm").click(); await idle();
+    assert.equal(await control("error").isVisible(), false);
+    const imported = await page.evaluate(async () => {
+      const snapshot = await window.mimoInput.getHotwords();
+      return { limit: snapshot.limit, requestLimit: snapshot.requestLimit, count: snapshot.entries.length,
+        enabled: snapshot.entries.filter(entry => entry.enabled).length, firstEnabled: snapshot.entries.slice(0, 100).every(entry => entry.enabled),
+        restDisabled: snapshot.entries.slice(100).every(entry => !entry.enabled) };
+    });
+    assert.deepEqual(imported, { limit: 100000, requestLimit: 100, count: 75672, enabled: 100, firstEnabled: true, restDisabled: true });
+    assert.equal(await control("entries").locator("li").count(), 100);
+    assert.equal(await control("text").inputValue(), "保留输入草稿");
+    await control("select-page").check(); await action("next").click(); await control("select-page").check();
+    await control("search").fill("测试热词75671"); await control("select-page").check();
+    assert.match(await control("selection").innerText(), /已选 201/);
+    await action("remove-many").click(); await action("delete-confirm").click(); await idle();
+    assert.equal(await control("error").isVisible(), false);
+    assert.equal(await control("count").innerText(), "75471 / 100000");
+    assert.equal(await control("text").inputValue(), "保留输入草稿");
+    console.log("Native dictionary: picker cancellation, worker parsing errors, 78,484 synthetic rows deduplicated to 75,672, token commit, first-100 enablement and 201 cross-page deletions passed.");
+  } finally {
+    await application.evaluate(({ dialog }) => { dialog.showOpenDialog = globalThis.oviOriginalHotwordDialog; });
+  }
 }
 if (require.main === module) (async () => {
   unitTests();

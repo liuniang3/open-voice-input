@@ -1177,7 +1177,7 @@ function setSettingsTab(tabName, { requestId } = {}) {
   const content = document.querySelector(".settings-tab-content");
   if (content) content.scrollTop = 0;
   document.getElementById("settingsPageSubtitle").textContent = settingsTabButtons.find(button => button.dataset.settingsTab === activeSettingsTab)?.textContent.trim() || "语音识别";
-  saveSettingsBtn.hidden = activeSettingsTab === "history" || activeSettingsTab === "updates";
+  saveSettingsBtn.hidden = ["hotwords", "history", "updates"].includes(activeSettingsTab);
   setTextSupplierView(activeSettingsTab === "cleaner" && tabName === "connections" ? "manager" : "overview");
   let historyLoad;
   if (activeSettingsTab === "history") {

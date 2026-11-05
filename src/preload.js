@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("mimoInput", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   getHotwords: () => ipcRenderer.invoke("hotwords:get"),
   updateHotwords: (payload) => ipcRenderer.invoke("hotwords:update", payload),
+  previewHotwordImport: () => ipcRenderer.invoke("hotwords:import:preview"),
+  commitHotwordImport: (payload) => ipcRenderer.invoke("hotwords:import:commit", payload),
   onHotwordsUpdated: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("hotwords:updated", listener);

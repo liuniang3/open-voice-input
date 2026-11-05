@@ -2166,6 +2166,38 @@ ipcMain.handle("hotwords:get", async (event) => {
   if (!isAppSender(event.sender, event.senderFrame?.url)) throw new Error("hotwords_unavailable");
   return { ...await getHotwordStore().get(), observationStatus: correctionObservationStatus };
 });
+let hotwordImporter;
+function getHotwordImporter() {
+  return hotwordImporter ||= require("./hotword-import-session").createHotwordImporter({
+    getStore: getHotwordStore,
+    chooseFile: async sender => {
+      const options = { title: "导入热词词库", properties: ["openFile"], filters: [
+        { name: "词库与表格", extensions: ["txt", "csv", "tsv", "xlsx", "bin"] },
+        { name: "文本词库", extensions: ["txt"] },
+        { name: "表格", extensions: ["xlsx", "csv", "tsv"] },
+        { name: "搜狗词库备份", extensions: ["bin"] }
+      ] };
+      const window = BrowserWindow.fromWebContents(sender);
+      const selected = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
+      return selected.canceled ? null : selected.filePaths[0];
+    }
+  });
+}
+for (const action of ["preview", "commit"]) {
+  ipcMain.handle(`hotwords:import:${action}`, async (event, payload) => {
+    if (!isAppSender(event.sender, event.senderFrame?.url)) throw new Error("hotwords_unavailable");
+    try {
+      const value = await getHotwordImporter()[action](event.sender, payload);
+      if (action === "commit") {
+        mainWindow?.webContents.send("hotwords:updated");
+        return { ...value, observationStatus: correctionObservationStatus };
+      }
+      return value;
+    } catch (error) {
+      throw new Error(/^hotwords?_[a-z_]+$/.test(error?.message || "") ? error.message : action === "commit" ? "hotwords_unavailable" : "hotwords_import_format");
+    }
+  });
+}
 ipcMain.handle("hotwords:update", async (event, payload) => {
   if (!isAppSender(event.sender, event.senderFrame?.url)) throw new Error("hotwords_unavailable");
   try {
