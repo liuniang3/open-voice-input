@@ -110,6 +110,21 @@
           ? "开启后，最多观察 45 秒，仅处理本次输入范围内的词语替换。修正候选保存在本机，须手动确认；不支持的编辑器或边界修改会跳过。"
           : "词典已停用，修正观察已暂停；原有开关偏好保留。")
         : "当前平台不可用，仅 Windows 支持修正观察。热词词典仍可手动管理；修正记录保存在本机。";
+      const observationLabels = {
+        observing: "正在观察本次输入。",
+        candidate: "已收集候选，请在下方确认。",
+        corrected: "已检查本次修正；符合词语规则时才生成候选。",
+        unsupported: "上次输入框无法可靠跟踪，请手动添加词条。",
+        "range-invalidated": "上次输入的文本范围发生变化，已停止收集；可手动添加词条。",
+        "focus-changed": "已离开原输入窗口或控件，本次观察结束。",
+        timeout: "本次观察已到时。",
+        "spawn-error": "观察器未能启动，请重新启动程序后重试。",
+        "helper-error": "观察器暂不可用，语音输入不受影响。",
+        "protocol-error": "观察器暂不可用，语音输入不受影响。"
+      };
+      if (snapshot.observationAvailable && snapshot.enabled && snapshot.observeCorrections && observationLabels[snapshot.observationStatus]) {
+        $("observation-note").textContent += ` ${observationLabels[snapshot.observationStatus]}`;
+      }
 
       const entries = snapshot.entries.map(entry => {
         const row = node("li", "hotwords-row");

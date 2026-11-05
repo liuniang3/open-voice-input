@@ -165,6 +165,7 @@ public static class CorrectionFixture {
  [System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
  [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from, uint to, bool attach);
  [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int show);
+ [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void NotifyWinEvent(uint ev, IntPtr window, int objectId, int childId);
  static void Activate(Window form) {
   uint current = GetCurrentThreadId(), foreground = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
   bool attached = current != foreground && AttachThreadInput(current, foreground, true);
@@ -223,6 +224,7 @@ public static class CorrectionFixture {
        case "outside": box.Select(0, 5); break;
        case "clear": box.Clear(); break;
        case "focus": other.Focus(); break;
+       case "repeat-focus": NotifyWinEvent(0x8005, new WindowInteropHelper(form).Handle, -4, 0); NotifyWinEvent(3, new WindowInteropHelper(form).Handle, 0, 0); break;
        case "password": secret.Visibility = Visibility.Visible; secret.Focus(); break;
        case "readonly": box.IsReadOnly = true; break;
        case "quit": form.Close(); return;
@@ -312,6 +314,14 @@ async function native() {
       await command("select"); await command("grow");
       await waitFor(() => watch.closed, "length edit did not finish", 5000);
       assert.deepEqual(watch.results, [{ before: BEFORE, after: BEFORE.replace("wrong", "correct") }]);
+    });
+    await test("redundant focus notifications keep the same input observable", async () => {
+      const watch = await observe(); assert.ok(watch.statuses.includes("observing"));
+      await command("repeat-focus"); await delay(800);
+      assert.equal(watch.closed, false);
+      await command("select"); await command("replace");
+      await waitFor(() => watch.closed, "redundant-focus correction did not finish", 5000);
+      assert.deepEqual(watch.results, [{ before: BEFORE, after: AFTER }]);
     });
     for (const action of ["boundary", "outside", "clear", "focus"]) {
       await test(`real UIA ${action} cancels without correction`, async () => {

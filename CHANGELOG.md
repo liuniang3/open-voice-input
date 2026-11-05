@@ -12,7 +12,7 @@ All notable changes to this project are documented here.
 
 ### Validation
 
-- 80 shared regression scripts pass locally. Windows observer verification includes 14 Rust tests and 23 wrapper/native fixture groups; the optimized helper passed two consecutive isolated WPF/UIA runs after synchronizing fixture focus readiness. This does not establish support for every third-party editor.
+- 80 shared regression scripts pass locally. Windows observer verification includes 14 Rust tests and 24 wrapper/native fixture groups, including optimized WPF/UIA tests with synchronized focus readiness. Repeated focus notifications are tolerated while actual window/control departure cancels observation. Editors that invalidate their text ranges are skipped and expose a local observation status; this does not establish support for every third-party editor.
 - A real Qwen Streaming request with eight seconds of synthetic audio and two hotwords completed with 13 partial events and one final event. Browser tests cover dictionary/candidate editing, error recovery, narrow layouts and integrated settings keyboard handling. No private audio or response bodies are stored in the test report.
 
 ## v0.4.26 - 2026-11-03 (Windows)

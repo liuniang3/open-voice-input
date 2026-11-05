@@ -318,6 +318,7 @@ let voiceHistory;
 let hotwordStore;
 let correctionObservation;
 let correctionGeneration = 0;
+let correctionObservationStatus = "";
 let onboardingState;
 
 function getHotwordStore() {
@@ -328,6 +329,7 @@ function stopCorrectionObservation() {
   correctionGeneration++;
   const observation = correctionObservation;
   correctionObservation = null;
+  if (observation) correctionObservationStatus = "stopped";
   try { observation?.stop(); } catch { logEvent("hotwords: observer stop unavailable"); }
 }
 
@@ -342,6 +344,10 @@ function observeInsertedText(target, text) {
     const observation = require("./platform/windows-correction-observer").startCorrectionObservation({
       helperPath, target, text,
       onStatus: ({ status }) => {
+        if (generation === correctionGeneration && status !== "helper-exit") {
+          correctionObservationStatus = status;
+          try { mainWindow?.webContents.send("hotwords:updated"); } catch { /* Window may be closing. */ }
+        }
         if (["corrected", "helper-exit", "timeout", "protocol-error", "stopped", "spawn-error", "helper-error", "unsupported-platform"].includes(status)) {
           ended = true;
           if (generation === correctionGeneration) correctionObservation = null;
@@ -351,6 +357,7 @@ function observeInsertedText(target, text) {
         if (generation !== correctionGeneration || !getHotwordStore().canObserve()) return;
         try {
           if (await getHotwordStore().recordCorrection({ before, after })) {
+            if (generation === correctionGeneration) correctionObservationStatus = "candidate";
             mainWindow?.webContents.send("hotwords:updated");
           }
         } catch { logEvent("hotwords: candidate persistence unavailable"); }
@@ -2157,7 +2164,7 @@ public static class Win32 {
 ipcMain.handle("settings:get", async () => settings);
 ipcMain.handle("hotwords:get", async (event) => {
   if (!isAppSender(event.sender, event.senderFrame?.url)) throw new Error("hotwords_unavailable");
-  return getHotwordStore().get();
+  return { ...await getHotwordStore().get(), observationStatus: correctionObservationStatus };
 });
 ipcMain.handle("hotwords:update", async (event, payload) => {
   if (!isAppSender(event.sender, event.senderFrame?.url)) throw new Error("hotwords_unavailable");
@@ -2165,7 +2172,7 @@ ipcMain.handle("hotwords:update", async (event, payload) => {
     if (payload?.action === "configure") stopCorrectionObservation();
     const value = await getHotwordStore().update(payload);
     mainWindow?.webContents.send("hotwords:updated");
-    return value;
+    return { ...value, observationStatus: correctionObservationStatus };
   } catch (error) {
     const code = /^hotwords?_[a-z_]+$/.test(error?.message || "") ? error.message : "hotwords_unavailable";
     throw new Error(code);

@@ -146,6 +146,8 @@ async function browserTests(browser) {
   await saved(page, { action: "configure", enabled: true });
   await reply(page, { observeCorrections: true }); await control(page, "observe").check();
   await saved(page, { action: "configure", observeCorrections: true });
+  await emit(page, { observationStatus: "range-invalidated" });
+  assert.match(await control(page, "observation-note").innerText(), /文本范围发生变化/);
   await reply(page, { observeCorrections: false }); await control(page, "observe").uncheck();
   await saved(page, { action: "configure", observeCorrections: false });
   const added = { id: "e3", text: "磁光阱", enabled: true };

@@ -2,10 +2,10 @@
 //! clipboard, Value reads, document ranges, text logs, or persistence.
 //! Four characters at each inserted boundary remain immutable. Only providers
 //! preserving independently cloned ranges can support an interior correction.
-//! A reset, boundary edit, outside selection, focus event, or uncertainty stops it.
+//! A reset, boundary edit, outside selection, focus departure, or uncertainty stops it.
 //! Scope: >=12 Unicode scalars, <=4096 UTF-16 units, unique nonblank four-scalar
 //! guards, <=256-unit growth, 500ms polls, 2s idle, <=45s lifetime. Some editors
-//! have no TextPattern or return a child owner; both are intentionally rejected.
+//! have no stable TextPattern ranges and are intentionally rejected.
 //! Submission is detectable only through clear/focus/range changes, not key input.
 
 use std::io::{self, BufRead, Read, Write};
@@ -25,6 +25,7 @@ const MAX_PAYLOAD: u64 = 64 * 1024;
 const POLL: Duration = Duration::from_millis(500);
 const IDLE: Duration = Duration::from_secs(2);
 static FOCUS_CHANGED: AtomicBool = AtomicBool::new(false);
+static WATCH_TARGET: AtomicU64 = AtomicU64::new(0);
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -78,17 +79,21 @@ fn status(value: &str) {
 unsafe extern "system" fn focus_event(
     _: HWINEVENTHOOK,
     _: u32,
-    _: HWND,
+    window: HWND,
     _: i32,
     _: i32,
     _: u32,
     _: u32,
 ) {
-    // Only a cancellation bit; never query or retain the event's target.
-    FOCUS_CHANGED.store(true, Ordering::SeqCst);
+    // Repeated notifications for our own window do not indicate departure.
+    // Control identity is checked through UIA before and after every text read.
+    if window.0 as usize as u64 != WATCH_TARGET.load(Ordering::SeqCst) {
+        FOCUS_CHANGED.store(true, Ordering::SeqCst);
+    }
 }
 
-fn start_focus_watch() -> Option<Arc<AtomicBool>> {
+fn start_focus_watch(target: u64) -> Option<Arc<AtomicBool>> {
+    WATCH_TARGET.store(target, Ordering::SeqCst);
     let stop = Arc::new(AtomicBool::new(false));
     let stopped = Arc::clone(&stop);
     let (tx, rx) = mpsc::sync_channel(1);
@@ -102,16 +107,7 @@ fn start_focus_watch() -> Option<Arc<AtomicBool>> {
             0,
             WINEVENT_OUTOFCONTEXT,
         );
-        let focus = SetWinEventHook(
-            EVENT_OBJECT_FOCUS,
-            EVENT_OBJECT_FOCUS,
-            HMODULE::default(),
-            Some(focus_event),
-            0,
-            0,
-            WINEVENT_OUTOFCONTEXT,
-        );
-        let ready = !foreground.is_invalid() && !focus.is_invalid();
+        let ready = !foreground.is_invalid();
         let _ = tx.send(ready);
         let mut message = MSG::default();
         while ready && !stopped.load(Ordering::SeqCst) {
@@ -119,9 +115,6 @@ fn start_focus_watch() -> Option<Arc<AtomicBool>> {
                 DispatchMessageW(&message);
             }
             thread::sleep(Duration::from_millis(10));
-        }
-        if !focus.is_invalid() {
-            let _ = UnhookWinEvent(focus);
         }
         if !foreground.is_invalid() {
             let _ = UnhookWinEvent(foreground);
@@ -183,6 +176,25 @@ struct Observation {
 }
 
 impl Observation {
+    unsafe fn owns(&self, mut element: IUIAutomationElement) -> Option<()> {
+        let walker = self.automation.RawViewWalker().ok()?;
+        for _ in 0..64 {
+            if element.CurrentIsPassword().ok()?.as_bool() {
+                return None;
+            }
+            if self
+                .automation
+                .CompareElements(&element, &self.element)
+                .ok()?
+                .as_bool()
+            {
+                return Some(());
+            }
+            element = walker.GetParentElement(&element).ok()?;
+        }
+        None
+    }
+
     unsafe fn focused(&self) -> Option<()> {
         if FOCUS_CHANGED.load(Ordering::SeqCst) || GetForegroundWindow() != self.target {
             return None;
@@ -217,7 +229,10 @@ impl Observation {
             CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
         let element = automation.GetFocusedElement().ok()?;
         let role = element.CurrentControlType().ok()?;
-        if role != UIA_EditControlTypeId && role != UIA_DocumentControlTypeId {
+        if role != UIA_EditControlTypeId
+            && role != UIA_DocumentControlTypeId
+            && role != UIA_GroupControlTypeId
+        {
             return None;
         }
         // Establish membership BEFORE reading text. Browser renderer PIDs can
@@ -313,14 +328,7 @@ impl Observation {
         }
         for range in [&self.region, &self.left, &self.right] {
             let owner = range.GetEnclosingElement().ok()?;
-            if !self
-                .automation
-                .CompareElements(&owner, &self.element)
-                .ok()?
-                .as_bool()
-            {
-                return None;
-            }
+            self.owns(owner)?;
         }
         if read_bounded(&self.left, self.left_text.encode_utf16().count())? != self.left_text
             || read_bounded(&self.right, self.right_text.encode_utf16().count())? != self.right_text
@@ -413,7 +421,16 @@ pub fn run() {
         return;
     }
     limit.store(request.timeout_ms, Ordering::SeqCst);
-    let Some(focus_stop) = start_focus_watch() else {
+    let Some(target) = request
+        .target
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value > 0 && *value <= isize::MAX as u64)
+    else {
+        status("unsupported");
+        return;
+    };
+    let Some(focus_stop) = start_focus_watch(target) else {
         status("unsupported");
         return;
     };
