@@ -12,9 +12,16 @@ All notable changes to this project are documented here.
 - Send approved terms through the verified Qwen Audio 3.0 Streaming instant-vocabulary parameter and as short-dictation cleaner reference vocabulary. Unsupported ASR models keep their existing request schema. Meeting/file transcription remains unchanged.
 - Add bounded Windows input-range observation after successful dictation delivery. Stop or skip observation when the target cannot be established safely; preserve manual vocabulary entry for unsupported editors. See `docs/HOTWORDS.md` for scope and limitations.
 
+### Fixed
+
+- Stop Windows dictation display animations, spectrum painting and pending scroll frames after hiding. Restore background throttling before the native hide, and resume unrestricted first-frame preparation only when reopening. Keep the separate capture renderer active for recording.
+- Publish Windows native show/hide/minimize/restore visibility to the shared UI. Stop hidden Home refresh timers and realtime meeting view polling/clock repainting while retaining backend recording, autosave, ASR and summary tasks and their update subscriptions. Restore current content when the window returns.
+- Restore a minimized Windows main window invisibly before preparing the separate dictation bubble, avoiding a flash of the compact capture surface during repeated hotkey activation.
+
 ### Validation
 
 - Bulk vocabulary tests cover TXT encodings, CSV/TSV/XLSX, SGPU record boundaries, malformed and oversized files, preview ownership/expiry, retry after failed saves, capacity limits and atomic bulk deletion. All 82 shared regression scripts pass locally. Windows Electron IPC checks exercise a synthetic 78,484-row import, cross-page deletion and restart persistence; browser checks cover desktop and narrow layouts.
+- Idle-display tests cover cold cancellation, failed loading, hide/show reversal, late spectrum messages, hidden Home updates and background meeting completion. Windows Electron checks use synthetic audio to verify ongoing capture behind the display, full text delivery, stopped audio tracks, repeated bubble activation, minimized Home and idle animations without microphone/API access. CPU comparisons are bounded local samples, not a zero-CPU guarantee.
 - 80 shared regression scripts pass locally. Windows observer verification includes 14 Rust tests and 24 wrapper/native fixture groups, including optimized WPF/UIA tests with synchronized focus readiness. Repeated focus notifications are tolerated while actual window/control departure cancels observation. Editors that invalidate their text ranges are skipped and expose a local observation status; this does not establish support for every third-party editor.
 - A real Qwen Streaming request with eight seconds of synthetic audio and two hotwords completed with 13 partial events and one final event. Browser tests cover dictionary/candidate editing, error recovery, narrow layouts and integrated settings keyboard handling. No private audio or response bodies are stored in the test report.
 

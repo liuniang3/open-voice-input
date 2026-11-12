@@ -14,7 +14,11 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
   const alive = () => !disposed && win && !win.isDestroyed();
   const sender = event => alive() && event.sender === win.webContents && event.sender.getURL() === url
     && (!event.senderFrame || event.senderFrame.url === url);
-  function publish() { if (alive() && enabled) win.webContents.send("dictation:preview:state", state); }
+  const displayState = () => ({ ...state, active: enabled && !warming });
+  function publish() { if (alive()) win.webContents.send("dictation:preview:state", displayState()); }
+  function throttleIdle() {
+    if (alive() && !enabled) win.webContents.setBackgroundThrottling?.(true);
+  }
   function create() {
     win = new BrowserWindow({ width: 340, height: 116, useContentSize: true, frame: false,
       thickFrame: false, transparent: true, backgroundColor: "#00000000", hasShadow: false,
@@ -33,7 +37,7 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
     win.webContents.on("render-process-gone", () => {
       failed = true;
       if (!enabled || !alive() || mainWindow.isDestroyed()) return;
-      enabled = false; motion.hide(); mainWindow.show(); mainWindow.focus();
+      enabled = false; throttleIdle(); motion.hide(); mainWindow.show(); mainWindow.focus();
     });
     win.on("close", event => { event.preventDefault(); if (enabled) onCommand("cancel"); });
   }
@@ -56,18 +60,21 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
   ipcMain.on("dictation:preview:update", onState);
   ipcMain.on("dictation:preview:bands", onSpectrum);
   ipcMain.on("dictation:preview:command", onPreviewCommand);
-  ipcMain.handle("dictation:preview:ready", event => sender(event) ? state : null);
+  ipcMain.handle("dictation:preview:ready", event => sender(event) ? displayState() : null);
 
   return {
     async show({ reposition = false, entrance = null } = {}) {
       if (disposed || failed) return false;
       if (!alive()) create();
       const current = ++revision;
+      // Hidden first-frame preparation needs animation frames, but an idle
+      // display never needs the recorder's unrestricted background scheduling.
+      win.webContents.setBackgroundThrottling?.(false);
       if (!enabled) state = { kind: "recording", title: "正在录音", detail: "", preview: false };
       enabled = true;
       const loaded = await ready;
       if (!loaded || !alive() || failed || !enabled || revision !== current) {
-        if (!loaded && alive() && warming) { motion.hideImmediately(); warming = false; }
+        if (!loaded && alive() && warming) { motion.hideImmediately(); warming = false; enabled = false; throttleIdle(); }
         return false;
       }
       if (warming) { motion.hideImmediately(); warming = false; }
@@ -79,7 +86,14 @@ function createDictationPreview({ BrowserWindow, ipcMain, mainWindow, authorized
     },
     hide(onHidden) {
       enabled = false; warming = false; revision++;
-      return motion ? motion.hide(onHidden) : Promise.resolve(false);
+      publish();
+      throttleIdle();
+      const current = revision;
+      const hidden = motion ? motion.hide(onHidden) : Promise.resolve(false);
+      return hidden.then(result => {
+        if (revision === current) throttleIdle();
+        return result;
+      });
     },
     getWindow: () => alive() ? win : null,
     isActive: () => alive() && enabled,

@@ -1042,6 +1042,14 @@ function createWindow() {
 
   windowMotion = createWindowMotion({ window: mainWindow,
     prepareBubble: value => prepareDictationBubble(mainWindow, value) });
+  if (isWindows) {
+    const win = mainWindow;
+    const publishVisibility = () => {
+      if (!win.isDestroyed()) win.webContents.send("window-visibility", win.isVisible() && !win.isMinimized());
+    };
+    for (const event of ["show", "hide", "minimize", "restore"]) win.on(event, publishVisibility);
+    win.webContents.on("did-finish-load", publishVisibility);
+  }
   mainWindow.webContents.on("before-input-event", handleFocusedHotkey);
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
   dictationPreview = createDictationPreview({ BrowserWindow, ipcMain, mainWindow,
@@ -1145,6 +1153,12 @@ function showAndStart() {
     if (meetingQuitCleanupStarted) throw liveError("app_quitting");
     if (freshCapture) targetWindowHandle = context?.target || getForegroundWindowHandle();
     logEvent("hotkey: showAndStart");
+    if (freshCapture && os.platform() === "win32" && mainWindow.isMinimized()) {
+      // Restoring a hidden minimized HWND can show it again. Restore invisibly
+      // before staging the recording geometry and its separate display.
+      mainWindow.setOpacity(0);
+      mainWindow.restore();
+    }
     if (freshCapture) windowMotion.hideImmediately();
     setWindowMode("recording");
     prepareWindowForDisplay(mainWindow, "recording");

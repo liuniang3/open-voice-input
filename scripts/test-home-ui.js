@@ -43,8 +43,10 @@ async function run() {
   let historyRows = [];
   let historyFailed = false;
   let historyUpdated;
+  let visibilityChanged;
+  const homeTimers = new Set();
   const ui = createHomeUi({ document: { getElementById: id => nodes.get(id), createElement: element },
-    setInterval: () => 1, clearInterval() {}, setSettingsTab: (...args) => historyNavigation.push(args),
+    setInterval: callback => { homeTimers.add(callback); return callback; }, clearInterval: timer => homeTimers.delete(timer), setSettingsTab: (...args) => historyNavigation.push(args),
     FileTranscriptionUi: {
       openWorkspace: async () => workspaceNavigation.push("file"),
       chooseFile: async () => workspaceNavigation.push("unexpected-file-picker")
@@ -57,7 +59,8 @@ async function run() {
       },
       openSettings: async () => historyNavigation.push("settings"),
       openMeetingWorkspace: async () => workspaceNavigation.push("meeting"),
-      onVoiceHistoryUpdated: callback => { historyUpdated = callback; }
+      onVoiceHistoryUpdated: callback => { historyUpdated = callback; },
+      onWindowVisibility: callback => { visibilityChanged = callback; }
     } });
   const initial = ui.open(); await tick();
   ui.close(); const reopened = ui.open(); await tick();
@@ -96,8 +99,19 @@ async function run() {
   pending[5](recentDto); await inFlight; await tick();
   assert.equal(pending.length, 7, "history events during a refresh queue exactly one follow-up fetch");
   pending[6](recentDto); await ui.refresh();
+  assert.equal(homeTimers.size, 1);
+  visibilityChanged(false);
+  assert.equal(homeTimers.size, 0, "hiding the native window stops the home timer");
+  historyUpdated(); await ui.refresh(); await tick();
+  assert.equal(pending.length, 7, "hidden home events and explicit refresh never fetch");
+  visibilityChanged(true); await tick();
+  assert.equal(homeTimers.size, 1);
+  assert.equal(pending.length, 8, "show restores one fresh home snapshot");
+  pending[7](recentDto); await ui.refresh();
+  visibilityChanged(true);
+  assert.equal(homeTimers.size, 1, "repeated visibility notifications cannot duplicate timers");
   ui.close();
-  historyUpdated(); await tick(); assert.equal(pending.length, 7, "hidden home never fetches history updates");
+  historyUpdated(); await tick(); assert.equal(pending.length, 8, "hidden home never fetches history updates");
   const selectedReads = [];
   const historyUi = createVoiceHistoryUi({ document: { getElementById: id => nodes.get(id), createElement: element }, api: {
     listVoiceHistory: async payload => { assert.equal(payload.query, ""); return { ok: true, entries: historyRows, total: 50 }; },

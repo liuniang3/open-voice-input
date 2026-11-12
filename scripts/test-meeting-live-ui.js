@@ -75,6 +75,8 @@ function fixture(view = {}) {
     return handlers[name](...args);
   }]));
   api.onMeetingLiveUpdate = (callback) => { callbacks.add(callback); return () => callbacks.delete(callback); };
+  const visibility = new Set();
+  api.onWindowVisibility = callback => { visibility.add(callback); return () => visibility.delete(callback); };
   const events = new Map();
   const preferences = new Map();
   const win = { document: { getElementById: $, createElement: element }, mimoInput: api, TextSupplierUi,
@@ -85,6 +87,8 @@ function fixture(view = {}) {
   });
   return {
     $, ui, api, handlers, calls, timers, callbacks, win, events,
+    visibility,
+    setVisible(value) { for (const callback of visibility) callback(value); },
     setSettings(value) { settings = { ...settings, ...value }; },
     setStatus(value) { status = value; },
     push(value) { status = value; for (const cb of callbacks) cb(value); },
@@ -100,6 +104,31 @@ const test = (name, run) => tests.push({ name, run });
 const completed = (extra = {}) => ({
   sessionId: "s1", status: "completed", recording: false, modelId: "qwen-audio-3.0-asr-flash-streaming",
   rawText: "原始转写文本", pendingSegments: 0, failedSegments: 0, cleanupStatus: "idle", ...extra
+});
+
+test("native hide suspends view timers while recording and summaries keep their push state", async () => {
+  const f = fixture();
+  f.setStatus(completed());
+  await f.ui.open();
+  assert.equal(f.timers.size, 1);
+  f.setVisible(false);
+  assert.equal(f.timers.size, 0);
+  const callsBefore = f.calls.length;
+  const rendered = f.$("liveSessionTitle").textContent;
+  f.push(completed({ title: "Completed in background", postprocessStatus: "completed" }));
+  f.advance(10000);
+  assert.equal(f.$("liveSessionTitle").textContent, rendered, "hidden pushes retain state without repainting");
+  assert.equal(f.calls.length, callsBefore, "hiding must not pause, stop or cancel backend work");
+  f.setVisible(true); await tick();
+  assert.equal(f.$("liveSessionTitle").textContent, "Completed in background");
+  assert.equal(f.timers.size, 1);
+  f.setVisible(true);
+  assert.equal(f.timers.size, 1);
+  f.setVisible(false); f.ui.close();
+  await f.ui.open();
+  assert.equal(f.timers.size, 0, "opening a hidden page cannot start a view timer");
+  f.ui.destroy();
+  assert.equal(f.visibility.size, 0);
 });
 
 test("meeting sidebars remember visibility, enforce narrow drawers and expand invalid ASR only on entry", async () => {

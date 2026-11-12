@@ -26,6 +26,8 @@
     const api = win.mimoInput || {};
     let dto = { status: "idle", recording: false };
     let opened = false;
+    let visible = true;
+    let unsubscribeVisibility;
     let loaded = false;
     let settingsReady = false;
     let asrSettings = {};
@@ -564,6 +566,7 @@
     }
 
     function render() {
+      if (!visible) return;
       const isActive = active(dto);
       const isCleaning = cleaning(dto) || busy.has("cleanup") || busy.has("summarize");
       const isPaused = Boolean(dto.paused || dto.status === "paused");
@@ -730,6 +733,14 @@
       syncSidebars();
     }
 
+    function startViewTimer() {
+      if (!visible || !opened || timer) return;
+      timer = every(() => {
+        renderClock();
+        if (++ticks % 5 === 0 && !busy.size) void refresh();
+      }, 1000);
+    }
+
     function open() {
       if (openFlight) return openFlight;
       opened = true;
@@ -747,10 +758,7 @@
       if (!unsubscribeWindow && typeof api.onMeetingLiveWindowChanged === "function") {
         unsubscribeWindow = api.onMeetingLiveWindowChanged(flags => { if (opened) { windowRevision++; acceptWindow(flags); render(); } });
       }
-      if (!timer) timer = every(() => {
-        renderClock();
-        if (++ticks % 5 === 0 && !busy.size) void refresh();
-      }, 1000);
+      startViewTimer();
       const flight = (async () => {
         await Promise.all([refresh(), (async () => {
           try {
@@ -791,6 +799,7 @@
       close();
       unsubscribe?.();
       unsubscribe = null;
+      unsubscribeVisibility?.(); unsubscribeVisibility = null;
     }
 
     $("liveStart").addEventListener("click", () => {
@@ -908,6 +917,13 @@
     });
     $("liveHistoryBrowser").addEventListener("keydown", (event) => {
       if (event.key === "Escape") { event.preventDefault(); setHistoryOpen(false); $("liveHistoryToggle").focus(); }
+    });
+    unsubscribeVisibility = api.onWindowVisibility?.(value => {
+      if (visible === value) return;
+      visible = value;
+      if (timer) cancel(timer);
+      timer = null;
+      if (opened && visible) { startViewTimer(); render(); void refresh(); }
     });
     win.addEventListener("beforeunload", destroy);
     render();

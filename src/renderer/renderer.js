@@ -3083,6 +3083,10 @@ window.mimoInput.onWindowMode((mode) => {
   applyWindowMode(mode);
 });
 
+window.mimoInput.onWindowVisibility?.(visible => {
+  document.body.classList.toggle("window-visuals-paused", !visible);
+});
+
 /* —— Meeting workbench (Stage 4A) —— */
 const meetingChannels = meetingUi.createWorkbenchChannels
   ? meetingUi.createWorkbenchChannels()
