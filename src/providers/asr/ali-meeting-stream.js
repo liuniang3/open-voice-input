@@ -2,6 +2,7 @@
 
 const { randomBytes } = require("node:crypto");
 const WebSocket = require("ws");
+const { instantVocabulary } = require("../../hotwords");
 
 // Cached official guide: output/docs/aliyun-realtime.html (__ICE_PAGE_PROPS__).
 // Qwen3-ASR-Flash-Realtime uses /realtime, not this run-task protocol.
@@ -79,6 +80,7 @@ function createAliMeetingStream({
   apiKey,
   baseUrl,
   model = ALI_MEETING_MODELS[0],
+  hotwords = [],
   onSentence,
   onError,
   WebSocketImpl = WebSocket,
@@ -110,6 +112,7 @@ function createAliMeetingStream({
     throw streamError("invalid_callback_or_signal");
   }
   const url = resolveAliMeetingUrl(baseUrl);
+  const vocabulary = instantVocabulary(model, hotwords, url);
   const taskId = randomBytes(16).toString("hex");
   const readyState = deferred();
   const completed = deferred();
@@ -240,7 +243,8 @@ function createAliMeetingStream({
     if (state !== "connecting" || failure || runSent) return;
     observed(control("run-task", {
       task_group: "audio", task: "asr", function: "recognition", model,
-      parameters: { format: "pcm", sample_rate: sampleRate, heartbeat: true }, input: {}
+      parameters: { format: "pcm", sample_rate: sampleRate, heartbeat: true,
+        ...(vocabulary ? { vocabulary } : {}) }, input: {}
     }, () => { runSent = true; }));
   }
 

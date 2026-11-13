@@ -403,6 +403,7 @@ function mainHarness(platform = "darwin", extraStubs = {}) {
     "node:fs/promises": { mkdir: async () => {}, writeFile: async (...args) => controls.writes.push(args),
       realpath: async (file) => controls.canonical || file, lstat: async () => ({ isFile: () => true }) },
     "./runtime-log": { createRuntimeLogWriter: () => ({ enqueue: () => {}, close: async () => {} }) },
+    "./hotwords": { createHotwordStore: () => ({ ready: async () => {}, words: () => [], canObserve: () => false }) },
     "./settings/connection-profiles": { ensureConnectionProfiles },
     "./settings/text-suppliers": require("../src/settings/text-suppliers"),
     "./settings/meeting-window": require("../src/settings/meeting-window"),

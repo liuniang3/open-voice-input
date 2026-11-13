@@ -9,6 +9,15 @@ contextBridge.exposeInMainWorld("mimoInput", {
   downloadUpdate: () => ipcRenderer.invoke("app:update:download"),
   installUpdate: () => ipcRenderer.invoke("app:update:install"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
+  getHotwords: () => ipcRenderer.invoke("hotwords:get"),
+  updateHotwords: (payload) => ipcRenderer.invoke("hotwords:update", payload),
+  previewHotwordImport: () => ipcRenderer.invoke("hotwords:import:preview"),
+  commitHotwordImport: (payload) => ipcRenderer.invoke("hotwords:import:commit", payload),
+  onHotwordsUpdated: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("hotwords:updated", listener);
+    return () => ipcRenderer.removeListener("hotwords:updated", listener);
+  },
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   checkHotkey: (payload) => ipcRenderer.invoke("shortcut:check", payload),
   startHotkeyCapture: () => ipcRenderer.invoke("shortcut:capture-start"),
@@ -103,6 +112,11 @@ contextBridge.exposeInMainWorld("mimoInput", {
   onOpenMeeting: (callback) => ipcRenderer.on("open-meeting", callback),
   onOpenFile: (callback) => ipcRenderer.on("open-file", callback),
   onWindowMode: (callback) => ipcRenderer.on("window-mode", (_event, mode) => callback(mode)),
+  onWindowVisibility: (callback) => {
+    const listener = (_event, visible) => callback(visible === true);
+    ipcRenderer.on("window-visibility", listener);
+    return () => ipcRenderer.removeListener("window-visibility", listener);
+  },
   onDictationEntrance: (callback) => ipcRenderer.on("dictation:entrance", (_event, value) => callback(value)),
   onWindowBlur: (callback) => ipcRenderer.on("window-blur", callback),
   onPartialTranscript: (callback) => ipcRenderer.on("voice:partial-transcript", (_event, text) => callback(text)),

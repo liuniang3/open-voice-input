@@ -21,6 +21,7 @@ async function unitTests() {
       this.webContents.setWindowOpenHandler = () => {};
       this.webContents.getURL = () => pathToFileURL(path.join(root, "src/renderer/dictation-preview.html")).href;
       this.webContents.send = (...args) => this.sent.push(args);
+      this.webContents.setBackgroundThrottling = value => { this.throttled = value; };
     }
     loadFile() { return Promise.resolve(); }
     isDestroyed() { return this.destroyed; }
@@ -39,6 +40,8 @@ async function unitTests() {
   assert.equal(windows.length, 0, "normal startup does not create a hidden recording renderer");
   assert.equal(await preview.show(), true);
   const win = windows[0];
+  assert.equal(win.throttled, false, "first-frame preparation remains unthrottled");
+  assert.equal(win.sent.at(-1)[1].active, true);
   assert.equal(mainWindow.hidden && preview.isVisible(), true);
   win.bounds = { x: 500, y: 450, width: 340, height: 116 };
   await preview.show();
@@ -74,9 +77,17 @@ async function unitTests() {
   ipcMain.emit("dictation:preview:command", popupEvent, "settings:get");
   assert.deepEqual(commands, ["stop", "cancel"], "the display cannot access keys, providers or arbitrary IPC");
   await preview.hide();
+  assert.equal(win.sent.at(-1)[1].active, false, "hiding explicitly stops the display despite Chromium visibility");
+  assert.equal(win.throttled, true, "idle displays restore background throttling");
+  const idleCount = win.sent.length;
+  ipcMain.emit("dictation:preview:bands", event, Array(36).fill(0.5));
+  ipcMain.emit("dictation:preview:update", event, state);
+  assert.equal(win.sent.length, idleCount, "late recording events cannot wake the idle display");
   ipcMain.emit("dictation:preview:command", popupEvent, "stop");
   assert.deepEqual(commands, ["stop", "cancel"]);
   assert.equal(await preview.show(), true);
+  assert.equal(win.throttled, false);
+  assert.equal(win.sent.at(-1)[1].active, true);
   assert.equal(win.sent.at(-1)[1].detail, "", "a new invocation cannot display the previous transcript");
   win.webContents.emit("render-process-gone");
   assert.equal(mainWindow.hidden, false, "a failed display returns to the existing capture renderer");
@@ -109,6 +120,19 @@ async function unitTests() {
     cold.dispose();
   }
   Window.prototype.loadFile = originalLoad;
+  const reversing = createDictationPreview({ ...options, platform: "win32" });
+  reversing.setReducedMotion(false);
+  await reversing.show();
+  const reversedWindow = windows.at(-1);
+  const hiding = reversing.hide();
+  const reopening = reversing.show();
+  assert.equal(await hiding, false);
+  assert.equal(await reopening, true);
+  assert.equal(reversedWindow.throttled, false, "a stale fade completion cannot throttle a reopened display");
+  assert.equal(reversedWindow.sent.at(-1)[1].active, true);
+  await reversing.hide();
+  assert.equal(reversedWindow.throttled, true);
+  reversing.dispose();
 
   const previewSource = fs.readFileSync(path.join(root, "src/dictation-preview.js"), "utf8");
   assert.doesNotMatch(previewSource, /applyWindowsDictationGlass|SetWindowCompositionAttribute|setShape|setOpacity\(0\.[0-9]+\)/,
@@ -268,6 +292,12 @@ async function verifyNative() {
     assert.equal(finished.text.endsWith("最后一句也必须保留。"), true);
     assert.deepEqual(await application.evaluate(() => globalThis.fixtureInjected), [finished.text]);
     assert.equal(await application.evaluate(() => globalThis.fixtureApp.preview().isVisible()), false);
+    await popup.waitForFunction(() => document.body.classList.contains("window-visuals-paused")
+      && document.getElementById("recordingSpectrum").hidden
+      && document.getAnimations().every(animation => animation.playState !== "running"));
+    assert.equal(await application.evaluate(() => globalThis.fixtureApp.preview().getWindow().webContents.getBackgroundThrottling()), true);
+    assert.equal(await page.evaluate(() => document.body.classList.contains("window-visuals-paused")), true,
+      "the hidden capture window pauses visuals without changing audio cleanup");
     await page.evaluate(() => window.mimoInput.setReducedMotion(false));
     await application.evaluate(() => {
       globalThis.fixtureFirstFrames = [];
@@ -401,6 +431,7 @@ async function verifyNative() {
     const restored = await application.evaluate(() => ({ visible: globalThis.fixtureApp.main().isVisible(),
       resizable: globalThis.fixtureApp.main().isResizable(), preview: globalThis.fixtureApp.preview().isVisible() }));
     assert.deepEqual(restored, { visible: true, resizable: true, preview: false });
+    await page.waitForFunction(() => !document.body.classList.contains("window-visuals-paused"));
     await page.evaluate(async () => { window.testMicrophone.tone.stop(); await window.testMicrophone.audio.close(); });
     console.log("PASS actual Windows app: transparent rounded focused/inactive/reopened display, background synthetic PCM capture and spectrum, Stable Enter complete paste, Escape cancellation and normal resizable workspace restoration; no microphone/API/credentials");
   } finally { await application.close(); }

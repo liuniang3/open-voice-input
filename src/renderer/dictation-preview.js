@@ -2,9 +2,14 @@
 
 const panel = document.getElementById("statusPanel"), detail = document.getElementById("statusDetail");
 const spectrum = window.RecordingSpectrum.createRecordingSpectrum(window);
-let followTail = true, scrollFrame = 0, showingPreview = false;
+let followTail = true, scrollFrame = 0, showingPreview = false, active = false;
 function update(value) {
   if (!value) return;
+  active = value.active !== false;
+  document.body.classList.toggle("window-visuals-paused", !active);
+  cancelAnimationFrame(scrollFrame);
+  scrollFrame = 0;
+  if (!active) { spectrum.stop(); return; }
   if (!value.preview || !showingPreview) followTail = true;
   showingPreview = value.preview;
   panel.dataset.kind = value.kind; panel.dataset.preview = String(value.preview);
@@ -29,7 +34,7 @@ window.addEventListener("keydown", event => {
 let receivedState = false;
 window.dictationPreview.onState(value => { receivedState = true; update(value); });
 window.dictationPreview.onSpectrum(levels => {
-  if (panel.dataset.kind === "recording") spectrum.render(levels);
+  if (active && panel.dataset.kind === "recording") spectrum.render(levels);
 });
 void window.dictationPreview.ready().then(value => { if (!receivedState) update(value); });
 window.addEventListener("unload", () => { cancelAnimationFrame(scrollFrame); spectrum.dispose(); });

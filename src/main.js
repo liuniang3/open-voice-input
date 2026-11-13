@@ -50,6 +50,7 @@ const { mergeAsrConnections, resolveProviderConnection } = require("./settings/p
 const { validateHotkey, normalizeAccelerator, matchesShortcutInput } = require("./hotkeys/validate-hotkey");
 const { createUsageStats } = require("./usage-stats");
 const { createVoiceHistory } = require("./voice-history");
+const { createHotwordStore } = require("./hotwords");
 const { createOnboardingState } = require("./onboarding-state");
 const { openConsole: openAsrProviderConsole } = require("./asr-provider-info");
 const { workspaceSelection, savedFollowPreferences } = require("./asr-defaults");
@@ -314,7 +315,57 @@ let hotkeyRegistrationQueue = Promise.resolve();
 let windowMode = "compact";
 let usageStats;
 let voiceHistory;
+let hotwordStore;
+let correctionObservation;
+let correctionGeneration = 0;
+let correctionObservationStatus = "";
 let onboardingState;
+
+function getHotwordStore() {
+  return hotwordStore ||= createHotwordStore({ directory: app.getPath("userData") });
+}
+
+function stopCorrectionObservation() {
+  correctionGeneration++;
+  const observation = correctionObservation;
+  correctionObservation = null;
+  if (observation) correctionObservationStatus = "stopped";
+  try { observation?.stop(); } catch { logEvent("hotwords: observer stop unavailable"); }
+}
+
+function observeInsertedText(target, text) {
+  stopCorrectionObservation();
+  if (!getHotwordStore().canObserve()) return;
+  const generation = correctionGeneration;
+  let ended = false;
+  try {
+    const helperPath = meetingPaths.resolveHelperPath({ platform: process.platform,
+      isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appRoot: path.join(__dirname, "..") });
+    const observation = require("./platform/windows-correction-observer").startCorrectionObservation({
+      helperPath, target, text,
+      onStatus: ({ status }) => {
+        if (generation === correctionGeneration && status !== "helper-exit") {
+          correctionObservationStatus = status;
+          try { mainWindow?.webContents.send("hotwords:updated"); } catch { /* Window may be closing. */ }
+        }
+        if (["corrected", "helper-exit", "timeout", "protocol-error", "stopped", "spawn-error", "helper-error", "unsupported-platform"].includes(status)) {
+          ended = true;
+          if (generation === correctionGeneration) correctionObservation = null;
+        }
+      },
+      onCorrection: async ({ before, after }) => {
+        if (generation !== correctionGeneration || !getHotwordStore().canObserve()) return;
+        try {
+          if (await getHotwordStore().recordCorrection({ before, after })) {
+            if (generation === correctionGeneration) correctionObservationStatus = "candidate";
+            mainWindow?.webContents.send("hotwords:updated");
+          }
+        } catch { logEvent("hotwords: candidate persistence unavailable"); }
+      }
+    });
+    correctionObservation = ended ? null : observation;
+  } catch { logEvent("hotwords: correction observation unavailable"); }
+}
 
 function getUsageStats() {
   return usageStats ||= createUsageStats({ directory: app.getPath("userData") });
@@ -991,6 +1042,14 @@ function createWindow() {
 
   windowMotion = createWindowMotion({ window: mainWindow,
     prepareBubble: value => prepareDictationBubble(mainWindow, value) });
+  if (isWindows) {
+    const win = mainWindow;
+    const publishVisibility = () => {
+      if (!win.isDestroyed()) win.webContents.send("window-visibility", win.isVisible() && !win.isMinimized());
+    };
+    for (const event of ["show", "hide", "minimize", "restore"]) win.on(event, publishVisibility);
+    win.webContents.on("did-finish-load", publishVisibility);
+  }
   mainWindow.webContents.on("before-input-event", handleFocusedHotkey);
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
   dictationPreview = createDictationPreview({ BrowserWindow, ipcMain, mainWindow,
@@ -1084,6 +1143,7 @@ function showAndStart() {
     return;
   }
   const freshCapture = captureOwner !== "short";
+  if (freshCapture) stopCorrectionObservation();
   const invokedAt = Date.now();
   const inputContext = freshCapture ? getDictationInputContext() : Promise.resolve(null);
   captureOwner = "short";
@@ -1093,6 +1153,12 @@ function showAndStart() {
     if (meetingQuitCleanupStarted) throw liveError("app_quitting");
     if (freshCapture) targetWindowHandle = context?.target || getForegroundWindowHandle();
     logEvent("hotkey: showAndStart");
+    if (freshCapture && os.platform() === "win32" && mainWindow.isMinimized()) {
+      // Restoring a hidden minimized HWND can show it again. Restore invisibly
+      // before staging the recording geometry and its separate display.
+      mainWindow.setOpacity(0);
+      mainWindow.restore();
+    }
     if (freshCapture) windowMotion.hideImmediately();
     setWindowMode("recording");
     prepareWindowForDisplay(mainWindow, "recording");
@@ -1990,7 +2056,8 @@ function qwenRealtimeSettings() {
     baseUrl: connection.baseUrl,
     model,
     language: settings.asrLanguage || "",
-    enableItn: Boolean(settings.asrEnableItn)
+    enableItn: Boolean(settings.asrEnableItn),
+    hotwords: getHotwordStore().words()
   };
 }
 
@@ -2066,6 +2133,7 @@ function sendTextKeystrokes(text) {
 }
 
 async function injectText(text) {
+  stopCorrectionObservation();
   // Fade and focus-settling run together, never adding animation time to direct input.
   await Promise.all([hideWindow(), new Promise((resolve) => setTimeout(resolve, 260))]);
   try {
@@ -2075,6 +2143,7 @@ async function injectText(text) {
       if (access !== true && access !== "granted") throw liveError("accessibility_permission");
     }
     await sendTextKeystrokes(text);
+    observeInsertedText(targetWindowHandle, text);
     return { ok: true };
   } catch (error) {
     if (os.platform() === "darwin") await showCaptureError(liveError("accessibility_permission")).catch(() => {});
@@ -2107,6 +2176,54 @@ public static class Win32 {
 }
 
 ipcMain.handle("settings:get", async () => settings);
+ipcMain.handle("hotwords:get", async (event) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url)) throw new Error("hotwords_unavailable");
+  return { ...await getHotwordStore().get(), observationStatus: correctionObservationStatus };
+});
+let hotwordImporter;
+function getHotwordImporter() {
+  return hotwordImporter ||= require("./hotword-import-session").createHotwordImporter({
+    getStore: getHotwordStore,
+    chooseFile: async sender => {
+      const options = { title: "导入热词词库", properties: ["openFile"], filters: [
+        { name: "词库与表格", extensions: ["txt", "csv", "tsv", "xlsx", "bin"] },
+        { name: "文本词库", extensions: ["txt"] },
+        { name: "表格", extensions: ["xlsx", "csv", "tsv"] },
+        { name: "搜狗词库备份", extensions: ["bin"] }
+      ] };
+      const window = BrowserWindow.fromWebContents(sender);
+      const selected = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
+      return selected.canceled ? null : selected.filePaths[0];
+    }
+  });
+}
+for (const action of ["preview", "commit"]) {
+  ipcMain.handle(`hotwords:import:${action}`, async (event, payload) => {
+    if (!isAppSender(event.sender, event.senderFrame?.url)) throw new Error("hotwords_unavailable");
+    try {
+      const value = await getHotwordImporter()[action](event.sender, payload);
+      if (action === "commit") {
+        mainWindow?.webContents.send("hotwords:updated");
+        return { ...value, observationStatus: correctionObservationStatus };
+      }
+      return value;
+    } catch (error) {
+      throw new Error(/^hotwords?_[a-z_]+$/.test(error?.message || "") ? error.message : action === "commit" ? "hotwords_unavailable" : "hotwords_import_format");
+    }
+  });
+}
+ipcMain.handle("hotwords:update", async (event, payload) => {
+  if (!isAppSender(event.sender, event.senderFrame?.url)) throw new Error("hotwords_unavailable");
+  try {
+    if (payload?.action === "configure") stopCorrectionObservation();
+    const value = await getHotwordStore().update(payload);
+    mainWindow?.webContents.send("hotwords:updated");
+    return { ...value, observationStatus: correctionObservationStatus };
+  } catch (error) {
+    const code = /^hotwords?_[a-z_]+$/.test(error?.message || "") ? error.message : "hotwords_unavailable";
+    throw new Error(code);
+  }
+});
 ipcMain.handle("settings:save", async (_event, nextSettings) => saveSettings(nextSettings));
 ipcMain.handle("app:startup:status", async (event) => {
   if (!isAppSender(event.sender, event.senderFrame?.url)) return { ok: false };
@@ -3415,9 +3532,11 @@ app.whenReady().then(async () => {
   logEvent("app: ready");
   attachMeetingPlaybackProtocolHandler();
   await loadSettings();
+  await getHotwordStore().ready().catch(() => logEvent("hotwords: local store unavailable"));
   liveWindowStore = createMeetingWindowStore(app.getPath("userData"));
   livePresentation = await liveWindowStore.read();
-  voicePipeline = createVoicePipeline({ getSettings: () => settings, logEvent, onTranscript: recordVoiceHistory });
+  voicePipeline = createVoicePipeline({ getSettings: () => settings, logEvent, onTranscript: recordVoiceHistory,
+    getHotwords: () => getHotwordStore().words() });
   logEvent("settings: loaded", JSON.stringify({ hotkey: settings.hotkey, microphoneDeviceId: settings.microphoneDeviceId, transcriptionMode: settings.transcriptionMode }));
   configurePermissions();
   createWindow();
@@ -3500,6 +3619,7 @@ async function shutdownMeetingCaptureBounded(timeoutMs = MEETING_QUIT_TIMEOUT_MS
 
 // Live disk writes must finish before the bounded legacy-helper cleanup and exit.
 app.on("before-quit", (event) => {
+  stopCorrectionObservation();
   event.preventDefault();
   if (meetingQuitCleanupStarted) return;
   meetingQuitCleanupStarted = true;

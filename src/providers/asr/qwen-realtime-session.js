@@ -33,6 +33,7 @@ function createQwenAudioStreamingSession({
   apiKey,
   baseUrl,
   model = QWEN_REALTIME_MODEL,
+  hotwords = [],
   onPartial,
   onFinal,
   onLog,
@@ -58,6 +59,7 @@ function createQwenAudioStreamingSession({
     apiKey: resolvedApiKey,
     baseUrl,
     model,
+    hotwords,
     onSentence: updateSentence,
     onError: (error) => {
       appendFailure ||= error;

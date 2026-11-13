@@ -631,6 +631,15 @@ body.settings-open footer {
   background: #ffb36b;
 }
 
+/* Native Windows visibility is explicit: the capture renderer may stay active
+   while its window is hidden behind a separate transcription display. */
+body.window-visuals-paused,
+body.window-visuals-paused *,
+body.window-visuals-paused *::before,
+body.window-visuals-paused *::after {
+  animation: none !important;
+}
+
 @keyframes pulse {
   0% { transform: scale(0.8); opacity: 0.7; }
   50% { transform: scale(1.05); opacity: 1; }

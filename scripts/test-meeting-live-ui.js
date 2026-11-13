@@ -75,6 +75,8 @@ function fixture(view = {}) {
     return handlers[name](...args);
   }]));
   api.onMeetingLiveUpdate = (callback) => { callbacks.add(callback); return () => callbacks.delete(callback); };
+  const visibility = new Set();
+  api.onWindowVisibility = callback => { visibility.add(callback); return () => visibility.delete(callback); };
   const events = new Map();
   const preferences = new Map();
   const win = { document: { getElementById: $, createElement: element }, mimoInput: api, TextSupplierUi,
@@ -85,6 +87,8 @@ function fixture(view = {}) {
   });
   return {
     $, ui, api, handlers, calls, timers, callbacks, win, events,
+    visibility,
+    setVisible(value) { for (const callback of visibility) callback(value); },
     setSettings(value) { settings = { ...settings, ...value }; },
     setStatus(value) { status = value; },
     push(value) { status = value; for (const cb of callbacks) cb(value); },
@@ -100,6 +104,31 @@ const test = (name, run) => tests.push({ name, run });
 const completed = (extra = {}) => ({
   sessionId: "s1", status: "completed", recording: false, modelId: "qwen-audio-3.0-asr-flash-streaming",
   rawText: "原始转写文本", pendingSegments: 0, failedSegments: 0, cleanupStatus: "idle", ...extra
+});
+
+test("native hide suspends view timers while recording and summaries keep their push state", async () => {
+  const f = fixture();
+  f.setStatus(completed());
+  await f.ui.open();
+  assert.equal(f.timers.size, 1);
+  f.setVisible(false);
+  assert.equal(f.timers.size, 0);
+  const callsBefore = f.calls.length;
+  const rendered = f.$("liveSessionTitle").textContent;
+  f.push(completed({ title: "Completed in background", postprocessStatus: "completed" }));
+  f.advance(10000);
+  assert.equal(f.$("liveSessionTitle").textContent, rendered, "hidden pushes retain state without repainting");
+  assert.equal(f.calls.length, callsBefore, "hiding must not pause, stop or cancel backend work");
+  f.setVisible(true); await tick();
+  assert.equal(f.$("liveSessionTitle").textContent, "Completed in background");
+  assert.equal(f.timers.size, 1);
+  f.setVisible(true);
+  assert.equal(f.timers.size, 1);
+  f.setVisible(false); f.ui.close();
+  await f.ui.open();
+  assert.equal(f.timers.size, 0, "opening a hidden page cannot start a view timer");
+  f.ui.destroy();
+  assert.equal(f.visibility.size, 0);
 });
 
 test("meeting sidebars remember visibility, enforce narrow drawers and expand invalid ASR only on entry", async () => {
@@ -657,6 +686,7 @@ async function prepareBrowser(page) {
       "/settings-workspace.css": ["src/renderer/settings-workspace.css", "text/css"],
       "/settings-workspace.js": ["src/renderer/settings-workspace.js", "text/javascript"],
       "/voice-history-ui.js": ["src/renderer/voice-history-ui.js", "text/javascript"],
+      "/hotwords.js": ["src/renderer/hotwords.js", "text/javascript"],
       "/recording-spectrum.js": ["src/renderer/recording-spectrum.js", "text/javascript"],
       "/voice-settings-snapshot.js": ["src/renderer/voice-settings-snapshot.js", "text/javascript"],
       "/reading-layout.js": ["src/renderer/reading-layout.js", "text/javascript"],
@@ -720,6 +750,7 @@ async function prepareBrowser(page) {
         window.mockCalls.push({ name, payload });
         if (name === "getSettings") return settings;
         if (name === "getHomeOverview") return window.mockHome;
+        if (name === "getHotwords") return { enabled: true, observeCorrections: false, observationAvailable: true, limit: 100, entries: [], candidates: [] };
         if (name === "listVoiceHistory") {
           const rows = window.mockVoiceRecords.filter(row => !payload?.query || (row.rawText + row.text).includes(payload.query));
           return { ok: true, total: rows.length, entries: rows.slice(payload?.offset || 0, (payload?.offset || 0) + (payload?.limit || 40))

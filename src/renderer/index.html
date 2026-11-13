@@ -148,6 +148,7 @@
         <div class="settings-workspace">
         <nav class="settings-tabs" role="tablist" aria-label="设置分类" aria-orientation="vertical">
           <button id="settingsTabAsr" type="button" class="settings-tab is-active" role="tab" aria-selected="true" aria-controls="settingsAsrPanel" data-settings-tab="asr"><span class="ui-icon icon-mic" aria-hidden="true"></span><span>语音识别</span></button>
+          <button id="settingsTabHotwords" type="button" class="settings-tab" role="tab" aria-selected="false" aria-controls="settingsHotwordsPanel" tabindex="-1" data-settings-tab="hotwords"><span class="ui-icon icon-type" aria-hidden="true"></span><span>热词词典</span></button>
           <button id="settingsTabCleaner" type="button" class="settings-tab" role="tab" aria-selected="false" aria-controls="settingsCleanerPanel" tabindex="-1" data-settings-tab="cleaner"><span class="ui-icon icon-type" aria-hidden="true"></span><span>表达整理</span></button>
           <button id="settingsTabHistory" type="button" class="settings-tab" role="tab" aria-selected="false" aria-controls="settingsHistoryPanel" tabindex="-1" data-settings-tab="history"><span class="ui-icon icon-history" aria-hidden="true"></span><span>语音识别历史记录</span></button>
           <button id="settingsTabUpdates" type="button" class="settings-tab" role="tab" aria-selected="false" aria-controls="settingsUpdatesPanel" tabindex="-1" data-settings-tab="updates"><span class="ui-icon icon-info" aria-hidden="true"></span><span>关于与更新</span></button>
@@ -310,6 +311,52 @@
                 <input id="asrEnableItnInput" type="checkbox" />
                 <span>启用数字、日期等文本规范化</span>
               </label>
+            </section>
+          </div>
+
+          <div id="settingsHotwordsPanel" class="settings-tab-panel" role="tabpanel" aria-labelledby="settingsTabHotwords" data-settings-panel="hotwords" hidden>
+            <section id="hotwordsPanel" class="settings-group hotwords-panel" aria-label="热词词典">
+              <div class="hotwords-heading"><h3>热词词典</h3><span data-hotwords="summary">正在读取</span><span data-hotwords="pending">待确认 —</span></div>
+              <div class="hotwords-body">
+                <label class="switch-field"><input data-hotwords="enabled" type="checkbox" checked disabled aria-describedby="hotwordsPrivacy" /><span>启用热词词典</span></label>
+                <label class="switch-field"><input data-hotwords="observe" type="checkbox" disabled aria-describedby="hotwordsObservation hotwordsObservationHelp" /><span>观察输入后的修正（仅 Windows，默认关闭）</span></label>
+                <p id="hotwordsObservation" class="hotwords-note" data-hotwords="observation-note" role="status" aria-live="polite">正在读取观察状态…</p>
+                <p class="hotwords-note" data-hotwords="request-limit">每次最多使用 100 个启用词条；导入超出部分禁用。</p>
+                <details class="hotwords-help" data-hotwords="help">
+                  <summary>使用说明</summary>
+                  <div>
+                    <p id="hotwordsPrivacy" class="hotwords-note">仅用于短语音输入，不用于会议或文件转写。启用后，已确认且启用的词条会发送给稳定模式的文本整理服务；语音识别仅 qwen-audio-3.0-asr-flash-streaming 及其日期版本使用即时词表。其他 ASR（包括 Qwen3-ASR Flash 批量识别和 MiMo）暂不发送热词参数。修正记录保存在本机。</p>
+                    <p id="hotwordsObservationHelp" class="hotwords-note">开启后，最多观察 45 秒，仅处理本次输入范围内的词语替换。修正候选保存在本机，须手动确认后才加入词典；不支持的编辑器或边界修改会跳过。</p>
+                    <p class="hotwords-note">支持 TXT（UTF-8 / UTF-16 BOM / GB18030）、搜狗 SGPU BIN、XLSX / CSV / TSV，最大 16 MiB、10 万行；XLSX 读取全部工作表，表格读取“词条 / 热词”命名列或无表头第一列。</p>
+                    <p id="hotwordsTermHint" class="hotwords-note">含中文等非 ASCII 字符：最多 15 个字符；纯 ASCII：最多 7 个空格分隔的词，且不超过 80 个字符。</p>
+                  </div>
+                </details>
+                <div class="hotwords-heading"><h3>已确认词条 <span data-hotwords="count">— / 100000</span></h3><div class="hotwords-row-actions"><button type="button" data-hotwords-action="import" disabled>导入词库</button><button type="button" class="icon-btn" data-hotwords-action="refresh" aria-label="刷新热词词典" title="刷新热词词典"><span class="ui-icon icon-refresh" aria-hidden="true"></span></button></div></div>
+                <div data-hotwords="import-preview" class="hotwords-confirmation" role="region" aria-label="导入预览" hidden>
+                  <h3 data-hotwords="import-file"></h3>
+                  <p data-hotwords="import-stats" class="hotwords-note"></p>
+                  <ul data-hotwords="import-words" class="hotwords-list" aria-label="待导入词条"></ul>
+                  <div class="hotwords-toolbar"><button type="button" data-hotwords-action="import-prev" aria-label="预览上一页">上一页</button><span data-hotwords="import-page" class="hotwords-note" role="status"></span><button type="button" data-hotwords-action="import-next" aria-label="预览下一页">下一页</button></div>
+                  <p data-hotwords="import-capacity" class="hotwords-error" hidden>剩余容量不足以导入全部有效词条，请取消后删除词条再重试。</p>
+                  <div class="hotwords-toolbar"><button type="button" data-hotwords-action="import-confirm">确认全部导入</button><button type="button" data-hotwords-action="import-cancel">取消导入</button></div>
+                </div>
+                <form data-hotwords="editor" class="hotwords-editor">
+                  <label for="hotwordsText" data-hotwords="editor-label">添加词条</label>
+                  <div class="hotwords-editor-controls"><input id="hotwordsText" data-hotwords="text" type="text" autocomplete="off" spellcheck="false" placeholder="姓名、术语或专有名词" aria-describedby="hotwordsTermHint" disabled /><button type="submit" data-hotwords="save" disabled>添加</button><button type="button" data-hotwords-action="cancel" hidden>取消</button></div>
+                </form>
+                <p data-hotwords="limit" class="hotwords-note" hidden>词典已满，请先删除词条再添加；仍可编辑或停用已有词条。</p>
+                <label class="field hotwords-search"><span>搜索词条</span><input type="search" data-hotwords="search" placeholder="输入关键词" autocomplete="off" /></label>
+                <div class="hotwords-toolbar"><label class="switch-field"><input type="checkbox" data-hotwords="select-page" /><span>选择当前页</span></label><button type="button" data-hotwords-action="select-results">选择全部搜索结果</button><span data-hotwords="selection" class="hotwords-note" role="status"></span><button type="button" data-hotwords-action="clear-selection">清除选择</button><button type="button" data-hotwords-action="remove-many">批量删除</button></div>
+                <div data-hotwords="delete-confirmation" class="hotwords-confirmation" role="region" aria-label="确认批量删除" hidden><p data-hotwords="delete-message"></p><div class="hotwords-toolbar"><button type="button" data-hotwords-action="delete-confirm">确认删除</button><button type="button" data-hotwords-action="delete-cancel">取消删除</button></div></div>
+                <ul data-hotwords="entries" class="hotwords-list" aria-label="已确认词条"></ul>
+                <p data-hotwords="entries-empty" class="hotwords-note" hidden>还没有词条。</p>
+                <div class="hotwords-toolbar"><button type="button" data-hotwords-action="prev" aria-label="词典上一页">上一页</button><span data-hotwords="page" class="hotwords-note" role="status"></span><button type="button" data-hotwords-action="next" aria-label="词典下一页">下一页</button></div>
+                <h3>候选修正</h3>
+                <ul data-hotwords="candidates" class="hotwords-list" aria-label="待确认的候选修正"></ul>
+                <p data-hotwords="candidates-empty" class="hotwords-note" hidden>暂无待确认的修正。</p>
+                <p data-hotwords="status" class="hotwords-note" role="status" aria-live="polite" aria-atomic="true">正在读取热词词典…</p>
+                <p data-hotwords="error" class="hotwords-error" role="alert" aria-atomic="true" hidden></p>
+              </div>
             </section>
           </div>
 
@@ -1212,6 +1259,7 @@
     <script src="./home-ui.js"></script>
     <script src="./onboarding-ui.js"></script>
     <script src="./settings-workspace.js"></script>
+    <script src="./hotwords.js"></script>
     <script src="./voice-history-ui.js"></script>
     <script src="./recording-spectrum.js"></script>
     <script src="./dictation-motion.js"></script>

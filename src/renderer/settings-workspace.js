@@ -1,7 +1,7 @@
 "use strict";
 
 (function (root) {
-  const TABS = ["asr", "cleaner", "history", "updates"];
+  const TABS = ["asr", "hotwords", "cleaner", "history", "updates"];
   const ALIASES = { general: "asr", "asr-connections": "asr", connections: "cleaner", meeting: "asr" };
   function settingsTab(value) {
     return TABS.includes(value) ? value : ALIASES[value] || "asr";

@@ -29,6 +29,11 @@
 
 ## Other runtime dependencies
 
+### Vocabulary file readers
+
+- `read-excel-file` 9.3.14 (MIT), `csv-parse` 7.0.3 (MIT), and `yauzl` 3.4.0 (MIT) parse local spreadsheet/text imports and validate ZIP expansion. Their licenses are shipped with the runtime modules. No workbook links or formulas are executed.
+- The independently implemented SGPU binary reader uses format information documented by `studyzy/imewlconverter` (`SougouBinParser.NewParser`, revision `6fda92c20a9d14f890b6a9f074ec069f38a29899`). That project credits `nopdan/rose` and `h4x3rotab` under GNU GPL v3.0 notices. No upstream source code or pinyin tables are included in this application.
+
 ### OpenAI JavaScript SDK
 
 - Package: [openai-node](https://github.com/openai/openai-node) **7.32.0**, Apache-2.0 license.

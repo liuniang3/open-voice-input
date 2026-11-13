@@ -198,6 +198,8 @@ Pushing a `v*` tag runs `.github/workflows/release-windows.yml` for Windows only
 
 ## Short Dictation Usage
 
+Hotwords: Settings > Hotword Dictionary provides a local vocabulary, TXT/XLSX/CSV/TSV and Sogou SGPU `.bin` import with confirmation, search, pagination and bulk deletion. The library stores up to 100,000 terms with at most 100 enabled for requests; excess imported terms remain disabled. Optional Windows correction observation is off by default, limited to the just-inserted text range and requires candidate confirmation. Approved terms are used by supported Qwen Audio 3.0 Streaming ASR and stable-mode expression cleanup. No prior sentences are sent as context. Other ASR models retain their existing protocol; see [hotword scope and privacy](docs/HOTWORDS.md).
+
 1. Start the app.
 2. Right-click the tray icon and open `Settings`.
 3. Set ASR provider, cleanup provider, per-model credentials, microphone, and hotkeys.

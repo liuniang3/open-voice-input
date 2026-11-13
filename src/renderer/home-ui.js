@@ -16,6 +16,7 @@
     if (!$("homePanel")) return null;
     const api = win.mimoInput;
     let active = false;
+    let visible = true;
     let revision = 0;
     let timer;
     let flight;
@@ -117,7 +118,7 @@
       error(value.usage ? "" : "使用统计暂时无法读取；转写功能不受影响。");
     }
     async function refresh() {
-      if (!active || typeof api.getHomeOverview !== "function") return;
+      if (!active || !visible || typeof api.getHomeOverview !== "function") return;
       if (flight) return flight;
       const epoch = revision;
       const request = Promise.resolve().then(async () => {
@@ -126,7 +127,7 @@
             api.getHomeOverview(),
             Promise.resolve().then(() => api.listVoiceHistory({ limit: 6 })).catch(() => ({ ok: false }))
           ]);
-          if (active && epoch === revision) {
+          if (active && visible && epoch === revision) {
             if (!value?.ok) throw new Error("unavailable");
             render({ ...value, voiceRecent: history?.ok ? history.entries : [], voiceHistoryUnavailable: !history?.ok });
             if (value.onboarding?.status === "pending" && !win.OnboardingUi?.isOpen()) {
@@ -148,12 +149,13 @@
       return request;
     }
     async function open() {
-      if (!active) { active = true; revision++; timer = win.setInterval(() => { void refresh(); }, 60000); }
+      if (!active) { active = true; revision++; }
+      if (visible && !timer) timer = win.setInterval(() => { void refresh(); }, 60000);
       await refresh();
     }
-    function close() { active = false; revision++; flight = null; refreshPending = false; win.clearInterval(timer); }
+    function close() { active = false; revision++; flight = null; refreshPending = false; win.clearInterval(timer); timer = null; }
     function requestRefresh() {
-      if (!active) return;
+      if (!active || !visible) return;
       if (flight) refreshPending = true;
       else void refresh();
     }
@@ -180,6 +182,13 @@
     });
     api.onUsageUpdated?.(requestRefresh);
     api.onVoiceHistoryUpdated?.(requestRefresh);
+    api.onWindowVisibility?.(value => {
+      if (visible === value) return;
+      visible = value;
+      revision++; flight = null; refreshPending = false;
+      win.clearInterval(timer); timer = null;
+      if (visible && active) void open();
+    });
     return { open, close, refresh, getSnapshot: () => snapshot };
   }
 

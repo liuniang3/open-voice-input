@@ -1177,7 +1177,7 @@ function setSettingsTab(tabName, { requestId } = {}) {
   const content = document.querySelector(".settings-tab-content");
   if (content) content.scrollTop = 0;
   document.getElementById("settingsPageSubtitle").textContent = settingsTabButtons.find(button => button.dataset.settingsTab === activeSettingsTab)?.textContent.trim() || "语音识别";
-  saveSettingsBtn.hidden = activeSettingsTab === "history" || activeSettingsTab === "updates";
+  saveSettingsBtn.hidden = ["hotwords", "history", "updates"].includes(activeSettingsTab);
   setTextSupplierView(activeSettingsTab === "cleaner" && tabName === "connections" ? "manager" : "overview");
   let historyLoad;
   if (activeSettingsTab === "history") {
@@ -3000,6 +3000,7 @@ historyHotkeyInput.addEventListener("beforeinput", (event) => event.preventDefau
 
 window.addEventListener("keydown", (event) => {
   if (textSupplierManager?.isOpen()) return;
+  if (currentWindowMode === "settings" && event.target?.closest?.("#hotwordsPanel")) return;
   if (event.key === "Escape" && currentWindowMode === "settings" && activeSettingsTab === "cleaner" && activeTextSupplierView === "manager") {
     event.preventDefault();
     setTextSupplierView("overview", { focus: true });
@@ -3080,6 +3081,10 @@ window.mimoInput.onWindowMode((mode) => {
     return;
   }
   applyWindowMode(mode);
+});
+
+window.mimoInput.onWindowVisibility?.(visible => {
+  document.body.classList.toggle("window-visuals-paused", !visible);
 });
 
 /* —— Meeting workbench (Stage 4A) —— */
