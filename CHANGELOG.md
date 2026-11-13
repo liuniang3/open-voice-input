@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v0.4.27 - 2026-11-13 (Windows)
 
 ### Added
 
